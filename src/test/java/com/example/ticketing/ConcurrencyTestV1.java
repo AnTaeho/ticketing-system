@@ -1,9 +1,9 @@
 package com.example.ticketing;
 
-import com.example.ticketing.domain.Concert;
-import com.example.ticketing.repository.ConcertRepository;
-import com.example.ticketing.repository.ReservationRepository;
-import com.example.ticketing.service.TicketServiceV1;
+import com.example.ticketing.concert.domain.Concert;
+import com.example.ticketing.concert.repository.ConcertRepository;
+import com.example.ticketing.reservation.repository.ReservationRepository;
+import com.example.ticketing.reservation.service.TicketServiceV1;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
