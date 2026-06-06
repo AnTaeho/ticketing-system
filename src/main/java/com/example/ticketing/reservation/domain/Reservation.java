@@ -26,6 +26,7 @@ public class Reservation {
 
     private Long concertId;
     private Long userId;
+    private String ticketToken;
 
     @Enumerated(EnumType.STRING)
     private ReservationStatus status;
@@ -38,6 +39,12 @@ public class Reservation {
         reservation.concertId = concertId;
         reservation.userId = userId;
         reservation.status = status;
+        return reservation;
+    }
+
+    public static Reservation ofV6(Long concertId, Long userId, ReservationStatus status, String ticketToken) {
+        Reservation reservation = of(concertId, userId, status);
+        reservation.ticketToken = ticketToken;
         return reservation;
     }
 
