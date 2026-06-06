@@ -1,7 +1,8 @@
-package com.example.ticketing.reservation.service;
+package com.example.ticketing.reservation.service.v5;
 
 import com.example.ticketing.global.exception.LockAcquisitionFailedException;
 import com.example.ticketing.reservation.dto.ReserveResponse;
+import com.example.ticketing.reservation.service.TicketService;
 import java.util.concurrent.TimeUnit;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;

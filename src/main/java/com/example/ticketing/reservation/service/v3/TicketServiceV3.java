@@ -1,6 +1,7 @@
-package com.example.ticketing.reservation.service;
+package com.example.ticketing.reservation.service.v3;
 
 import com.example.ticketing.reservation.dto.ReserveResponse;
+import com.example.ticketing.reservation.service.TicketService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
