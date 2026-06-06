@@ -2,6 +2,7 @@ package com.example.ticketing.concert.service;
 
 import com.example.ticketing.concert.domain.Concert;
 import com.example.ticketing.global.exception.ConcertNotFoundException;
+import com.example.ticketing.global.stock.RedisStockRepository;
 import com.example.ticketing.concert.repository.ConcertRepository;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
@@ -14,6 +15,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class ConcertService {
 
     private final ConcertRepository concertRepository;
+    private final RedisStockRepository redisStockRepository;
 
     @Transactional(readOnly = true)
     public List<Concert> getConcerts(int page, int size) {
@@ -34,6 +36,7 @@ public class ConcertService {
     public void resetStock(Long concertId, int stock) {
         Concert concert = findConcertById(concertId);
         concert.resetStock(stock);
+        redisStockRepository.initStock(concertId, stock);
     }
 
     private Concert findConcertById(Long concertId) {

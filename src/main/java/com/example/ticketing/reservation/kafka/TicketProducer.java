@@ -1,8 +1,7 @@
 package com.example.ticketing.reservation.kafka;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import java.util.UUID;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -20,18 +19,15 @@ public class TicketProducer {
     @Value("${ticketing.kafka.topic}")
     private String topic;
 
-    public String publishReservationRequest(Long concertId, Long userId) {
-        String ticketToken = UUID.randomUUID().toString();
-        ReservationMessage message = new ReservationMessage(ticketToken, concertId, userId);
+    public void publishReservationRequest(Long concertId, Long userId) {
+        ReservationMessage message = new ReservationMessage(concertId, userId);
 
         try {
             String payload = objectMapper.writeValueAsString(message);
             kafkaTemplate.send(topic, String.valueOf(concertId), payload);
-            log.info("[V6] 예약 요청 발행 - ticketToken={}, concertId={}, userId={}", ticketToken, concertId, userId);
-        } catch (JsonProcessingException e) {
+            log.info("[V6] DB 처리 요청 발행 - concertId={}, userId={}", concertId, userId);
+        } catch (JacksonException e) {
             throw new RuntimeException("Kafka 메시지 직렬화 실패", e);
         }
-
-        return ticketToken;
     }
 }
