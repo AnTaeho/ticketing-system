@@ -1,4 +1,4 @@
-package com.example.ticketing.reservation.service;
+package com.example.ticketing.reservation.service.v2;
 
 import com.example.ticketing.reservation.dto.ReserveResponse;
 import com.example.ticketing.concert.domain.Concert;
@@ -8,6 +8,7 @@ import com.example.ticketing.global.exception.ConcertNotFoundException;
 import com.example.ticketing.global.exception.SoldOutException;
 import com.example.ticketing.concert.repository.ConcertRepository;
 import com.example.ticketing.reservation.repository.ReservationRepository;
+import com.example.ticketing.reservation.service.TicketService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;

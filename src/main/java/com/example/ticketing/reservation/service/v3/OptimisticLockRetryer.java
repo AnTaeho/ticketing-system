@@ -1,4 +1,4 @@
-package com.example.ticketing.reservation.service;
+package com.example.ticketing.reservation.service.v3;
 
 import com.example.ticketing.global.exception.ReservationFailedException;
 import java.util.function.Supplier;

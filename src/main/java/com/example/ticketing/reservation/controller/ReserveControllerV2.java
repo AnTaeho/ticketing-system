@@ -2,7 +2,7 @@ package com.example.ticketing.reservation.controller;
 
 import com.example.ticketing.reservation.dto.ReserveRequest;
 import com.example.ticketing.reservation.dto.ReserveResponse;
-import com.example.ticketing.reservation.service.TicketServiceV2;
+import com.example.ticketing.reservation.service.v2.TicketServiceV2;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
