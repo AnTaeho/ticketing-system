@@ -70,6 +70,7 @@
         .tab-btn.active { background: #3b82f6; border-color: #3b82f6; color: #fff; }
         .tab-btn:hover:not(.active) { border-color: #475569; color: #e2e8f0; }
         .badge-chaos { background: #1a2040; color: #f87171; }
+        .badge-cb { background: #1a3040; color: #60a5fa; }
     </style>
 </head>
 <body>
@@ -83,6 +84,7 @@
     <div class="tab-nav">
         <button class="tab-btn active" onclick="switchTab('normal', this)">정상 측정</button>
         <button class="tab-btn" onclick="switchTab('chaos', this)">장애 시나리오</button>
+        <button class="tab-btn" onclick="switchTab('cb', this)">Circuit Breaker</button>
     </div>
 
     <!-- 정상 측정 탭 -->
@@ -312,6 +314,85 @@
         </div>
     </div><!-- /chaos-tab -->
 
+    <!-- Circuit Breaker 탭 -->
+    <div id="cb-tab" class="tab-content" style="display:none;">
+
+        <div class="filter-section" style="margin-bottom:24px;">
+            <h2>Circuit Breaker — Graceful Degradation</h2>
+            <p style="color:#94a3b8; font-size:0.875rem; margin-top:8px;">
+                V5(Redisson) Redis 장애 시 V2(DB 비관적 락)으로 자동 폴백하는 Circuit Breaker 측정 결과입니다.<br>
+                CLOSED(Redis 정상) → OPEN(Redis 장애, V2 폴백) → HALF_OPEN(복구 테스트) 상태 전환 확인.
+            </p>
+        </div>
+
+        <div class="charts-grid" style="margin-bottom:24px;">
+            <div class="chart-card">
+                <h3>Redis 경로 vs V2 폴백 분포</h3>
+                <div class="chart-wrapper"><canvas id="cbDistributionChart"></canvas></div>
+            </div>
+            <div class="chart-card">
+                <h3>TPS 비교 (정상 vs Redis 장애)</h3>
+                <div class="chart-wrapper"><canvas id="cbTpsChart"></canvas></div>
+            </div>
+            <div class="chart-card full-width">
+                <h3>에러율 % (정상 vs Redis 장애)</h3>
+                <div class="chart-wrapper"><canvas id="cbErrorChart"></canvas></div>
+            </div>
+        </div>
+
+        <div class="table-section">
+            <h2>Circuit Breaker 측정 결과</h2>
+            <div class="table-wrapper">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>버전</th>
+                            <th>락 방식</th>
+                            <th>동시 사용자</th>
+                            <th>TPS</th>
+                            <th>P99 (ms)</th>
+                            <th>에러율</th>
+                            <th>Redis 경로</th>
+                            <th>V2 폴백</th>
+                            <th>CB Trip 횟수</th>
+                            <th>Chaos</th>
+                            <th>테스트 시각</th>
+                            <th>메모</th>
+                            <th>삭제</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr th:each="r : ${cbResults}">
+                            <td><span class="badge badge-v5" th:text="${r.version}"></span></td>
+                            <td class="text-muted" th:text="${r.lockType}"></td>
+                            <td th:text="${r.concurrentUsers + '명'}"></td>
+                            <td th:text="${#numbers.formatDecimal(r.tps, 1, 1)}"></td>
+                            <td th:text="${r.p99ResponseMs}"></td>
+                            <td th:class="${r.errorRate > 0 ? 'text-danger' : 'text-success'}"
+                                th:text="${#numbers.formatDecimal(r.errorRate, 1, 1) + '%'}"></td>
+                            <td class="text-success"
+                                th:text="${r.fallbackCount != null ? (r.successCount - r.fallbackCount) : r.successCount}"></td>
+                            <td th:class="${(r.fallbackCount != null and r.fallbackCount > 0) ? 'text-danger' : 'text-muted'}"
+                                th:text="${r.fallbackCount != null ? r.fallbackCount : 0}"></td>
+                            <td class="text-muted" th:text="${r.cbTripCount != null ? r.cbTripCount : 0}"></td>
+                            <td>
+                                <span class="badge"
+                                      th:classappend="${r.chaosType != null and r.chaosType.name() != 'NONE' ? ' badge-chaos' : ' badge-cb'}"
+                                      th:text="${r.chaosType != null ? r.chaosType : 'NONE'}"></span>
+                            </td>
+                            <td class="text-muted" th:text="${#temporals.format(r.testedAt, 'MM-dd HH:mm')}"></td>
+                            <td class="text-muted" th:text="${r.memo}" style="font-size:0.78rem;max-width:180px;"></td>
+                            <td>
+                                <button type="button" class="btn-danger" th:onclick="|deleteResult(${r.id})|">삭제</button>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+    </div><!-- /cb-tab -->
+
 </div>
 
 <script th:inline="javascript">
@@ -320,6 +401,9 @@
 <script src="/js/dashboard.js"></script>
 <script th:inline="javascript">
     const chaosResults = /*[[${chaosResults}]]*/ [];
+</script>
+<script th:inline="javascript">
+    const cbResults = /*[[${cbResults}]]*/ [];
 </script>
 <script>
     function switchTab(tabName, btn) {
