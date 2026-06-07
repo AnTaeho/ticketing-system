@@ -1,5 +1,6 @@
 package com.example.ticketing.reservation.service.v5cb;
 
+import com.example.ticketing.global.exception.ConcertNotFoundException;
 import com.example.ticketing.global.exception.LockAcquisitionFailedException;
 import com.example.ticketing.global.exception.SoldOutException;
 import com.example.ticketing.global.resilience.CircuitBreakerStatsHolder;
@@ -33,8 +34,9 @@ public class TicketServiceV5CB implements TicketService {
                     concertId, redisLockCircuitBreaker.getState());
             return response;
         } catch (Throwable e) {
+            if (e instanceof ConcertNotFoundException cnfe)      throw cnfe;
             if (e instanceof LockAcquisitionFailedException lafe) throw lafe;
-            if (e instanceof SoldOutException soe)              throw soe;
+            if (e instanceof SoldOutException soe)               throw soe;
             log.warn("[V5CB] Circuit fallback 진입 - concertId={}, cbState={}, cause={}",
                     concertId, redisLockCircuitBreaker.getState(), e.getClass().getSimpleName());
             statsHolder.incrementFallbackPath();

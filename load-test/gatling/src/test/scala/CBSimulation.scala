@@ -25,9 +25,10 @@ import java.net.http.{HttpClient, HttpRequest, HttpResponse}
  */
 class CBSimulation extends Simulation {
 
-  val chaos: String   = System.getProperty("CHAOS", "none")
-  val users: Int      = System.getProperty("USERS", "1000").toInt
-  val baseUrl: String = "http://localhost:8080"
+  val chaos: String     = System.getProperty("CHAOS", "none")
+  val users: Int        = System.getProperty("USERS", "1000").toInt
+  val concertId: String = System.getProperty("CONCERT_ID", "1")
+  val baseUrl: String   = "http://localhost:8080"
 
   val httpProtocol = http
     .baseUrl(baseUrl)
@@ -38,7 +39,7 @@ class CBSimulation extends Simulation {
     .feed(Feeders.userFeeder)
     .exec(
       http("V5CB 예약 요청")
-        .post("/api/v5cb/concerts/1/reserve")
+        .post(s"/api/v5cb/concerts/$concertId/reserve")
         .body(StringBody("""{"userId": #{userId}}"""))
         .check(status.in(200, 409, 500))
     )
