@@ -411,6 +411,7 @@
         document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
         document.getElementById(tabName + '-tab').style.display = 'block';
         btn.classList.add('active');
+        if (tabName === 'cb') initCbCharts();
     }
 
     if (chaosResults && chaosResults.length > 0) {
