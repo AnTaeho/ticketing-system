@@ -1252,7 +1252,7 @@ new Chart(document.getElementById('tpsChart'), {
 
 [x] Phase 11: docs/performance-report.md 작성 완료 (V1~V6 + V5CB 실측 수치, 핵심 발견 포함)
 
-[ ] Phase 12: README.md 완성 (대시보드 스크린샷 포함)
+[x] Phase 12: README.md 완성 (V5CB 섹션 포함, 대시보드 스크린샷 포함)
 ```
 
 ---
