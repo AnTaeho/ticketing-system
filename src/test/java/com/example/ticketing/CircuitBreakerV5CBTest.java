@@ -52,7 +52,7 @@ class CircuitBreakerV5CBTest {
     }
 
     @Test
-    @DisplayName("Redis 3회 실패 후 CB OPEN — 이후 요청은 V2 폴백으로 처리")
+    @DisplayName("Redis 5회 실패 후 CB OPEN — 이후 요청은 V2 폴백으로 처리")
     void redis_장애_3회_후_cb_open_v2_폴백() {
         ReserveResponse v2Response = new ReserveResponse(99L, ReservationStatus.SUCCESS);
         when(mockV5.reserve(anyLong(), anyLong()))
