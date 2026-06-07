@@ -1490,6 +1490,22 @@ log.info("[공통] 예약 완료 - reservationId={}, userId={}", reservation.get
 10-8. V6 Gatling 측정의 함정 — PENDING 응답은 실제 처리량이 아님
 ```
 
+### Level 12 — Circuit Breaker + Graceful Degradation
+
+```
+12-1. Circuit Breaker란 무엇인가 — 왜 필요한가 (Cascading Failure 방지)
+12-2. Circuit Breaker 세 가지 상태 — CLOSED / OPEN / HALF_OPEN
+12-3. Resilience4j 설정값 상세 해설 — minimumNumberOfCalls 함정 포함
+12-4. TicketServiceV5CB 코드 흐름 상세 분석
+12-5. Graceful Degradation — Fail-Fast vs 폴백 체인
+12-6. CircuitBreakerStatsHolder — 관찰 가능성(Observability)
+12-7. 프로그래매틱 API vs 어노테이션 방식 선택 이유
+12-8. 실무 적용 시 고려사항 — 다중 인스턴스 한계, 설정값 결정 방법
+12-9. 면접 Q&A 종합
+```
+
+---
+
 ### Level 11 — 면접 Q&A 전체 정리
 
 ```
