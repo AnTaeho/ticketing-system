@@ -1226,6 +1226,18 @@ new Chart(document.getElementById('tpsChart'), {
 [x] Phase 7-2: TicketConsumer 작성 + Redis 결과 저장 확인
 [x] Phase 7-3: TicketServiceV6 + 폴링 API + 전체 흐름 동작 확인
 
+[x] Phase V5CB-1: Resilience4j CircuitBreaker Bean + ResilienceConfig 작성
+[x] Phase V5CB-2: CircuitBreakerStatsHolder (AtomicLong 관찰 가능성) 작성
+[x] Phase V5CB-3: TicketServiceV5CB (Redis→V2 폴백 체인) 작성
+[x] Phase V5CB-4: ReserveControllerV5CB + /api/v5cb/** 엔드포인트 작성
+[x] Phase V5CB-5: ChaosController + ChaosAspect (Redis 차단 주입) 작성
+[x] Phase V5CB-6: StatsController (/api/v5cb/stats, /reset) 작성
+[x] Phase V5CB-7: TestResult fallbackCount/cbTripCount 컬럼 추가
+[x] Phase V5CB-8: 대시보드 Circuit Breaker 탭 (차트 3종 + 결과 테이블) 추가
+[x] Phase V5CB-9: CBSimulation.scala (Gatling CHAOS=none / redis_block 시나리오)
+[x] Phase V5CB-10: docs/knowledge/level-12-circuit-breaker.md 작성 (9섹션, 실측 수치 포함)
+[x] Phase V5CB-11: Gatling 결과 2건 DB 저장 (id=38 정상, id=39 폴백)
+
 [ ] Phase 8-1: Redis Sorted Set 기반 대기열 구현 + 순서 보장 확인
 [ ] Phase 8-2: Redis DECR 재고 선점 + 즉시 성공/실패 응답 확인
 [ ] Phase 8-3: 성공자 비동기 DB 처리 (Kafka or @Async) 동작 확인
@@ -1238,7 +1250,8 @@ new Chart(document.getElementById('tpsChart'), {
 [x] Phase 10-2: DashboardController + 대시보드 화면 렌더링 확인
 [x] Phase 10-3: 차트 4종 + 필터 + 테이블 전체 동작 확인
 
-[ ] Phase 11: docs/ 성능 비교표 + 트레이드오프 정리 (V7 포함)
+[x] Phase 11: docs/performance-report.md 작성 완료 (V1~V6 + V5CB 실측 수치, 핵심 발견 포함)
+
 [ ] Phase 12: README.md 완성 (대시보드 스크린샷 포함)
 ```
 
