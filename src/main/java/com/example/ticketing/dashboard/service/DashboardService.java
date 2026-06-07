@@ -26,7 +26,8 @@ public class DashboardService {
                 request.concurrentUsers(), request.initialStock(), request.totalRequests(),
                 request.successCount(), request.overBookingCount(), request.tps(),
                 request.p99ResponseMs(), request.errorRate(), request.memo(),
-                chaosType, request.chaosParameter()
+                chaosType, request.chaosParameter(),
+                request.fallbackCount(), request.cbTripCount()
         );
         return testResultRepository.save(result);
     }
@@ -58,5 +59,9 @@ public class DashboardService {
 
     public List<TestResult> findChaosResults() {
         return testResultRepository.findChaosResults();
+    }
+
+    public List<TestResult> findCbResults() {
+        return testResultRepository.findCbResults();
     }
 }

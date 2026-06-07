@@ -35,4 +35,8 @@ public interface TestResultRepository extends JpaRepository<TestResult, Long> {
     @Query(value = "SELECT * FROM test_result WHERE chaos_type IS NOT NULL AND chaos_type != 'NONE' ORDER BY tested_at DESC",
            nativeQuery = true)
     List<TestResult> findChaosResults();
+
+    @Query(value = "SELECT * FROM test_result WHERE lock_type = 'REDISSON_CB' ORDER BY tested_at DESC",
+           nativeQuery = true)
+    List<TestResult> findCbResults();
 }

@@ -20,5 +20,7 @@ public record TestResultRequest(
         double errorRate,
         String memo,
         ChaosType chaosType,
-        Integer chaosParameter
+        Integer chaosParameter,
+        Integer fallbackCount,
+        Integer cbTripCount
 ) {}

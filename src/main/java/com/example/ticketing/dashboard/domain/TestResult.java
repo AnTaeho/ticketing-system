@@ -43,6 +43,8 @@ public class TestResult {
     private ChaosType chaosType;
 
     private Integer chaosParameter;
+    private Integer fallbackCount;
+    private Integer cbTripCount;
 
     @CreatedDate
     private LocalDateTime testedAt;
@@ -51,7 +53,8 @@ public class TestResult {
                                 int concurrentUsers, int initialStock, int totalRequests,
                                 int successCount, int overBookingCount, double tps,
                                 long p99ResponseMs, double errorRate, String memo,
-                                ChaosType chaosType, Integer chaosParameter) {
+                                ChaosType chaosType, Integer chaosParameter,
+                                Integer fallbackCount, Integer cbTripCount) {
         TestResult r = new TestResult();
         r.version = version;
         r.lockType = lockType;
@@ -67,6 +70,8 @@ public class TestResult {
         r.memo = memo;
         r.chaosType = chaosType != null ? chaosType : ChaosType.NONE;
         r.chaosParameter = chaosParameter;
+        r.fallbackCount = fallbackCount;
+        r.cbTripCount = cbTripCount;
         return r;
     }
 }
