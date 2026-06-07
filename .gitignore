@@ -38,3 +38,8 @@ out/
 
 ### Gatling build output ###
 load-test/gatling/target/
+
+### Personal study notes & test results ###
+docs/knowledge/
+docs/performance-report.md
+docs/superpowers/
