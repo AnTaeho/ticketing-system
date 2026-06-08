@@ -413,67 +413,6 @@ P99:       V6 << V5CB ≈ V5 < V2 ≈ V3 << V4
 장애내성:  V5CB (자동 폴백) > V5 > V4 > V2 = V3 > V1
 ```
 
-### 도메인별 권장 전략
-
-| 도메인 | 권장 | 이유 |
-|--------|------|------|
-| 일반 티켓팅 (실시간 응답) | **V5 Redisson** | 정합성 + 분산 환경 + P99 균형 |
-| Redis 장애 내성이 중요한 서비스 | **V5CB Circuit Breaker** | Redis 다운 시에도 V2로 자동 폴백, 에러율 0% |
-| 극한 트래픽 + 즉시 응답 보장 | **V6 Redis선점+Kafka** | Redis DECR 즉시 응답 + DB 부하 최소화 |
-| 충돌이 드문 일반 쇼핑몰 | **V3 Optimistic** | 읽기 성능 우수, 락 오버헤드 없음 |
-| 단일 서버 환경 | **V2 Pessimistic** | 구현 단순, 강력한 정합성 |
-
----
-
-## 면접 예상 질문
-
-**Q. Redis 분산 락에서 Lettuce 대신 Redisson을 선택한 이유는?**
-
-Spin Lock(V4)은 락 획득 실패 시 100ms마다 Redis에 폴링 요청을 보내 Redis 부하가 증가합니다. 반면 Redisson(V5)은 락 해제 시 Pub-Sub 이벤트로 대기 쓰레드에 통보하므로 불필요한 폴링이 없습니다. 실측 결과 V4 대비 Redis 명령어는 3.3배 많지만 TPS는 3배 높고 P99는 81% 감소했습니다. 이 역설의 이유는 스핀 대기가 쓰레드를 점유하는 반면, Pub-Sub 방식은 이벤트를 기다리며 쓰레드를 해방하기 때문입니다.
-
-**Q. 낙관적 락을 티켓팅에 쓰지 않은 이유는?**
-
-낙관적 락은 충돌이 드물 때 유리합니다. 하지만 티켓팅처럼 수천 명이 동일 Concert 레코드를 동시에 수정하는 환경에서는 충돌률이 거의 100%에 달합니다. 충돌 시 재시도 → 재시도도 충돌 → 재시도 폭발이 발생합니다. 실측 결과 2,000명 기준 V3 P99가 7,359ms로 비관적 락(7,194ms)보다 오히려 높게 나왔습니다.
-
-**Q. Kafka 방식의 단점과 해결 방법은?**
-
-단일 컨슈머 순차 처리로 동시성을 회피하므로 즉각 예약 성공/실패를 알릴 수 없습니다. 실무에서는 "대기열 진입" 상태를 즉시 반환하고 SSE 또는 폴링으로 결과를 안내하는 UX 설계가 필요합니다. 처리량 확장이 필요하면 파티션 수를 늘리고 concert ID를 파티션 키로 사용하면 같은 공연의 예약은 동일 파티션에서 순차 처리되어 정합성을 유지할 수 있습니다.
-
-**Q. @Transactional과 분산 락의 순서가 왜 중요한가?**
-
-트랜잭션 종료(커밋) 전에 락을 해제하면, 다른 스레드가 락을 획득하고 DB를 조회했을 때 이전 트랜잭션의 변경사항이 아직 커밋되지 않아 정합성이 깨질 수 있습니다. 따라서 V4/V5에서 `@Transactional`은 내부 메서드에만 적용하고, 락 획득/해제는 바깥 메서드에서 처리했습니다. `finally` 블록으로 항상 락 해제를 보장합니다.
-
-**Q. 비관적 락에서 데드락을 어떻게 방지했는가?**
-
-두 가지 방법을 적용했습니다. 첫째, `@Transactional(timeout=3)`으로 락 대기 시간을 제한해 교착 상태 발생 시 자동으로 롤백됩니다. 둘째, 여러 공연을 동시에 잠궈야 하는 경우 항상 동일한 순서(ID 오름차순)로 락을 획득해 사이클이 발생하지 않도록 했습니다.
-
-**Q. Circuit Breaker를 왜 도입했고 어떻게 동작하는가?**
-
-Redis 장애 발생 시 모든 예약 요청이 즉시 에러 응답을 반환하는 Fail-Fast 대신, DB 비관적 락(V2)으로 자동 폴백하는 Graceful Degradation을 구현했습니다. Resilience4j CircuitBreaker를 사용하며, `RedisCommandTimeoutException` 발생 시에만 실패로 집계하고 `slidingWindowSize=10`, `failureRateThreshold=50` 설정으로 10번 중 5번 실패하면 OPEN으로 전환됩니다. Gatling 실측에서 Redis 차단 시에도 에러율 0%, fallbackRatio 100%로 서비스가 중단 없이 유지됨을 확인했습니다. 주의할 점은 `minimumNumberOfCalls`를 `slidingWindowSize`와 맞춰야 하는 것인데, 기본값이 100이라 명시적으로 10으로 설정하지 않으면 CB가 절대 열리지 않는 함정이 있습니다.
-
----
-
-## 지식 정리 문서
-
-이 프로젝트에서 다룬 모든 개념을 **면접 완벽 답변 기준**으로 정리한 문서입니다.  
-쉬운 개념부터 어렵고 중요한 것까지 11단계로 구성되어 있습니다.
-
-| 레벨 | 제목 | 핵심 내용 |
-|------|------|---------|
-| [Level 1](docs/knowledge/level-01-concurrency-basics.md) | 동시성 문제의 본질 | Race Condition, Lost Update, 티켓팅이 교과서적 사례인 이유 |
-| [Level 2](docs/knowledge/level-02-transaction-isolation.md) | 트랜잭션과 격리 수준 | ACID, 4단계 격리 수준, MVCC, Undo Log, Read View |
-| [Level 3](docs/knowledge/level-03-pessimistic-lock.md) | DB 비관적 락 | InnoDB 락 타입, SELECT FOR UPDATE, 데드락 Coffman 조건, 방지 전략 |
-| [Level 4](docs/knowledge/level-04-optimistic-lock.md) | DB 낙관적 락 | @Version 원리, flush 시점 예외, Retry Storm, 티켓팅 부적합 증명 |
-| [Level 5](docs/knowledge/level-05-lettuce-spin-lock.md) | Redis Lettuce Spin Lock | SETNX+EXPIRE 함정, SET NX EX, UUID+Lua Script 주인 확인, P99 폭발 원인 |
-| [Level 6](docs/knowledge/level-06-redisson-pubsub-lock.md) | Redisson Pub-Sub Lock | Redis Hash 구조, 획득/해제 Lua Script, Watchdog, 스레드 역설 분석 |
-| [Level 7](docs/knowledge/level-07-transactional-deep-dive.md) | @Transactional 심화 | CGLIB 프록시, Self-Invocation 해결, 커밋 후 락 해제, 1차 캐시 충돌 |
-| [Level 8](docs/knowledge/level-08-kafka-async-queue.md) | Kafka 비동기 대기열 | 파티션/오프셋, 단일 파티션 순차 처리, acks/idempotent, SSE vs 폴링 |
-| [Level 9](docs/knowledge/level-09-spring-boot-4x.md) | Spring Boot 4.x 특이사항 | Jackson tools.jackson 패키지 변경, Kafka 자동구성 제거, @EnableKafka |
-| [Level 10](docs/knowledge/level-10-gatling-load-test.md) | Gatling 부하 테스트 설계 | DSL 핵심, atOnceUsers vs rampUsers, P99 해석, V6 측정 함정 |
-| [Level 11](docs/knowledge/level-11-interview-qa.md) | 면접 Q&A 전체 정리 | 16개 질문 완벽 답변 스크립트 + 현장 치트시트 |
-| [Level 12](docs/knowledge/level-12-circuit-breaker.md) | Circuit Breaker + Graceful Degradation | CLOSED/OPEN/HALF_OPEN 상태 기계, Resilience4j 설정 함정, Gatling 실측 수치 |
-
----
 
 ## 프로젝트 구조
 
