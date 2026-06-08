@@ -27,6 +27,11 @@ public class RedisStockRepository {
         redisTemplate.opsForValue().increment(buildKey(concertId));
     }
 
+    public long getStock(Long concertId) {
+        String val = redisTemplate.opsForValue().get(buildKey(concertId));
+        return val == null ? 0L : Long.parseLong(val);
+    }
+
     private String buildKey(Long concertId) {
         return STOCK_KEY_PREFIX + concertId;
     }

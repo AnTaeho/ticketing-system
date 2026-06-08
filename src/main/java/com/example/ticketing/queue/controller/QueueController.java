@@ -1,0 +1,39 @@
+package com.example.ticketing.queue.controller;
+
+import com.example.ticketing.queue.controller.dto.QueueStatusResponse;
+import com.example.ticketing.queue.controller.dto.QueueTokenResponse;
+import com.example.ticketing.queue.service.QueueCommandService;
+import com.example.ticketing.queue.service.QueueQueryService;
+import lombok.RequiredArgsConstructor;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
+
+@RestController
+@RequestMapping("/api/v7/concerts/{concertId}/queue")
+@RequiredArgsConstructor
+public class QueueController {
+
+    private final QueueCommandService queueCommandService;
+    private final QueueQueryService queueQueryService;
+
+    // 대기열 진입 + 토큰 발급
+    @PostMapping("/token")
+    public ResponseEntity<QueueTokenResponse> issueToken(
+            @PathVariable Long concertId,
+            @RequestParam Long userId) {
+        return ResponseEntity.ok(queueCommandService.issueTokenAndEnqueue(userId, concertId));
+    }
+
+    // 대기열 상태 조회 (폴링)
+    @GetMapping("/status")
+    public ResponseEntity<QueueStatusResponse> getStatus(
+            @PathVariable Long concertId,
+            @RequestParam String token) {
+        return ResponseEntity.ok(queueQueryService.getQueueStatus(concertId, token));
+    }
+}
