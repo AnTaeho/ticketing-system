@@ -46,7 +46,7 @@ ticketing-system/
 │   └── static/js/dashboard.js
 ├── load-test/gatling/   ScenarioA/B/CBSimulation.scala
 └── docs/
-    ├── knowledge/       level-1 ~ level-12 마크다운
+    ├── knowledge/       level-1 ~ level-13 마크다운
     ├── performance-report.md
     └── tradeoff-summary.md
 ```
@@ -121,6 +121,23 @@ Redis Sorted Set 대기열 → DECR 원자적 재고 선점 → 성공자만 비
 - **일반 티켓팅**: V5 (Redisson) — 즉시 응답 + 적정 성능의 균형
 - **폭발적 트래픽**: V7 (Redis 선점 + 대기열) — 운영자 사전 설정으로 전환
 - **장애 대응**: V5CB (Circuit Breaker) — Redis 장애 시 V2로 자동 폴백
+
+---
+
+## 버전별 함정 & 수정 이력
+
+> 프레젠테이션(프레젠테이션2.pdf) 분석 후 발견된 실제 코드 함정과 수정 내용.
+
+| # | 버전 | 함정 | 파일 | 수정 방향 |
+|---|------|------|------|-----------|
+| 1 | 전체 | `@Version` 측정 왜곡 — Concert 엔티티의 `@Version`이 V1에도 적용되어 순수 무방비 기준선이 아님 | `Concert.java:25` | 문서화 (의도된 다층 방어로 기록, V1 오버부킹 수치가 실제보다 낮게 나올 수 있음) |
+| 2 | V3 | 고정 50ms sleep → Thundering Herd — 동시 충돌 스레드가 정확히 50ms 뒤 재충돌 | `OptimisticLockRetryer.java:30` | 지수 백오프 + 지터 (`50ms × 2^retry + random`) |
+| 3 | V4 | 비소유자 락 삭제 — TTL 만료 후 A의 `finally`가 B의 락을 삭제 → C 진입(정합성 파괴) | `LettuceLockRepository.java:24` | UUID 소유자 검증 + Lua compare-and-delete 원자 실행 |
+| 4 | V5 | `leaseTime` 명시 → 워치독 비활성화 — `tryLock(5, 3, SEC)` 로 leaseTime=3초 명시 시 워치독 꺼짐 | `TicketServiceV5.java:38` | `leaseTime` 제거 → `tryLock(waitTime, unit)` 2인자 버전으로 워치독 자동 갱신 활성화 |
+| 5 | V5CB | `RedisConnectionException` 집계 누락 — 서버 다운 시 해당 예외는 CB가 카운트 안 함 → CLOSED 유지 | `ResilienceConfig.java:24` | `recordException`에 `RedisConnectionException` 추가 + 중첩 cause 순회 |
+| 6 | V5CB | `catch(Throwable)` 위험 — NPE 등 코드 버그도 조용히 V2 폴백으로 삼킴 | `TicketServiceV5CB.java:36` | 인프라 예외(Redis 계열)만 폴백, 그 외 미지 예외는 재던짐 |
+| 7 | V6 | ack 순서 역전 — `ack.acknowledge()`가 `@Transactional` 커밋 전에 호출 → DB 실패 시 오프셋 이미 넘어가 메시지 영구 유실 | `TicketConsumer.java:39` | `TransactionSynchronization.afterCommit()` 콜백 뒤로 이동 |
+| 8 | V6 | `ticketToken` 미반환 — PENDING 응답에 조회 핸들 없어 폴링 API 사용 불가 | `TicketServiceV6.java:49` | `ReserveResponse`에 `ticketToken` 필드 추가 후 응답에 포함 |
 
 ---
 
@@ -253,3 +270,4 @@ log.info("[공통] 재고 차감 - concertId={}, 차감 후 재고={}", concertI
 | 10 | level-10-gatling.md | atOnceUsers vs rampUsers, P99 해석, V4 꼬리 레이턴시 |
 | 11 | level-11-interview.md | 면접 Q&A 16개 전체 정리 |
 | 12 | level-12-circuit-breaker.md | CB 3상태, Resilience4j 설정, 폴백 체인, 실측 수치 |
+| 13 | level-13-redis-stock-management.md | DECR 원자성, 음수 보상, ZSet 대기열, Eventually Consistent |

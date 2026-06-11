@@ -11,6 +11,8 @@ import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
 
@@ -36,7 +38,12 @@ public class TicketConsumer {
         }
 
         saveReservation(message.concertId(), message.userId(), message.ticketToken());
-        ack.acknowledge();
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                ack.acknowledge();
+            }
+        });
     }
 
     private void saveReservation(Long concertId, Long userId, String ticketToken) {

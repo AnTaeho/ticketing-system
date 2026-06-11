@@ -46,7 +46,7 @@ public class TicketServiceV6 {
         eventPublisher.publishEvent(new OutboxCreatedEvent(outboxEvent.getId()));
 
         log.info("[V6] 재고 선점 성공, Outbox 저장 - concertId={}, userId={}, 남은재고={}", concertId, userId, remaining);
-        return new ReserveResponse(null, ReservationStatus.PENDING);
+        return new ReserveResponse(null, ReservationStatus.PENDING, ticketToken);
     }
 
     private String serializeMessage(Long concertId, Long userId, String ticketToken) {

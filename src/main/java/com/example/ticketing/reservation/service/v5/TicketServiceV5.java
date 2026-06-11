@@ -15,9 +15,8 @@ import org.springframework.stereotype.Service;
 @RequiredArgsConstructor
 public class TicketServiceV5 implements TicketService {
 
-    private static final long LOCK_WAIT_SECONDS  = 5;
-    private static final long LOCK_LEASE_SECONDS = 3;
-    private static final String LOCK_KEY_PREFIX  = "lock:concert:";
+    private static final long LOCK_WAIT_SECONDS = 5;
+    private static final String LOCK_KEY_PREFIX = "lock:concert:";
 
     private final RedissonClient redissonClient;
     private final TicketTransactionV5 transaction;
@@ -35,7 +34,7 @@ public class TicketServiceV5 implements TicketService {
 
     private void acquireRedissonLock(RLock lock, Long concertId) {
         try {
-            boolean acquired = lock.tryLock(LOCK_WAIT_SECONDS, LOCK_LEASE_SECONDS, TimeUnit.SECONDS);
+            boolean acquired = lock.tryLock(LOCK_WAIT_SECONDS, TimeUnit.SECONDS);
             if (!acquired) {
                 throw new LockAcquisitionFailedException(concertId);
             }

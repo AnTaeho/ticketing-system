@@ -10,6 +10,9 @@ import org.springframework.stereotype.Component;
 @Component
 public class OptimisticLockRetryer {
 
+    private static final long BASE_WAIT_MS = 50;
+    private static final long MAX_WAIT_MS  = 1_000;
+
     public <T> T executeWithRetry(Supplier<T> action, Long concertId, int maxRetry) {
         int retryCount = 0;
         while (true) {
@@ -21,14 +24,17 @@ public class OptimisticLockRetryer {
                 if (retryCount >= maxRetry) {
                     throw new ReservationFailedException(concertId);
                 }
-                sleep();
+                sleepWithBackoff(retryCount);
             }
         }
     }
 
-    private void sleep() {
+    private void sleepWithBackoff(int retryCount) {
+        long backoffMs = BASE_WAIT_MS * (1L << retryCount);
+        long cappedMs  = Math.min(backoffMs, MAX_WAIT_MS);
+        long jitteredMs = (long) (Math.random() * cappedMs);
         try {
-            Thread.sleep(50);
+            Thread.sleep(jitteredMs);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }

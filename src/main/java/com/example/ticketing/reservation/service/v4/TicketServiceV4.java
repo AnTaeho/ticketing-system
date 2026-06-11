@@ -21,18 +21,23 @@ public class TicketServiceV4 implements TicketService {
 
     @Override
     public ReserveResponse reserve(Long concertId, Long userId) {
-        acquireSpinLock(concertId);
+        String lockValue = acquireSpinLock(concertId);
         try {
             return transaction.reserveInTransaction(concertId, userId);
         } finally {
-            lettuceLockRepository.releaseLock(concertId);
+            lettuceLockRepository.releaseLock(concertId, lockValue);
             log.info("[V4] 락 해제 - concertId={}", concertId);
         }
     }
 
-    private void acquireSpinLock(Long concertId) {
+    private String acquireSpinLock(Long concertId) {
         int spinCount = 0;
-        while (!lettuceLockRepository.tryLock(concertId)) {
+        while (true) {
+            String lockValue = lettuceLockRepository.tryLock(concertId);
+            if (lockValue != null) {
+                log.info("[V4] 락 획득 성공 - concertId={}", concertId);
+                return lockValue;
+            }
             spinCount++;
             log.info("[V4] 락 대기 중 - concertId={}, 대기횟수={}", concertId, spinCount);
             if (spinCount >= MAX_SPIN_COUNT) {
@@ -40,7 +45,6 @@ public class TicketServiceV4 implements TicketService {
             }
             sleep();
         }
-        log.info("[V4] 락 획득 성공 - concertId={}", concertId);
     }
 
     private void sleep() {
