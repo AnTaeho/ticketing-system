@@ -17,10 +17,16 @@ import org.springframework.kafka.core.DefaultKafkaProducerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.core.ProducerFactory;
 import org.springframework.kafka.listener.ContainerProperties;
+import org.springframework.kafka.listener.DeadLetterPublishingRecoverer;
+import org.springframework.kafka.listener.DefaultErrorHandler;
+import org.springframework.util.backoff.FixedBackOff;
 
 @EnableKafka
 @Configuration
 public class KafkaConfig {
+
+    private static final long RETRY_INTERVAL_MS = 1_000;
+    private static final long MAX_RETRY_ATTEMPTS = 2;
 
     @Value("${spring.kafka.bootstrap-servers}")
     private String bootstrapServers;
@@ -63,6 +69,18 @@ public class KafkaConfig {
                 new ConcurrentKafkaListenerContainerFactory<>();
         factory.setConsumerFactory(consumerFactory());
         factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.MANUAL_IMMEDIATE);
+        factory.setCommonErrorHandler(deadLetterErrorHandler());
         return factory;
+    }
+
+    /**
+     * 처리 불가 메시지(역직렬화 실패 등)가 단일 파티션 컨슈머를 영구 정지시키지 않도록,
+     * 2회 재시도 후 Dead Letter Topic(<topic>.DLT)으로 격리한다.
+     */
+    private DefaultErrorHandler deadLetterErrorHandler() {
+        DeadLetterPublishingRecoverer recoverer =
+                new DeadLetterPublishingRecoverer(kafkaTemplate());
+        FixedBackOff backOff = new FixedBackOff(RETRY_INTERVAL_MS, MAX_RETRY_ATTEMPTS);
+        return new DefaultErrorHandler(recoverer, backOff);
     }
 }

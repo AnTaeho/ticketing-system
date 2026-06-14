@@ -40,7 +40,8 @@
 | V3 | DB 낙관적 락 | `@Version` + 재시도 |
 | V4 | Redis 스핀 락 | Lettuce `SETNX` + Spin Wait |
 | V5 | Redis Pub-Sub 락 | Redisson `RLock` |
-| V6 | Redis 선점 + Kafka 비동기 DB | Redis DECR 즉시 SUCCESS/FAIL + Kafka DB 처리 |
+| V6 | Redis 선점 + Outbox + Kafka | Redis DECR 선점 → Outbox 발행 → 멱등 Consumer(+DLT) |
+| V7 | Redis 선점 + 대기열 | Sorted Set 대기열(정원 200) + DECR 선점 + 비동기 DB |
 | V5CB | Circuit Breaker + Fallback Chain | Resilience4j CB — Redis 장애 시 V2 자동 폴백 |
 
 ---
@@ -209,31 +210,40 @@ public ReserveResponse reserve(Long concertId, Long userId) {
 
 ---
 
-### V6 — Redis 선점 + Kafka 비동기 DB
+### V6 — Redis 선점 + Outbox 패턴 + Kafka 비동기 DB
 
 ```java
-// TicketServiceV6.java — Redis DECR로 즉시 재고 선점
-@Override
+// TicketServiceV6.java — Redis DECR로 즉시 재고 선점 + Outbox 저장 (원자적 트랜잭션)
+@Transactional
 public ReserveResponse reserve(Long concertId, Long userId) {
     long remaining = redisStockRepository.decrement(concertId);
     if (remaining < 0) {
         redisStockRepository.increment(concertId);  // 복구
         throw new SoldOutException(concertId);
     }
-    ticketProducer.publishReservationRequest(concertId, userId);  // DB 저장 비동기 위임
-    return new ReserveResponse(null, ReservationStatus.SUCCESS);  // 즉시 SUCCESS 반환
+    String ticketToken = UUID.randomUUID().toString();
+    OutboxEvent event = OutboxEvent.create(concertId, ticketToken, serialize(...));
+    outboxEventRepository.save(event);                              // Outbox 테이블에 저장
+    eventPublisher.publishEvent(new OutboxCreatedEvent(event.getId()));
+    return new ReserveResponse(null, ReservationStatus.PENDING, ticketToken);  // PENDING + 토큰
 }
 
-// TicketConsumer.java — DB 저장만 담당 (재고 판단 없음)
+// OutboxRelay.java — 커밋 직후 발행 + 5분 주기 미발행 복구 (at-least-once)
+@Async @TransactionalEventListener(phase = AFTER_COMMIT)
+public void onOutboxCreated(OutboxCreatedEvent e) { /* Kafka 발행 → markPublished */ }
+
+// TicketConsumer.java — 재고 판단 없이 예약 INSERT만 (재고 SSOT = Redis)
+@Transactional
 @KafkaListener(topics = "${ticketing.kafka.topic}", concurrency = "1")
-public void consumeReservationRequest(String payload) {
+public void consumeReservationRequest(String payload, Acknowledgment ack) {
     ReservationMessage msg = deserialize(payload);
-    concert.decrease();
-    reservationRepository.save(Reservation.of(msg.concertId(), msg.userId(), SUCCESS));
+    if (reservationRepository.existsByTicketToken(msg.ticketToken())) { ack.acknowledge(); return; } // 멱등
+    reservationRepository.save(Reservation.ofV6(msg.concertId(), msg.userId(), SUCCESS, msg.ticketToken()));
+    // ack는 afterCommit 콜백에 등록 → DB 커밋 후에만 오프셋 커밋
 }
 ```
 
-**특징**: Redis DECR 원자성으로 재고를 즉시 선점 → SUCCESS/FAIL 즉시 반환. DB 저장은 성공자에 한해 Kafka Consumer가 비동기 처리. `reservationId`는 응답에 포함되지 않음(비동기 저장).
+**특징**: Redis DECR 원자성으로 재고를 즉시 선점 → `PENDING` + `ticketToken` 즉시 반환. **Outbox 패턴**으로 DB 트랜잭션과 Kafka 발행의 원자성을 보장하고, 단일 파티션 Consumer가 멱등하게 예약을 영속화한다. **재고 단일 진실 공급원(SSOT)은 Redis**이며 Consumer는 재고를 재검증하지 않는다. 처리 불가 메시지는 2회 재시도 후 **DLT(`<topic>.DLT`)로 격리**되어 컨슈머 정지(HoL 블로킹)를 방지한다.
 
 ---
 
@@ -279,6 +289,34 @@ public ReserveResponse reserve(Long concertId, Long userId) {
 | OPEN → V2 폴백 | 411ms | 257ms | 1,946 | 0% | 100% |
 
 > 장애 상황에서도 에러율 0% — CB가 V2로 자동 폴백하여 서비스 중단 없음
+
+---
+
+### V7 — Redis 선점 + 대기열 (Sorted Set)
+
+폭발적 트래픽을 운영자가 제어 가능한 처리량으로 제한하는 대기열 모델. 동시 처리 인원을 `PROCESSING_QUEUE_SIZE=200`으로 묶어 Redis·DB 부하를 통제하고, FIFO 순서로 공정성을 확보한다.
+
+```java
+// QueueRedisRepository.java — 입장 판정 + 등록을 단일 Lua로 원자화 (TOCTOU 제거)
+// 처리열에 빈자리가 있고 대기열이 비었으면 처리열로, 아니면 대기열로 ZADD
+private static final DefaultRedisScript<Long> ADMIT_SCRIPT = ...;
+
+// TicketServiceV7.java — 처리열 토큰 검증 → Redis DECR 선점 → 즉시 SUCCESS/FAIL
+public ReserveResponse reserve(Long concertId, Long userId, String queueToken) {
+    validateInProcessingQueue(concertId, queueToken);     // 처리열 토큰만 통과
+    preemptStock(concertId, queueToken);                  // DECR 선점, 음수면 보상 후 SoldOut
+    transaction.saveReservationAsync(concertId, userId);  // @Async DB 처리 (실패 시 재고 복구)
+    return new ReserveResponse(null, ReservationStatus.SUCCESS);
+}
+```
+
+**특징**:
+- **대기열 + 처리열 분리** — Sorted Set `score = currentTimeMs + TTL`로 FIFO 순서와 TTL 만료를 단일 자료구조로 처리.
+- **원자성** — 입장 판정/승격을 Lua 스크립트로 원자화하여 정원 초과 입장 방지(재고 `DECR`와 동일한 원자성 수준).
+- **자동 승격** — `QueueScheduler`가 3초마다 만료 토큰 제거 + 처리열 빈자리만큼 대기열 선두를 승격.
+- **실시간 시각화** — `/v7/demo` 페이지에서 SSE로 대기열/처리열/재고 변화를 실시간 관찰(데모 전용).
+
+> **V6 vs V7**: V6은 처리량 최적화(즉시 DECR), V7은 "제어 가능한 처리량 + FIFO 공정성" 최적화. 운영자가 트래픽 규모에 따라 선택.
 
 ---
 
@@ -421,14 +459,20 @@ ticketing-system/
 ├── src/main/java/com/example/ticketing/
 │   ├── concert/             # 공연 엔티티, 재고 관리
 │   ├── reservation/
-│   │   ├── controller/      # ReserveControllerV1 ~ V6, V5CB
-│   │   ├── service/         # TicketServiceV1 ~ V6, V5CB
-│   │   └── kafka/           # TicketProducer, TicketConsumer
+│   │   ├── controller/      # ReserveControllerV1 ~ V7, V5CB
+│   │   ├── service/         # v1~v7 (TicketServiceVn + TicketTransactionVn), v5cb
+│   │   ├── kafka/           # TicketConsumer, ReservationMessage (V6)
+│   │   └── outbox/          # OutboxEvent, OutboxRelay, OutboxEventRepository (V6 발행)
+│   ├── queue/               # QueueRedisRepository, CommandService, Scheduler (V7 대기열)
+│   ├── demo/                # V7 실시간 SSE 시각화 (데모 전용)
 │   ├── payment/             # 결제 Mock (100~200ms 지연)
 │   ├── dashboard/           # TestResult 엔티티 + Chart.js 대시보드
 │   └── global/
 │       ├── config/          # RedissonConfig, KafkaConfig, ResilienceConfig
-│       ├── resilience/      # CircuitBreakerStatsHolder, ChaosAspect
+│       ├── lock/            # LettuceLockRepository (V4)
+│       ├── stock/           # RedisStockRepository (V6/V7 재고 SSOT)
+│       ├── resilience/      # CircuitBreakerStatsHolder, RedisInfraFailures
+│       ├── chaos/           # ChaosAspect (V5CB 장애 주입)
 │       └── exception/       # GlobalExceptionHandler
 ├── load-test/gatling/
 │   ├── ScenarioASimulation.scala   # 극한 경합 시나리오

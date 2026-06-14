@@ -1,7 +1,5 @@
 package com.example.ticketing.reservation.kafka;
 
-import com.example.ticketing.concert.domain.Concert;
-import com.example.ticketing.concert.repository.ConcertRepository;
 import com.example.ticketing.reservation.domain.Reservation;
 import com.example.ticketing.reservation.domain.ReservationStatus;
 import com.example.ticketing.reservation.repository.ReservationRepository;
@@ -21,7 +19,6 @@ import tools.jackson.databind.ObjectMapper;
 @RequiredArgsConstructor
 public class TicketConsumer {
 
-    private final ConcertRepository concertRepository;
     private final ReservationRepository reservationRepository;
     private final ObjectMapper objectMapper;
 
@@ -47,15 +44,12 @@ public class TicketConsumer {
     }
 
     private void saveReservation(Long concertId, Long userId, String ticketToken) {
-        Concert concert = concertRepository.findById(concertId).orElse(null);
-        if (concert == null) {
-            log.warn("[V6] 콘서트 없음 - concertId={}", concertId);
-            return;
-        }
-        concert.decrease();
+        // 재고 차감은 V6 진입 시 Redis DECR로 이미 원자적으로 선점됨(SSOT=Redis).
+        // 컨슈머는 재고를 재검증하지 않고 예약 기록만 영속화한다(V7과 동일 모델).
         Reservation reservation = Reservation.ofV6(concertId, userId, ReservationStatus.SUCCESS, ticketToken);
         reservationRepository.save(reservation);
-        log.info("[V6] DB 저장 완료 - reservationId={}, 차감 후 재고={}", reservation.getId(), concert.getStock());
+        log.info("[V6] DB 저장 완료 - reservationId={}, concertId={}, userId={}",
+                reservation.getId(), concertId, userId);
     }
 
     private ReservationMessage deserialize(String payload) {

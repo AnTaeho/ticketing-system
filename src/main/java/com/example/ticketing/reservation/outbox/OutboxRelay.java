@@ -47,6 +47,16 @@ public class OutboxRelay {
             log.warn("[Outbox] 미발행 이벤트 복구 시작 - count={}", stuck.size());
             stuck.forEach(this::publishAndSave);
         }
+
+        alertDeadLetteredEvents();
+    }
+
+    // MAX_RETRY 초과로 FAILED 격리된 이벤트는 복구 대상에서 제외되므로, 방치되지 않도록 노출한다.
+    private void alertDeadLetteredEvents() {
+        long failedCount = outboxEventRepository.countByStatus(OutboxStatus.FAILED);
+        if (failedCount > 0) {
+            log.error("[Outbox] 재시도 한도 초과로 격리된 이벤트 존재 - count={}, 수동 조치 필요", failedCount);
+        }
     }
 
     private void publishAndSave(OutboxEvent event) {
