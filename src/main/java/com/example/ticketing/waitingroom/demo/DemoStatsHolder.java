@@ -12,15 +12,17 @@ public class DemoStatsHolder {
     private final AtomicInteger soldOutCount   = new AtomicInteger(0);
     private final AtomicInteger failedCount    = new AtomicInteger(0);
     private final AtomicInteger abandonedCount = new AtomicInteger(0);
+    private volatile int initialStock = 0;
     private volatile boolean running = false;
 
-    public void reset(int total) {
+    public void reset(int total, int initialStock) {
         totalUsers.set(total);
         enqueuedCount.set(0);
         successCount.set(0);
         soldOutCount.set(0);
         failedCount.set(0);
         abandonedCount.set(0);
+        this.initialStock = initialStock;
         running = true;
     }
 
@@ -43,6 +45,7 @@ public class DemoStatsHolder {
                 processingCount,
                 waitingCount,
                 redisStock,
+                initialStock,
                 running
         );
     }

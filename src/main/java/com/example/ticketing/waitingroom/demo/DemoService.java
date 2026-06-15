@@ -29,7 +29,7 @@ public class DemoService {
     private static final int POLL_INTERVAL_MS  = 500;
     private static final int MAX_POLL_ATTEMPTS = 100;  // 50초 최대 대기
     private static final int SIMULATION_POOL_SIZE = 80;
-    private static final int MAX_DEMO_USERS = 500;     // 데모 보호용 인원 상한
+    private static final int MAX_DEMO_USERS = 3000;    // 데모 보호용 인원 상한 (화면 입력 상한과 동일)
     private static final long SHUTDOWN_WAIT_SEC = 5;
 
     private final ExecutorService simulationPool = Executors.newFixedThreadPool(SIMULATION_POOL_SIZE);
@@ -45,10 +45,11 @@ public class DemoService {
     @Async
     public void start(Long concertId, int users) {
         users = Math.min(users, MAX_DEMO_USERS);
+        int initialStock = concertService.getConcert(concertId).getTotalStock();
         queueRepository.clearQueues(concertId);
-        statsHolder.reset(users);
-        concertService.resetStock(concertId, 100);
-        log.info("[Demo] 시작 - concertId={}, users={}", concertId, users);
+        statsHolder.reset(users, initialStock);
+        concertService.resetStock(concertId, initialStock);
+        log.info("[Demo] 시작 - concertId={}, users={}, initialStock={}", concertId, users, initialStock);
 
         // Phase 1: 모든 사용자 토큰 일괄 발급 (대기열을 한 번에 채움)
         String[] tokens = issueAllTokens(concertId, users);

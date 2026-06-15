@@ -39,6 +39,13 @@ public class ConcertService {
         redisStockRepository.initStock(concertId, stock);
     }
 
+    @Transactional
+    public Concert createConcert(String title, int stock) {
+        Concert concert = concertRepository.save(Concert.create(title, stock));
+        redisStockRepository.initStock(concert.getId(), stock);
+        return concert;
+    }
+
     private Concert findConcertById(Long concertId) {
         return concertRepository.findById(concertId)
                 .orElseThrow(() -> new ConcertNotFoundException(concertId));

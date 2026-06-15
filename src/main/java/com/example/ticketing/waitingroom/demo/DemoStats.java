@@ -10,5 +10,6 @@ public record DemoStats(
         int processingCount,
         int waitingCount,
         long redisStock,
+        int initialStock,
         boolean running
 ) {}

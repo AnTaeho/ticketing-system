@@ -39,6 +39,20 @@
         .btn-start:disabled { background: #1e3a5f; color: #4b6380; cursor: not-allowed; }
         .btn-reset  { background: #1e293b; color: #94a3b8; border: 1px solid #334155; }
         .btn-reset:hover { background: #334155; }
+        .btn-create { background: #16a34a; color: #fff; }
+        .btn-create:hover:not(:disabled) { background: #15803d; }
+        .btn-create:disabled { background: #14532d; color: #4b6380; cursor: not-allowed; }
+
+        /* ── 콘서트 추가 패널 ── */
+        .create-panel {
+            background: #1e293b; border: 1px solid #334155; border-radius: 12px;
+            padding: 1.5rem; display: flex; flex-wrap: wrap; gap: 1.2rem;
+            align-items: flex-end; margin-bottom: 1.5rem;
+        }
+        .create-panel .field input { width: 220px; }
+        .create-msg { font-size: 0.85rem; padding-bottom: 0.6rem; }
+        .create-msg.success { color: #4ade80; }
+        .create-msg.error   { color: #f87171; }
 
         /* ── 상태 뱃지 ── */
         .badge {
@@ -118,6 +132,20 @@
     <p>Redis Sorted Set 대기열 + DECR 재고 선점 — 동시 요청 처리 과정을 실시간으로 확인합니다</p>
 </header>
 
+<!-- 콘서트 추가 패널 -->
+<div class="create-panel">
+    <div class="field">
+        <label>새 공연 제목</label>
+        <input type="text" id="newConcertTitle" placeholder="예: 데모 공연" maxlength="100">
+    </div>
+    <div class="field">
+        <label>초기 재고</label>
+        <input type="number" id="newConcertStock" value="100" min="1" step="10">
+    </div>
+    <button class="btn btn-create" id="createBtn" onclick="createConcert()">+ 콘서트 추가</button>
+    <span id="createMsg" class="create-msg"></span>
+</div>
+
 <!-- 컨트롤 패널 -->
 <div class="controls">
     <div class="field">
@@ -195,9 +223,9 @@
     </div>
     <div class="card">
         <div class="card-label">남은 재고 (Redis)</div>
-        <div class="card-value c-yellow" id="redisStock">100</div>
+        <div class="card-value c-yellow" id="redisStock">-</div>
         <div class="card-unit">장 남음</div>
-        <div class="mini-bar"><div class="mini-fill mini-blue" id="stockBar" style="width:100%"></div></div>
+        <div class="mini-bar"><div class="mini-fill mini-blue" id="stockBar" style="width:0%"></div></div>
     </div>
 </div>
 
@@ -215,6 +243,42 @@
 <script>
     let sse = null;
     let totalUsersVal = 0;
+
+    function createConcert() {
+        const title = document.getElementById('newConcertTitle').value.trim();
+        const stock = parseInt(document.getElementById('newConcertStock').value);
+        const msg = document.getElementById('createMsg');
+        const btn = document.getElementById('createBtn');
+
+        if (!title) {
+            msg.textContent = '공연 제목을 입력해주세요.';
+            msg.className = 'create-msg error';
+            return;
+        }
+
+        btn.disabled = true;
+        msg.textContent = '생성 중...';
+        msg.className = 'create-msg';
+
+        fetch('/api/concerts', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title, stock })
+        })
+            .then(res => res.json().then(body => ({ ok: res.ok, body })))
+            .then(({ ok, body }) => {
+                if (!ok) throw new Error(body.error || '생성 실패');
+                document.getElementById('concertId').value = body.id;
+                document.getElementById('newConcertTitle').value = '';
+                msg.textContent = `생성 완료: #${body.id} "${body.title}" (재고 ${body.stock})`;
+                msg.className = 'create-msg success';
+            })
+            .catch(err => {
+                msg.textContent = err.message;
+                msg.className = 'create-msg error';
+            })
+            .finally(() => { btn.disabled = false; });
+    }
 
     function startDemo() {
         const concertId = document.getElementById('concertId').value;
@@ -266,12 +330,13 @@
         setText('waitingCount',   d.waitingCount);
 
         const total = d.totalUsers > 0 ? d.totalUsers : 1;
+        const initialStock = d.initialStock > 0 ? d.initialStock : 1;
         const done  = d.successCount + d.soldOutCount + d.failedCount + d.abandonedCount;
 
         setBar('processingBar', (d.processingCount / 200) * 100);
         setBar('waitingBar',    (d.waitingCount / total) * 100);
-        setBar('successBar',    (d.successCount / 100) * 100);   // 재고 100 기준
-        setBar('stockBar',      (Math.max(0, d.redisStock) / 100) * 100);
+        setBar('successBar',    (d.successCount / initialStock) * 100);
+        setBar('stockBar',      (Math.max(0, d.redisStock) / initialStock) * 100);
         setBar('progressBar',   (done / total) * 100);
 
         document.getElementById('progressText').textContent = `${done} / ${d.totalUsers}`;
@@ -303,9 +368,8 @@
         ['enqueuedCount','successCount','soldOutCount','failedCount','abandonedCount'].forEach(id => setText(id, '0'));
         setText('processingCount', '0');
         setText('waitingCount', '0');
-        setText('redisStock', '100');
-        ['processingBar','waitingBar','successBar','progressBar'].forEach(id => setBar(id, 0));
-        setBar('stockBar', 100);
+        setText('redisStock', '-');
+        ['processingBar','waitingBar','successBar','progressBar','stockBar'].forEach(id => setBar(id, 0));
         document.getElementById('progressText').textContent = '0 / 0';
     }
 
