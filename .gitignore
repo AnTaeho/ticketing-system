@@ -1,5 +1,6 @@
 CLAUDE.md
 portfolio.md
+portfolio-deep-dive.md
 .gradle
 build/
 !gradle/wrapper/gradle-wrapper.jar

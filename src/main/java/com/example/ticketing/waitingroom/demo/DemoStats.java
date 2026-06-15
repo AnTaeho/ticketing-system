@@ -1,4 +1,4 @@
-package com.example.ticketing.demo;
+package com.example.ticketing.waitingroom.demo;
 
 public record DemoStats(
         int totalUsers,

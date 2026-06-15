@@ -1,4 +1,4 @@
-package com.example.ticketing.queue.repository;
+package com.example.ticketing.waitingroom.repository;
 
 import java.util.HashSet;
 import java.util.List;
@@ -11,7 +11,7 @@ import org.springframework.data.redis.core.ZSetOperations;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Repository;
 
-import static com.example.ticketing.queue.QueueConst.*;
+import static com.example.ticketing.waitingroom.WaitingRoomConst.*;
 
 @Repository
 @RequiredArgsConstructor

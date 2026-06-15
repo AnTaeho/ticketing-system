@@ -1,6 +1,6 @@
-package com.example.ticketing.queue.controller.dto;
+package com.example.ticketing.waitingroom.dto;
 
-import static com.example.ticketing.queue.QueueConst.*;
+import static com.example.ticketing.waitingroom.WaitingRoomConst.*;
 
 public record QueueTokenResponse(String token, String status) {
 

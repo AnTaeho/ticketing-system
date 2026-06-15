@@ -1,8 +1,8 @@
-package com.example.ticketing.reservation.controller;
+package com.example.ticketing.waitingroom.controller;
 
-import com.example.ticketing.reservation.dto.ReserveRequestV7;
+import com.example.ticketing.waitingroom.dto.ReserveRequest;
 import com.example.ticketing.reservation.dto.ReserveResponse;
-import com.example.ticketing.reservation.service.v7.TicketServiceV7;
+import com.example.ticketing.waitingroom.service.ReservationService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -13,18 +13,18 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
-@RequestMapping("/api/v7/concerts")
+@RequestMapping("/api/waitingroom/concerts")
 @RequiredArgsConstructor
-public class ReserveControllerV7 {
+public class ReservationController {
 
-    private final TicketServiceV7 ticketServiceV7;
+    private final ReservationService reservationService;
 
     @PostMapping("/{concertId}/reserve")
     public ResponseEntity<ReserveResponse> reserve(
             @PathVariable Long concertId,
-            @Valid @RequestBody ReserveRequestV7 request) {
+            @Valid @RequestBody ReserveRequest request) {
         return ResponseEntity.ok(
-                ticketServiceV7.reserve(concertId, request.userId(), request.queueToken())
+                reservationService.reserve(concertId, request.userId(), request.queueToken())
         );
     }
 }

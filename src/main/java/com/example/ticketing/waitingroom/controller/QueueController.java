@@ -1,9 +1,9 @@
-package com.example.ticketing.queue.controller;
+package com.example.ticketing.waitingroom.controller;
 
-import com.example.ticketing.queue.controller.dto.QueueStatusResponse;
-import com.example.ticketing.queue.controller.dto.QueueTokenResponse;
-import com.example.ticketing.queue.service.QueueCommandService;
-import com.example.ticketing.queue.service.QueueQueryService;
+import com.example.ticketing.waitingroom.dto.QueueStatusResponse;
+import com.example.ticketing.waitingroom.dto.QueueTokenResponse;
+import com.example.ticketing.waitingroom.service.QueueCommandService;
+import com.example.ticketing.waitingroom.service.QueueQueryService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -14,7 +14,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
-@RequestMapping("/api/v7/concerts/{concertId}/queue")
+@RequestMapping("/api/waitingroom/concerts/{concertId}/queue")
 @RequiredArgsConstructor
 public class QueueController {
 

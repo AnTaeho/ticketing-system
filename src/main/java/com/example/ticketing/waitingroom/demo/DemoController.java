@@ -1,4 +1,4 @@
-package com.example.ticketing.demo;
+package com.example.ticketing.waitingroom.demo;
 
 import java.io.IOException;
 import lombok.RequiredArgsConstructor;
@@ -15,7 +15,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 @Slf4j
 @Controller
-@RequestMapping("/v7/demo")
+@RequestMapping("/waitingroom/demo")
 @RequiredArgsConstructor
 public class DemoController {
 

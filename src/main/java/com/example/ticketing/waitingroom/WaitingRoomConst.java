@@ -1,6 +1,6 @@
-package com.example.ticketing.queue;
+package com.example.ticketing.waitingroom;
 
-public final class QueueConst {
+public final class WaitingRoomConst {
 
     public static final int PROCESSING_QUEUE_SIZE = 200;
     public static final long PROCESSING_TOKEN_TTL_MS = 30 * 60 * 1000L;
@@ -13,5 +13,5 @@ public final class QueueConst {
     public static final String STATUS_WAITING = "WAITING";
     public static final String STATUS_NOT_IN_QUEUE = "NOT_IN_QUEUE";
 
-    private QueueConst() {}
+    private WaitingRoomConst() {}
 }

@@ -225,7 +225,7 @@
         resetNumbers();
         document.getElementById('totalUsers').textContent = totalUsersVal;
 
-        fetch(`/v7/demo/start?concertId=${concertId}&users=${totalUsersVal}`, { method: 'POST' })
+        fetch(`/waitingroom/demo/start?concertId=${concertId}&users=${totalUsersVal}`, { method: 'POST' })
             .catch(err => console.error('start error:', err));
 
         connectSSE(concertId);
@@ -233,7 +233,7 @@
 
     function connectSSE(concertId) {
         if (sse) sse.close();
-        sse = new EventSource(`/v7/demo/stream?concertId=${concertId}`);
+        sse = new EventSource(`/waitingroom/demo/stream?concertId=${concertId}`);
 
         sse.addEventListener('stats', (e) => {
             const d = JSON.parse(e.data);

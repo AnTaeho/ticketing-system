@@ -1,6 +1,6 @@
-package com.example.ticketing.queue.scheduler;
+package com.example.ticketing.waitingroom.scheduler;
 
-import com.example.ticketing.queue.service.QueueCommandService;
+import com.example.ticketing.waitingroom.service.QueueCommandService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -17,6 +17,6 @@ public class QueueScheduler {
     public void processQueue() {
         queueCommandService.purgeExpiredTokens();
         queueCommandService.promoteWaitingToProcessing();
-        log.debug("[V7-Queue] 스케줄러 실행 완료");
+        log.debug("[WaitingRoom-Queue] 스케줄러 실행 완료");
     }
 }

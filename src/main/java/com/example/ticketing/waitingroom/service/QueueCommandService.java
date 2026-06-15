@@ -1,7 +1,7 @@
-package com.example.ticketing.queue.service;
+package com.example.ticketing.waitingroom.service;
 
-import com.example.ticketing.queue.controller.dto.QueueTokenResponse;
-import com.example.ticketing.queue.repository.QueueRedisRepository;
+import com.example.ticketing.waitingroom.dto.QueueTokenResponse;
+import com.example.ticketing.waitingroom.repository.QueueRedisRepository;
 import java.util.Set;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
@@ -19,17 +19,17 @@ public class QueueCommandService {
         String token = UUID.randomUUID().toString();
 
         if (queueRepository.admitOrEnqueue(concertId, token)) {
-            log.info("[V7-Queue] 처리열 즉시 입장 - userId={}, concertId={}", userId, concertId);
+            log.info("[WaitingRoom-Queue] 처리열 즉시 입장 - userId={}, concertId={}", userId, concertId);
             return QueueTokenResponse.processing(token);
         } else {
-            log.info("[V7-Queue] 대기열 진입 - userId={}, concertId={}", userId, concertId);
+            log.info("[WaitingRoom-Queue] 대기열 진입 - userId={}, concertId={}", userId, concertId);
             return QueueTokenResponse.waiting(token);
         }
     }
 
     public void removeFromProcessing(Long concertId, String token) {
         queueRepository.removeFromProcessing(concertId, token);
-        log.info("[V7-Queue] 처리열 토큰 제거 - concertId={}", concertId);
+        log.info("[WaitingRoom-Queue] 처리열 토큰 제거 - concertId={}", concertId);
     }
 
     public void removeFromWaiting(Long concertId, String token) {
@@ -48,7 +48,7 @@ public class QueueCommandService {
             Long concertId = extractConcertId(key);
             int promoted = queueRepository.promoteWaiting(concertId);
             if (promoted > 0) {
-                log.info("[V7-Queue] 대기→처리 승격 - concertId={}, 승격수={}", concertId, promoted);
+                log.info("[WaitingRoom-Queue] 대기→처리 승격 - concertId={}, 승격수={}", concertId, promoted);
             }
         }
     }

@@ -1,11 +1,11 @@
-package com.example.ticketing.queue.service;
+package com.example.ticketing.waitingroom.service;
 
-import com.example.ticketing.queue.controller.dto.QueueStatusResponse;
-import com.example.ticketing.queue.repository.QueueRedisRepository;
+import com.example.ticketing.waitingroom.dto.QueueStatusResponse;
+import com.example.ticketing.waitingroom.repository.QueueRedisRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
-import static com.example.ticketing.queue.QueueConst.*;
+import static com.example.ticketing.waitingroom.WaitingRoomConst.*;
 
 @Service
 @RequiredArgsConstructor

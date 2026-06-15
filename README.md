@@ -25,8 +25,10 @@
 | V4 | Redis 스핀 락 | Lettuce `SETNX` + Spin Wait |
 | V5 | Redis Pub-Sub 락 | Redisson `RLock` |
 | V6 | Redis 선점 + Outbox + Kafka | DECR 선점 → Outbox 발행 → 멱등 Consumer(+DLT) |
-| V7 | Redis 선점 + 대기열 | Sorted Set 대기열(정원 200) + DECR 선점 + 비동기 DB |
 | V5CB | Circuit Breaker | Resilience4j — Redis 장애 시 V2 자동 폴백 |
+| **WaitingRoom** | Redis 선점 + 대기열 *(별도 모듈)* | Sorted Set 대기열(정원 200) + DECR 선점 + 비동기 DB |
+
+> V1~V6·V5CB는 "단건 예약을 안전하게 직렬화"하는 같은 문제의 변주다. **WaitingRoom**(구 V7)은 "유입 트래픽 자체를 통제"하는 다른 층위의 문제라, 버전 라인에서 분리해 독립 패키지 `com.example.ticketing.waitingroom`로 두었다.
 
 **기술 스택**: Java 17 · Spring Boot 4.0.6 · JPA/Hibernate 7.x · MySQL 8.x · Redis 7.x(Lettuce, Redisson 3.50) · Kafka 3.x · Gatling 3.9 · Thymeleaf + Chart.js · Gradle
 
@@ -39,8 +41,9 @@
     ├── V1~V3: JPA → MySQL (DB 레벨 락)
     ├── V4~V5: Redis 분산 락 → MySQL (V4 Lettuce 스핀 / V5 Redisson Pub-Sub)
     ├── V5CB:  V5 → [Circuit Breaker] → MySQL / Redis 장애 시 V2 자동 폴백
-    ├── V6:    Redis DECR 선점 → 즉시 PENDING+토큰 → Kafka → 멱등 Consumer → MySQL
-    └── V7:    Sorted Set 대기열 → DECR 선점 → 즉시 SUCCESS/FAIL → 비동기 DB
+    └── V6:    Redis DECR 선점 → 즉시 PENDING+토큰 → Kafka → 멱등 Consumer → MySQL
+
+WaitingRoom (별도 모듈): Sorted Set 대기열 → DECR 선점 → 즉시 SUCCESS/FAIL → 비동기 DB
 ```
 
 ---
@@ -84,14 +87,15 @@ public ReserveResponse reserve(Long concertId, Long userId) {
 - **단일 파티션 Consumer**: 멱등(`existsByTicketToken`) 예약 INSERT만 수행. **재고 SSOT = Redis**(재검증 X).
 - **DLT**: 처리 불가 메시지는 2회 재시도 후 `<topic>.DLT` 격리 → 컨슈머 정지(HoL) 방지. ack는 DB 커밋 후 등록.
 
-### V7 — Redis 선점 + 대기열
-동시 처리 인원을 `PROCESSING_QUEUE_SIZE=200`으로 묶어 부하를 통제하고 FIFO 공정성 확보.
+### WaitingRoom — Redis 선점 + 대기열 *(별도 모듈, 구 V7)*
+독립 패키지 `com.example.ticketing.waitingroom`. 동시 처리 인원을 `PROCESSING_QUEUE_SIZE=200`으로 묶어 부하를 통제하고 FIFO 공정성 확보.
 - **입장 판정/승격을 Lua로 원자화** → 정원 초과 입장(TOCTOU) 제거.
 - Sorted Set `score = currentTimeMs + TTL` → FIFO + TTL 만료를 단일 자료구조로.
 - `QueueScheduler` 3초마다 만료 토큰 제거 + 대기→처리 승격.
-- `/v7/demo` SSE로 대기열/처리열/재고 실시간 시각화(데모 전용).
+- 예약 `POST /api/waitingroom/concerts/{id}/reserve`, 토큰 `POST /api/waitingroom/concerts/{id}/queue/token`.
+- `/waitingroom/demo` SSE로 대기열/처리열/재고 실시간 시각화(데모 전용).
 
-> **V6 vs V7**: V6은 처리량 최적화, V7은 "제어 가능한 처리량 + FIFO 공정성". 운영자가 트래픽 규모로 선택.
+> **V6 vs WaitingRoom**: V6은 처리량 최적화, WaitingRoom은 "제어 가능한 처리량 + FIFO 공정성". 운영자가 트래픽 규모로 선택.
 
 ### V5CB — Circuit Breaker + Graceful Degradation
 ```
@@ -172,14 +176,14 @@ mvn gatling:test -Dgatling.simulationClass=ScenarioASimulation -DVERSION=v5 -DUS
 ## 핵심 트레이드오프
 
 ```
-정합성:    V2 = V3 = V4 = V5 = V5CB = V6 = V7 >> V1
-TPS:       V7 > V6 > V5CB ≈ V5 ≈ V2 ≈ V3 > V4 > V1
+정합성:    V2 = V3 = V4 = V5 = V5CB = V6 = WaitingRoom >> V1
+TPS:       WaitingRoom > V6 > V5CB ≈ V5 ≈ V2 ≈ V3 > V4 > V1
 P99:       V6 << V5CB ≈ V5 < V2 ≈ V3 << V4
 장애내성:  V5CB (자동 폴백) > V5 > V4 > V2 = V3 > V1
-운영복잡:  V1 < V2 < V3 < V4 < V5 < V5CB < V6 < V7
+운영복잡:  V1 < V2 < V3 < V4 < V5 < V5CB < V6 < WaitingRoom
 ```
 
-**결론**: 일반 티켓팅 → **V5**(즉시 응답+균형) · 폭발 트래픽 → **V7**(대기열) · 장애 대응 → **V5CB**(자동 폴백)
+**결론**: 일반 티켓팅 → **V5**(즉시 응답+균형) · 폭발 트래픽 → **WaitingRoom**(대기열, 별도 모듈) · 장애 대응 → **V5CB**(자동 폴백)
 
 ---
 
@@ -189,18 +193,23 @@ P99:       V6 << V5CB ≈ V5 < V2 ≈ V3 << V4
 src/main/java/com/example/ticketing/
 ├── concert/                # 공연 엔티티, 재고 관리
 ├── reservation/
-│   ├── controller/         # ReserveControllerV1~V7, V5CB
-│   ├── service/            # v1~v7 (TicketServiceVn + TicketTransactionVn), v5cb
+│   ├── controller/         # ReserveControllerV1~V6, V5CB
+│   ├── service/            # v1~v6 (TicketServiceVn + TicketTransactionVn), v5cb
 │   ├── kafka/              # TicketConsumer, ReservationMessage (V6)
 │   └── outbox/             # OutboxEvent, OutboxRelay (V6 발행)
-├── queue/                  # QueueRedisRepository, CommandService, Scheduler (V7)
-├── demo/                   # V7 실시간 SSE 시각화 (데모 전용)
+├── waitingroom/            # 대기열 예매 (구 V7, 별도 모듈)
+│   ├── controller/         # ReservationController, QueueController
+│   ├── service/            # ReservationService, ReservationTransaction, QueueCommand/QueryService
+│   ├── repository/         # QueueRedisRepository
+│   ├── scheduler/          # QueueScheduler (만료 제거 + 승격)
+│   ├── dto/                # ReserveRequest, Queue*Response
+│   └── demo/               # 실시간 SSE 시각화 (데모 전용)
 ├── payment/                # 결제 Mock (100~200ms 지연)
 ├── dashboard/              # TestResult + Chart.js 대시보드
 └── global/
     ├── config/             # RedissonConfig, KafkaConfig, ResilienceConfig
     ├── lock/               # LettuceLockRepository (V4)
-    ├── stock/              # RedisStockRepository (V6/V7 재고 SSOT)
+    ├── stock/              # RedisStockRepository (V6/WaitingRoom 재고 SSOT)
     ├── resilience/         # CircuitBreakerStatsHolder, RedisInfraFailures
     ├── chaos/              # ChaosAspect (V5CB Redis 장애 주입)
     └── exception/          # GlobalExceptionHandler

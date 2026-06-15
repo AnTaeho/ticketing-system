@@ -1,9 +1,9 @@
-package com.example.ticketing.reservation.dto;
+package com.example.ticketing.waitingroom.dto;
 
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 
-public record ReserveRequestV7(
+public record ReserveRequest(
         @NotNull Long userId,
         @NotBlank String queueToken
 ) {}

@@ -1,6 +1,6 @@
-package com.example.ticketing.queue.controller.dto;
+package com.example.ticketing.waitingroom.dto;
 
-import static com.example.ticketing.queue.QueueConst.*;
+import static com.example.ticketing.waitingroom.WaitingRoomConst.*;
 
 public record QueueStatusResponse(String status, Integer position, Integer estimatedWaitSeconds) {
 

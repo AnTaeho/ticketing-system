@@ -1,15 +1,15 @@
-package com.example.ticketing.demo;
+package com.example.ticketing.waitingroom.demo;
 
 import com.example.ticketing.concert.service.ConcertService;
 import com.example.ticketing.global.exception.LockAcquisitionFailedException;
 import com.example.ticketing.global.exception.SoldOutException;
 import com.example.ticketing.global.stock.RedisStockRepository;
-import com.example.ticketing.queue.controller.dto.QueueStatusResponse;
-import com.example.ticketing.queue.controller.dto.QueueTokenResponse;
-import com.example.ticketing.queue.repository.QueueRedisRepository;
-import com.example.ticketing.queue.service.QueueCommandService;
-import com.example.ticketing.queue.service.QueueQueryService;
-import com.example.ticketing.reservation.service.v7.TicketServiceV7;
+import com.example.ticketing.waitingroom.dto.QueueStatusResponse;
+import com.example.ticketing.waitingroom.dto.QueueTokenResponse;
+import com.example.ticketing.waitingroom.repository.QueueRedisRepository;
+import com.example.ticketing.waitingroom.service.QueueCommandService;
+import com.example.ticketing.waitingroom.service.QueueQueryService;
+import com.example.ticketing.waitingroom.service.ReservationService;
 import jakarta.annotation.PreDestroy;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -19,7 +19,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
-import static com.example.ticketing.queue.QueueConst.*;
+import static com.example.ticketing.waitingroom.WaitingRoomConst.*;
 
 @Slf4j
 @Service
@@ -37,7 +37,7 @@ public class DemoService {
     private final DemoStatsHolder    statsHolder;
     private final QueueCommandService queueCommandService;
     private final QueueQueryService  queueQueryService;
-    private final TicketServiceV7    ticketServiceV7;
+    private final ReservationService    reservationService;
     private final ConcertService     concertService;
     private final QueueRedisRepository queueRepository;
     private final RedisStockRepository redisStockRepository;
@@ -118,7 +118,7 @@ public class DemoService {
                 return;
             }
 
-            ticketServiceV7.reserve(concertId, userId, token);
+            reservationService.reserve(concertId, userId, token);
             statsHolder.incrementSuccess();
 
         } catch (SoldOutException e) {
