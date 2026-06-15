@@ -1,13 +1,17 @@
 package com.example.ticketing.global.chaos;
 
+import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Profile;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
 
-import java.util.LinkedHashMap;
-import java.util.Map;
-
+/**
+ * V5CB 서킷브레이커 데모용 장애 주입 엔드포인트. Redis 차단/복구만 노출한다.
+ */
 @Profile("!prod")
 @RestController
 @RequestMapping("/api/chaos")
@@ -17,67 +21,20 @@ public class ChaosController {
     private final ChaosService chaosService;
     private final ChaosState chaosState;
 
-    @PostMapping("/hikari/constrain")
-    public ResponseEntity<Void> constrainHikari(@RequestParam int maxPoolSize) {
-        chaosService.constrainHikari(maxPoolSize);
-        return ResponseEntity.ok().build();
-    }
-
-    @PostMapping("/hikari/restore")
-    public ResponseEntity<Void> restoreHikari() {
-        chaosService.restoreHikari();
-        return ResponseEntity.ok().build();
-    }
-
-    @PostMapping("/redis/delay")
-    public ResponseEntity<Void> redisDelay(@RequestParam long ms) {
-        chaosService.setRedisDelay(ms);
-        return ResponseEntity.ok().build();
-    }
-
     @PostMapping("/redis/block")
     public ResponseEntity<Void> redisBlock() {
-        chaosService.setRedisBlock();
+        chaosService.blockRedis();
         return ResponseEntity.ok().build();
     }
 
-    @PostMapping("/redis/restore")
-    public ResponseEntity<Void> restoreRedis() {
+    @PostMapping("/reset")
+    public ResponseEntity<Void> reset() {
         chaosService.restoreRedis();
-        return ResponseEntity.ok().build();
-    }
-
-    @PostMapping("/kafka/pause")
-    public ResponseEntity<Void> pauseKafka() {
-        chaosService.pauseKafka();
-        return ResponseEntity.ok().build();
-    }
-
-    @PostMapping("/kafka/resume")
-    public ResponseEntity<Void> resumeKafka() {
-        chaosService.resumeKafka();
         return ResponseEntity.ok().build();
     }
 
     @GetMapping("/status")
     public ResponseEntity<Map<String, Object>> status() {
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("hikari", Map.of(
-                "constrained", chaosState.isHikariConstrained(),
-                "maxPoolSize", chaosState.getHikariMaxPoolSize(),
-                "originalMaxPoolSize", chaosState.getOriginalMaxPoolSize()
-        ));
-        result.put("redis", Map.of(
-                "mode", chaosState.getRedisMode().name(),
-                "delayMs", chaosState.getRedisDelayMs()
-        ));
-        result.put("kafka", Map.of("paused", chaosState.isKafkaPaused()));
-        return ResponseEntity.ok(result);
-    }
-
-    @PostMapping("/reset")
-    public ResponseEntity<Void> reset() {
-        chaosService.resetAll();
-        return ResponseEntity.ok().build();
+        return ResponseEntity.ok(Map.of("redisBlocked", chaosState.isRedisBlocked()));
     }
 }

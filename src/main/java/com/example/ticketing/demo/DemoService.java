@@ -27,8 +27,9 @@ import static com.example.ticketing.queue.QueueConst.*;
 public class DemoService {
 
     private static final int POLL_INTERVAL_MS  = 500;
-    private static final int MAX_POLL_ATTEMPTS = 300;  // 150초 최대 대기
-    private static final int SIMULATION_POOL_SIZE = 300;
+    private static final int MAX_POLL_ATTEMPTS = 100;  // 50초 최대 대기
+    private static final int SIMULATION_POOL_SIZE = 80;
+    private static final int MAX_DEMO_USERS = 500;     // 데모 보호용 인원 상한
     private static final long SHUTDOWN_WAIT_SEC = 5;
 
     private final ExecutorService simulationPool = Executors.newFixedThreadPool(SIMULATION_POOL_SIZE);
@@ -43,6 +44,7 @@ public class DemoService {
 
     @Async
     public void start(Long concertId, int users) {
+        users = Math.min(users, MAX_DEMO_USERS);
         queueRepository.clearQueues(concertId);
         statsHolder.reset(users);
         concertService.resetStock(concertId, 100);
