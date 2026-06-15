@@ -12,7 +12,7 @@
 |------|------|
 | **목표** | 동시성 제어 방식별 정합성·성능 실측 비교 |
 | **타겟 직무** | 백엔드 (Java / Spring) |
-| **시나리오** | 100장 티켓에 수천 명이 동시 접속하는 극한 경합 |
+| **시나리오** | 100장 티켓에 500명이 동시 접속하는 극한 경합 |
 | **비교 지표** | 오버부킹, TPS, P99, 에러율 |
 
 ### 구현한 전략
@@ -99,37 +99,35 @@ public ReserveResponse reserve(Long concertId, Long userId) {
 
 ## 부하 테스트 결과
 
-### 시나리오 A — 극한 경합 (재고 100장, 동시 1,000명)
+### 시나리오 A — 극한 경합 (재고 100장, 동시 500명)
 
 | 버전 | 방식 | P99 | Mean | TPS | 오버부킹 |
 |------|------|-----|------|-----|----------|
-| V1 | No Lock | 407ms | 273ms | 1,000 | 0 (lost update) |
-| V2 | Pessimistic | 338ms | 228ms | 1,000 | 0 ✅ |
-| V3 | Optimistic | 338ms | 252ms | 1,000 | 0 ✅ |
-| V4 | Spin Lock | **2,966ms** | 627ms | 250 | 0 ✅ |
-| V5 | Redisson | 731ms | 451ms | 1,000 | 0 ✅ |
-| V6 | Kafka | 155ms | 101ms | 1,000 | 0 ✅ |
+| V1 | No Lock | 342ms | 226ms | 500 | 0 (lost update) |
+| V2 | Pessimistic | 293ms | 233ms | 500 | 0 ✅ |
+| V3 | Optimistic | 286ms | 211ms | 500 | 0 ✅ |
+| V4 | Spin Lock | **3,587ms** | 895ms | 100 | 0 ✅ |
+| V5 | Redisson | 508ms | 350ms | 500 | 0 ✅ |
+| V6 | Kafka | 402ms | 335ms | 500 | 0 ✅ |
 
 > V4 TPS 급감: `Thread.sleep(100ms)` 스핀 대기가 쓰레드 점유 → 동시 처리 수 제한
 
-### 시나리오 B — 실제 플로우 (재고 100,000장, 동시 2,000명, think time 포함)
+### 시나리오 B — 실제 플로우 (재고 10,000장, 동시 2,000명, think time 포함)
 
 | 버전 | 방식 | P99 | req/s | 에러율 |
 |------|------|-----|-------|--------|
-| V1 | No Lock | 5,039ms | 262 | 5.1% |
-| V2 | Pessimistic | 7,194ms | 222 | 0% |
-| V3 | Optimistic | 7,359ms | 216 | 0% |
-| V4 | Spin Lock | **13,731ms** | 236 | 0% |
-| V5 | Redisson | 8,538ms | 241 | 0% |
-| V6 | Kafka | **2ms** | 400 | 0% |
+| V1 | No Lock | 4,706ms | 267.4 | 6.85% |
+| V2 | Pessimistic | 9,934ms | 222.2 | 0% |
+| V3 | Optimistic | 12,458ms | 150.9 | 0% |
+| V4 | Spin Lock | **13,731ms** | 223.8 | 0% |
+| V5 | Redisson | 8,670ms | 247.3 | 0% |
+| V6 | Kafka | **125ms** | 400 | 0% |
 
 ---
 
 ## 대시보드
 
 `http://localhost:8080/dashboard` — Thymeleaf + Chart.js 실시간 성능 비교.
-
-![대시보드 전체 뷰](docs/images/dashboard-full.png)
 
 - 시나리오(A/B) · 버전 · 동시 사용자 수 필터
 - TPS / P99 / 오버부킹 / 에러율 차트 + 결과 테이블
@@ -147,7 +145,7 @@ docker-compose -f kafka-docker-compose.yml up -d              # 1. Kafka 기동
 # 3. 부하 테스트 (재고 reset 후 실행)
 cd load-test/gatling
 curl -X POST "http://localhost:8080/api/concerts/1/reset?stock=100"
-mvn gatling:test -Dgatling.simulationClass=ScenarioASimulation -DVERSION=v5 -DUSERS=1000
+mvn gatling:test -Dgatling.simulationClass=ScenarioASimulation -DVERSION=v5 -DUSERS=500
 ```
 
 ---
@@ -191,5 +189,4 @@ src/main/java/com/example/ticketing/
     └── exception/          # GlobalExceptionHandler
 
 load-test/gatling/          # ScenarioA/B
-docs/images/                # 대시보드 스크린샷
 ```
