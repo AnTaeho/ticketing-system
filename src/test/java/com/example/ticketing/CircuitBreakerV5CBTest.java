@@ -54,7 +54,7 @@ class CircuitBreakerV5CBTest {
 
     @BeforeEach
     void setUp() {
-        chaosState.setRedisMode(ChaosState.RedisMode.NONE);
+        chaosState.setRedisBlocked(false);
         redisLockCircuitBreaker.reset();
         statsHolder.reset();
 
@@ -65,7 +65,7 @@ class CircuitBreakerV5CBTest {
 
     @AfterEach
     void tearDown() {
-        chaosState.setRedisMode(ChaosState.RedisMode.NONE);
+        chaosState.setRedisBlocked(false);
         RLock lock = redissonClient.getLock(LOCK_KEY_PREFIX + concertId);
         if (lock.isHeldByCurrentThread()) {
             lock.unlock();
@@ -91,7 +91,7 @@ class CircuitBreakerV5CBTest {
     @DisplayName("Redis 장애 10회 반복(minimumNumberOfCalls=10, threshold=50%) → CB OPEN, V2 폴백 DB 저장 확인")
     void redis_장애_10회_cb_open_v2_폴백() {
         // ChaosAspect가 V5.reserve() 진입 시 RedisCommandTimeoutException을 즉시 던진다
-        chaosState.setRedisMode(ChaosState.RedisMode.BLOCK);
+        chaosState.setRedisBlocked(true);
 
         int requestCount = 10;
         for (int i = 1; i <= requestCount; i++) {
@@ -172,7 +172,7 @@ class CircuitBreakerV5CBTest {
     @DisplayName("CLOSED → OPEN(Redis 장애) → HALF_OPEN(수동 전환) → CLOSED(성공 3회) 전체 상태 전환 검증")
     void cb_open_halfopen_closed_복구_흐름() {
         // Phase 1: Redis 장애로 CLOSED → OPEN
-        chaosState.setRedisMode(ChaosState.RedisMode.BLOCK);
+        chaosState.setRedisBlocked(true);
         for (int i = 1; i <= 10; i++) {
             service.reserve(concertId, (long) i);
         }
@@ -180,7 +180,7 @@ class CircuitBreakerV5CBTest {
 
         // Phase 2: Redis 복구 시뮬레이션 → 수동으로 HALF_OPEN 전환
         // (실제는 waitDurationInOpenState=10s 후 자동 전환 — 테스트에서는 강제 전환)
-        chaosState.setRedisMode(ChaosState.RedisMode.NONE);
+        chaosState.setRedisBlocked(false);
         redisLockCircuitBreaker.transitionToHalfOpenState();
         assertThat(redisLockCircuitBreaker.getState()).isEqualTo(CircuitBreaker.State.HALF_OPEN);
 
