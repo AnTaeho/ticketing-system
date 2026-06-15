@@ -25,10 +25,9 @@
 | V4 | Redis 스핀 락 | Lettuce `SETNX` + Spin Wait |
 | V5 | Redis Pub-Sub 락 | Redisson `RLock` |
 | V6 | Redis 선점 + Outbox + Kafka | DECR 선점 → Outbox 발행 → 멱등 Consumer(+DLT) |
-| V5CB | Circuit Breaker | Resilience4j — Redis 장애 시 V2 자동 폴백 |
 | **WaitingRoom** | Redis 선점 + 대기열 *(별도 모듈)* | Sorted Set 대기열(정원 200) + DECR 선점 + 비동기 DB |
 
-> V1~V6·V5CB는 "단건 예약을 안전하게 직렬화"하는 같은 문제의 변주다. **WaitingRoom**(구 V7)은 "유입 트래픽 자체를 통제"하는 다른 층위의 문제라, 버전 라인에서 분리해 독립 패키지 `com.example.ticketing.waitingroom`로 두었다.
+> V1~V6은 "단건 예약을 안전하게 직렬화"하는 같은 문제의 변주다. **WaitingRoom**(구 V7)은 "유입 트래픽 자체를 통제"하는 다른 층위의 문제라, 버전 라인에서 분리해 독립 패키지 `com.example.ticketing.waitingroom`로 두었다.
 
 **기술 스택**: Java 17 · Spring Boot 4.0.6 · JPA/Hibernate 7.x · MySQL 8.x · Redis 7.x(Lettuce, Redisson 3.50) · Kafka 3.x · Gatling 3.9 · Thymeleaf + Chart.js · Gradle
 
@@ -40,7 +39,6 @@
 클라이언트 → Spring Boot Controller
     ├── V1~V3: JPA → MySQL (DB 레벨 락)
     ├── V4~V5: Redis 분산 락 → MySQL (V4 Lettuce 스핀 / V5 Redisson Pub-Sub)
-    ├── V5CB:  V5 → [Circuit Breaker] → MySQL / Redis 장애 시 V2 자동 폴백
     └── V6:    Redis DECR 선점 → 즉시 PENDING+토큰 → Kafka → 멱등 Consumer → MySQL
 
 WaitingRoom (별도 모듈): Sorted Set 대기열 → DECR 선점 → 즉시 SUCCESS/FAIL → 비동기 DB
@@ -97,15 +95,6 @@ public ReserveResponse reserve(Long concertId, Long userId) {
 
 > **V6 vs WaitingRoom**: V6은 처리량 최적화, WaitingRoom은 "제어 가능한 처리량 + FIFO 공정성". 운영자가 트래픽 규모로 선택.
 
-### V5CB — Circuit Breaker + Graceful Degradation
-```
-[Circuit Breaker]
- ├── CLOSED (정상):  V5 Redisson → MySQL
- ├── OPEN   (장애):  즉시 폴백 → V2 Pessimistic Lock → MySQL
- └── HALF_OPEN:      소수 요청 통과 → 성공 시 CLOSED 복귀
-```
-인프라 예외(Redis 계열)만 폴백, 그 외 예외는 재던짐. `ChaosAspect`로 Redis 차단 장애 주입 테스트.
-
 ---
 
 ## 부하 테스트 결과
@@ -134,15 +123,6 @@ public ReserveResponse reserve(Long concertId, Long userId) {
 | V5 | Redisson | 8,538ms | 241 | 0% |
 | V6 | Kafka | **2ms** | 400 | 0% |
 
-### V5CB — Circuit Breaker (CHAOS=redis_block, 500명)
-
-| 시나리오 | P99 | Mean | TPS | 에러율 | fallbackRatio |
-|---------|-----|------|-----|--------|---------------|
-| CLOSED (정상) | 1,150ms | 755ms | 661 | 0% | 0% |
-| OPEN → V2 폴백 | 411ms | 257ms | 1,946 | 0% | 100% |
-
-> 장애 상황에서도 에러율 0% — CB가 V2로 자동 폴백하여 서비스 중단 없음
-
 ---
 
 ## 대시보드
@@ -153,7 +133,6 @@ public ReserveResponse reserve(Long concertId, Long userId) {
 
 - 시나리오(A/B) · 버전 · 동시 사용자 수 필터
 - TPS / P99 / 오버부킹 / 에러율 차트 + 결과 테이블
-- **Circuit Breaker 탭**: Redis 경로 vs V2 폴백 분포 + TPS/에러율 비교
 
 ---
 
@@ -176,14 +155,13 @@ mvn gatling:test -Dgatling.simulationClass=ScenarioASimulation -DVERSION=v5 -DUS
 ## 핵심 트레이드오프
 
 ```
-정합성:    V2 = V3 = V4 = V5 = V5CB = V6 = WaitingRoom >> V1
-TPS:       WaitingRoom > V6 > V5CB ≈ V5 ≈ V2 ≈ V3 > V4 > V1
-P99:       V6 << V5CB ≈ V5 < V2 ≈ V3 << V4
-장애내성:  V5CB (자동 폴백) > V5 > V4 > V2 = V3 > V1
-운영복잡:  V1 < V2 < V3 < V4 < V5 < V5CB < V6 < WaitingRoom
+정합성:    V2 = V3 = V4 = V5 = V6 = WaitingRoom >> V1
+TPS:       WaitingRoom > V6 > V5 ≈ V2 ≈ V3 > V4 > V1
+P99:       V6 << V5 < V2 ≈ V3 << V4
+운영복잡:  V1 < V2 < V3 < V4 < V5 < V6 < WaitingRoom
 ```
 
-**결론**: 일반 티켓팅 → **V5**(즉시 응답+균형) · 폭발 트래픽 → **WaitingRoom**(대기열, 별도 모듈) · 장애 대응 → **V5CB**(자동 폴백)
+**결론**: 일반 티켓팅 → **V5**(즉시 응답+균형) · 폭발 트래픽 → **WaitingRoom**(대기열, 별도 모듈)
 
 ---
 
@@ -193,8 +171,8 @@ P99:       V6 << V5CB ≈ V5 < V2 ≈ V3 << V4
 src/main/java/com/example/ticketing/
 ├── concert/                # 공연 엔티티, 재고 관리
 ├── reservation/
-│   ├── controller/         # ReserveControllerV1~V6, V5CB
-│   ├── service/            # v1~v6 (TicketServiceVn + TicketTransactionVn), v5cb
+│   ├── controller/         # ReserveControllerV1~V6
+│   ├── service/            # v1~v6 (TicketServiceVn + TicketTransactionVn)
 │   ├── kafka/              # TicketConsumer, ReservationMessage (V6)
 │   └── outbox/             # OutboxEvent, OutboxRelay (V6 발행)
 ├── waitingroom/            # 대기열 예매 (구 V7, 별도 모듈)
@@ -207,13 +185,11 @@ src/main/java/com/example/ticketing/
 ├── payment/                # 결제 Mock (100~200ms 지연)
 ├── dashboard/              # TestResult + Chart.js 대시보드
 └── global/
-    ├── config/             # RedissonConfig, KafkaConfig, ResilienceConfig
+    ├── config/             # RedissonConfig, KafkaConfig
     ├── lock/               # LettuceLockRepository (V4)
     ├── stock/              # RedisStockRepository (V6/WaitingRoom 재고 SSOT)
-    ├── resilience/         # CircuitBreakerStatsHolder, RedisInfraFailures
-    ├── chaos/              # ChaosAspect (V5CB Redis 장애 주입)
     └── exception/          # GlobalExceptionHandler
 
-load-test/gatling/          # ScenarioA/B, CBSimulation
+load-test/gatling/          # ScenarioA/B
 docs/images/                # 대시보드 스크린샷
 ```

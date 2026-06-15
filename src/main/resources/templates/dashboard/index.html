@@ -69,8 +69,6 @@
         .tab-btn { padding: 10px 24px; border-radius: 8px; border: 1px solid #334155; background: #1e293b; color: #94a3b8; cursor: pointer; font-size: 0.875rem; font-weight: 500; transition: all 0.15s; }
         .tab-btn.active { background: #3b82f6; border-color: #3b82f6; color: #fff; }
         .tab-btn:hover:not(.active) { border-color: #475569; color: #e2e8f0; }
-        .badge-chaos { background: #1a2040; color: #f87171; }
-        .badge-cb { background: #1a3040; color: #60a5fa; }
     </style>
 </head>
 <body>
@@ -83,8 +81,6 @@
     <!-- 탭 네비게이션 -->
     <div class="tab-nav">
         <button class="tab-btn active" onclick="switchTab('normal', this)">정상 측정</button>
-        <button class="tab-btn" onclick="switchTab('chaos', this)">장애 시나리오</button>
-        <button class="tab-btn" onclick="switchTab('cb', this)">Circuit Breaker</button>
     </div>
 
     <!-- 정상 측정 탭 -->
@@ -229,212 +225,18 @@
 
     </div><!-- /normal-tab -->
 
-    <!-- 장애 시나리오 탭 -->
-    <div id="chaos-tab" class="tab-content" style="display:none;">
-
-        <div class="filter-section" style="margin-bottom:24px;">
-            <h2>장애 시나리오 분석</h2>
-            <p style="color:#94a3b8; font-size:0.875rem; margin-top:8px;">
-                각 락 전략에 인프라 장애를 주입하여 어디서 어떻게 깨지는지 측정한 결과입니다.<br>
-                HikariCP 풀 제한 → V2/V3, Redis 지연/차단 → V4/V5, Kafka 중지 → V6
-            </p>
-        </div>
-
-        <div class="charts-grid" style="margin-bottom:24px;">
-            <div class="chart-card">
-                <h3>TPS (장애 주입 상태)</h3>
-                <div class="chart-wrapper"><canvas id="chaosTpsChart"></canvas></div>
-            </div>
-            <div class="chart-card">
-                <h3>P99 응답시간 ms (장애 주입 상태)</h3>
-                <div class="chart-wrapper"><canvas id="chaosP99Chart"></canvas></div>
-            </div>
-            <div class="chart-card full-width">
-                <h3>에러율 % (장애 주입 상태)</h3>
-                <div class="chart-wrapper"><canvas id="chaosErrorChart"></canvas></div>
-            </div>
-        </div>
-
-        <div class="table-section">
-            <h2>장애 시나리오 측정 결과</h2>
-            <div class="table-wrapper">
-                <table>
-                    <thead>
-                    <tr>
-                        <th>버전</th>
-                        <th>장애 유형</th>
-                        <th>파라미터</th>
-                        <th>동시 사용자</th>
-                        <th>TPS</th>
-                        <th>P99 (ms)</th>
-                        <th>에러율 %</th>
-                        <th>오버부킹</th>
-                        <th>테스트 시각</th>
-                        <th>메모</th>
-                        <th></th>
-                    </tr>
-                    </thead>
-                    <tbody>
-                    <tr th:if="${chaosResults.empty}">
-                        <td colspan="11" style="text-align:center; color:#64748b; padding:32px;">
-                            아직 장애 시나리오 결과가 없습니다. ChaosSimulation 실행 후 /api/test-results 로 저장하세요.
-                        </td>
-                    </tr>
-                    <tr th:each="r : ${chaosResults}">
-                        <td>
-                            <span class="badge"
-                                  th:classappend="'badge-' + ${r.version.name().toLowerCase()}"
-                                  th:text="${r.version}"></span>
-                        </td>
-                        <td>
-                            <span class="badge badge-chaos" th:text="${r.chaosType}"></span>
-                        </td>
-                        <td th:text="${r.chaosParameter != null ? r.chaosParameter : '-'}"></td>
-                        <td th:text="${r.concurrentUsers}"></td>
-                        <td th:text="${#numbers.formatDecimal(r.tps, 1, 1)}"></td>
-                        <td th:text="${r.p99ResponseMs}"></td>
-                        <td th:classappend="${r.errorRate > 50 ? 'text-danger' : ''}"
-                            th:text="${#numbers.formatDecimal(r.errorRate, 1, 1) + '%'}"></td>
-                        <td th:classappend="${r.overBookingCount > 0 ? 'text-danger' : 'text-success'}"
-                            th:text="${r.overBookingCount}"></td>
-                        <td class="text-muted"
-                            th:text="${#temporals.format(r.testedAt, 'MM-dd HH:mm')}"></td>
-                        <td class="text-muted" th:text="${r.memo}"></td>
-                        <td>
-                            <form th:action="@{/api/test-results/{id}(id=${r.id})}"
-                                  method="post" style="display:inline;">
-                                <input type="hidden" name="_method" value="DELETE"/>
-                                <button type="submit" class="btn-danger">삭제</button>
-                            </form>
-                        </td>
-                    </tr>
-                    </tbody>
-                </table>
-            </div>
-        </div>
-    </div><!-- /chaos-tab -->
-
-    <!-- Circuit Breaker 탭 -->
-    <div id="cb-tab" class="tab-content" style="display:none;">
-
-        <div class="filter-section" style="margin-bottom:24px;">
-            <h2>Circuit Breaker — Graceful Degradation</h2>
-            <p style="color:#94a3b8; font-size:0.875rem; margin-top:8px;">
-                V5(Redisson) Redis 장애 시 V2(DB 비관적 락)으로 자동 폴백하는 Circuit Breaker 측정 결과입니다.<br>
-                CLOSED(Redis 정상) → OPEN(Redis 장애, V2 폴백) → HALF_OPEN(복구 테스트) 상태 전환 확인.
-            </p>
-        </div>
-
-        <div class="charts-grid" style="margin-bottom:24px;">
-            <div class="chart-card">
-                <h3>Redis 경로 vs V2 폴백 분포</h3>
-                <div class="chart-wrapper"><canvas id="cbDistributionChart"></canvas></div>
-            </div>
-            <div class="chart-card">
-                <h3>TPS 비교 (정상 vs Redis 장애)</h3>
-                <div class="chart-wrapper"><canvas id="cbTpsChart"></canvas></div>
-            </div>
-            <div class="chart-card full-width">
-                <h3>에러율 % (정상 vs Redis 장애)</h3>
-                <div class="chart-wrapper"><canvas id="cbErrorChart"></canvas></div>
-            </div>
-        </div>
-
-        <div class="table-section">
-            <h2>Circuit Breaker 측정 결과</h2>
-            <div class="table-wrapper">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>버전</th>
-                            <th>락 방식</th>
-                            <th>동시 사용자</th>
-                            <th>TPS</th>
-                            <th>P99 (ms)</th>
-                            <th>에러율</th>
-                            <th>Redis 경로</th>
-                            <th>V2 폴백</th>
-                            <th>CB Trip 횟수</th>
-                            <th>Chaos</th>
-                            <th>테스트 시각</th>
-                            <th>메모</th>
-                            <th>삭제</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr th:each="r : ${cbResults}">
-                            <td><span class="badge badge-v5" th:text="${r.version}"></span></td>
-                            <td class="text-muted" th:text="${r.lockType}"></td>
-                            <td th:text="${r.concurrentUsers + '명'}"></td>
-                            <td th:text="${#numbers.formatDecimal(r.tps, 1, 1)}"></td>
-                            <td th:text="${r.p99ResponseMs}"></td>
-                            <td th:class="${r.errorRate > 0 ? 'text-danger' : 'text-success'}"
-                                th:text="${#numbers.formatDecimal(r.errorRate, 1, 1) + '%'}"></td>
-                            <td class="text-success"
-                                th:text="${r.fallbackCount != null ? (r.successCount - r.fallbackCount) : r.successCount}"></td>
-                            <td th:class="${(r.fallbackCount != null and r.fallbackCount > 0) ? 'text-danger' : 'text-muted'}"
-                                th:text="${r.fallbackCount != null ? r.fallbackCount : 0}"></td>
-                            <td class="text-muted" th:text="${r.cbTripCount != null ? r.cbTripCount : 0}"></td>
-                            <td>
-                                <span class="badge"
-                                      th:classappend="${r.chaosType != null and r.chaosType.name() != 'NONE' ? ' badge-chaos' : ' badge-cb'}"
-                                      th:text="${r.chaosType != null ? r.chaosType : 'NONE'}"></span>
-                            </td>
-                            <td class="text-muted" th:text="${#temporals.format(r.testedAt, 'MM-dd HH:mm')}"></td>
-                            <td class="text-muted" th:text="${r.memo}" style="font-size:0.78rem;max-width:180px;"></td>
-                            <td>
-                                <button type="button" class="btn-danger" th:onclick="|deleteResult(${r.id})|">삭제</button>
-                            </td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-        </div>
-
-    </div><!-- /cb-tab -->
-
 </div>
 
 <script th:inline="javascript">
     const chartData = /*[[${chartData}]]*/ {};
 </script>
 <script src="/js/dashboard.js"></script>
-<script th:inline="javascript">
-    const chaosResults = /*[[${chaosResults}]]*/ [];
-</script>
-<script th:inline="javascript">
-    const cbResults = /*[[${cbResults}]]*/ [];
-</script>
 <script>
     function switchTab(tabName, btn) {
         document.querySelectorAll('.tab-content').forEach(t => t.style.display = 'none');
         document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
         document.getElementById(tabName + '-tab').style.display = 'block';
         btn.classList.add('active');
-        if (tabName === 'cb') initCbCharts();
-    }
-
-    if (chaosResults && chaosResults.length > 0) {
-        const chaosLabels = chaosResults.map(r => r.version + ' (' + r.chaosType + (r.chaosParameter ? '=' + r.chaosParameter : '') + ')');
-        const colors = chaosResults.map((_, i) => `hsl(${i * 47 % 360}, 70%, 55%)`);
-
-        new Chart(document.getElementById('chaosTpsChart'), {
-            type: 'bar',
-            data: { labels: chaosLabels, datasets: [{ label: 'TPS', data: chaosResults.map(r => r.tps), backgroundColor: colors }] },
-            options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
-        });
-
-        new Chart(document.getElementById('chaosP99Chart'), {
-            type: 'bar',
-            data: { labels: chaosLabels, datasets: [{ label: 'P99 (ms)', data: chaosResults.map(r => r.p99ResponseMs), backgroundColor: colors }] },
-            options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
-        });
-
-        new Chart(document.getElementById('chaosErrorChart'), {
-            type: 'bar',
-            data: { labels: chaosLabels, datasets: [{ label: '에러율 %', data: chaosResults.map(r => r.errorRate), backgroundColor: colors }] },
-            options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { max: 100 } } }
-        });
     }
 </script>
 </body>

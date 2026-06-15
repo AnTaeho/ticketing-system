@@ -31,12 +31,4 @@ public interface TestResultRepository extends JpaRepository<TestResult, Long> {
     List<TestResult> findByFilters(@Param("scenario") ScenarioType scenario,
                                    @Param("version") LockVersion version,
                                    @Param("users") Integer users);
-
-    @Query(value = "SELECT * FROM test_result WHERE chaos_type IS NOT NULL AND chaos_type != 'NONE' ORDER BY tested_at DESC",
-           nativeQuery = true)
-    List<TestResult> findChaosResults();
-
-    @Query(value = "SELECT * FROM test_result WHERE lock_type = 'REDISSON_CB' ORDER BY tested_at DESC",
-           nativeQuery = true)
-    List<TestResult> findCbResults();
 }

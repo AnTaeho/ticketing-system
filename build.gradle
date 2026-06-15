@@ -37,9 +37,6 @@ dependencies {
 	// Kafka
 	implementation 'org.springframework.kafka:spring-kafka'
 
-	// Resilience4j
-	implementation 'io.github.resilience4j:resilience4j-circuitbreaker:2.3.0'
-
 	// Util
 	compileOnly 'org.projectlombok:lombok'
 	annotationProcessor 'org.projectlombok:lombok'

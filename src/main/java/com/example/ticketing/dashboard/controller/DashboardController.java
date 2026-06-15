@@ -41,8 +41,6 @@ public class DashboardController {
         model.addAttribute("scenarioTypes", ScenarioType.values());
         model.addAttribute("lockVersions", LockVersion.values());
         model.addAttribute("userOptions", List.of(500, 1000, 2000));
-        model.addAttribute("chaosResults", dashboardService.findChaosResults());
-        model.addAttribute("cbResults", dashboardService.findCbResults());
 
         return "dashboard/index";
     }

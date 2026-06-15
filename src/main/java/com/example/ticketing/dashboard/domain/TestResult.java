@@ -1,6 +1,5 @@
 package com.example.ticketing.dashboard.domain;
 
-import com.example.ticketing.global.chaos.ChaosType;
 import jakarta.persistence.*;
 import lombok.AccessLevel;
 import lombok.Getter;
@@ -39,22 +38,13 @@ public class TestResult {
     private double errorRate;
     private String memo;
 
-    @Enumerated(EnumType.STRING)
-    private ChaosType chaosType;
-
-    private Integer chaosParameter;
-    private Integer fallbackCount;
-    private Integer cbTripCount;
-
     @CreatedDate
     private LocalDateTime testedAt;
 
     public static TestResult of(LockVersion version, LockType lockType, ScenarioType scenarioType,
                                 int concurrentUsers, int initialStock, int totalRequests,
                                 int successCount, int overBookingCount, double tps,
-                                long p99ResponseMs, double errorRate, String memo,
-                                ChaosType chaosType, Integer chaosParameter,
-                                Integer fallbackCount, Integer cbTripCount) {
+                                long p99ResponseMs, double errorRate, String memo) {
         TestResult r = new TestResult();
         r.version = version;
         r.lockType = lockType;
@@ -68,10 +58,6 @@ public class TestResult {
         r.p99ResponseMs = p99ResponseMs;
         r.errorRate = errorRate;
         r.memo = memo;
-        r.chaosType = chaosType != null ? chaosType : ChaosType.NONE;
-        r.chaosParameter = chaosParameter;
-        r.fallbackCount = fallbackCount;
-        r.cbTripCount = cbTripCount;
         return r;
     }
 }

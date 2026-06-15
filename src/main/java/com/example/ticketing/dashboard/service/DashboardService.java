@@ -5,7 +5,6 @@ import com.example.ticketing.dashboard.domain.ScenarioType;
 import com.example.ticketing.dashboard.domain.TestResult;
 import com.example.ticketing.dashboard.dto.TestResultRequest;
 import com.example.ticketing.dashboard.repository.TestResultRepository;
-import com.example.ticketing.global.chaos.ChaosType;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -20,14 +19,11 @@ public class DashboardService {
 
     @Transactional
     public TestResult save(TestResultRequest request) {
-        ChaosType chaosType = request.chaosType() != null ? request.chaosType() : ChaosType.NONE;
         TestResult result = TestResult.of(
                 request.version(), request.lockType(), request.scenarioType(),
                 request.concurrentUsers(), request.initialStock(), request.totalRequests(),
                 request.successCount(), request.overBookingCount(), request.tps(),
-                request.p99ResponseMs(), request.errorRate(), request.memo(),
-                chaosType, request.chaosParameter(),
-                request.fallbackCount(), request.cbTripCount()
+                request.p99ResponseMs(), request.errorRate(), request.memo()
         );
         return testResultRepository.save(result);
     }
@@ -55,13 +51,5 @@ public class DashboardService {
     @Transactional
     public void delete(Long id) {
         testResultRepository.deleteById(id);
-    }
-
-    public List<TestResult> findChaosResults() {
-        return testResultRepository.findChaosResults();
-    }
-
-    public List<TestResult> findCbResults() {
-        return testResultRepository.findCbResults();
     }
 }
