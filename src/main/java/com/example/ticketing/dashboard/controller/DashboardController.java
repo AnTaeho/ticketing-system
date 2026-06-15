@@ -40,14 +40,14 @@ public class DashboardController {
         model.addAttribute("selectedUsers", users);
         model.addAttribute("scenarioTypes", ScenarioType.values());
         model.addAttribute("lockVersions", LockVersion.values());
-        model.addAttribute("userOptions", List.of(500, 1000, 2000));
+        model.addAttribute("userOptions", List.of(500, 2000));
 
         return "dashboard/index";
     }
 
     private ChartData buildChartData(ScenarioType scenario, Integer users) {
         ScenarioType targetScenario = scenario != null ? scenario : ScenarioType.SCENARIO_A;
-        int targetUsers = users != null ? users : 1000;
+        int targetUsers = users != null ? users : 500;
 
         List<TestResult> relevant = dashboardService.findByScenarioTypeAndUsers(targetScenario, targetUsers);
 

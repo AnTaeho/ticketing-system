@@ -127,19 +127,19 @@
     <!-- 요약 카드 -->
     <div class="summary-grid">
         <div class="summary-card">
-            <div class="label">최고 TPS (시나리오 A, 1000명)</div>
-            <div class="value highlight-blue">V6 1,000</div>
+            <div class="label">최고 TPS (시나리오 B, 2000명)</div>
+            <div class="value highlight-blue">V6 400 req/s</div>
             <div class="sub">Kafka 비동기 → 즉시 PENDING 응답</div>
         </div>
         <div class="summary-card">
-            <div class="label">V4 vs V5 P99 레이턴시 (A, 1000명)</div>
-            <div class="value highlight-green">2,966ms vs 731ms</div>
-            <div class="sub">Redisson이 Lettuce 대비 P99 75% 감소</div>
+            <div class="label">V4 vs V6 P99 레이턴시 (B, 2000명)</div>
+            <div class="value highlight-green">13,731ms vs 125ms</div>
+            <div class="sub">Kafka 큐가 스핀락 대비 P99 99% 감소</div>
         </div>
         <div class="summary-card">
-            <div class="label">V4 최대 P99 (시나리오 B, 2000명)</div>
-            <div class="value highlight-purple" style="color:#f87171">13,731ms</div>
-            <div class="sub">스핀락 꼬리 레이턴시 폭발</div>
+            <div class="label">V4 P99 (시나리오 A, 500명)</div>
+            <div class="value highlight-purple" style="color:#f87171">3,587ms</div>
+            <div class="sub">스핀락 꼬리 레이턴시 폭발 (TPS 100으로 급감)</div>
         </div>
     </div>
 
