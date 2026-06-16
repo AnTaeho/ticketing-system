@@ -2,27 +2,13 @@ spring:
   application:
     name: ticketing-system
 
+  profiles:
+    default: local
+
   datasource:
-    url: jdbc:mysql://localhost:3306/ticketing?serverTimezone=Asia/Seoul&characterEncoding=UTF-8
-    username: root
-    password: an902318
     driver-class-name: com.mysql.cj.jdbc.Driver
 
-  jpa:
-    hibernate:
-      ddl-auto: update
-    show-sql: true
-    properties:
-      hibernate:
-        format_sql: true
-
-  data:
-    redis:
-      host: localhost
-      port: 6379
-
   kafka:
-    bootstrap-servers: localhost:9092
     consumer:
       group-id: ticketing-group
       auto-offset-reset: earliest
