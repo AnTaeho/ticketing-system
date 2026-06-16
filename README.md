@@ -85,6 +85,27 @@ public ReserveResponse reserve(Long concertId, Long userId) {
 - **단일 파티션 Consumer**: 멱등(`existsByTicketToken`) 예약 INSERT만 수행. **재고 SSOT = Redis**(재검증 X).
 - **DLT**: 처리 불가 메시지는 2회 재시도 후 `<topic>.DLT` 격리 → 컨슈머 정지(HoL) 방지. ack는 DB 커밋 후 등록.
 
+**예약 상태 폴링 API**
+
+비동기 처리 결과는 `ticketToken`으로 조회한다.
+
+```
+# 1. 예약 요청 → 즉시 PENDING + ticketToken 반환
+POST /api/v6/concerts/{concertId}/reserve
+{"userId": 1}
+
+→ {"reservationId": null, "status": "PENDING", "ticketToken": "550e8400-e29b-..."}
+
+# 2. 처리 완료 여부 폴링
+GET /api/v6/reservations/{ticketToken}/status
+
+→ {"reservationId": null, "status": "PENDING", "ticketToken": "..."}  # Kafka 처리 중
+→ {"reservationId": 42,   "status": "SUCCESS", "ticketToken": "..."}  # 처리 완료
+→ 404 Not Found                                                         # 유효하지 않은 토큰
+```
+
+> OutboxEvent 존재 여부(PENDING) → Reservation 저장 여부(SUCCESS) 순으로 판별. 토큰이 두 테이블 모두 없으면 404.
+
 ### WaitingRoom — Redis 선점 + 대기열 *(별도 모듈, 구 V7)*
 독립 패키지 `com.example.ticketing.waitingroom`. 동시 처리 인원을 `PROCESSING_QUEUE_SIZE=200`으로 묶어 부하를 통제하고 FIFO 공정성 확보.
 - **입장 판정/승격을 Lua로 원자화** → 정원 초과 입장(TOCTOU) 제거.
@@ -139,12 +160,22 @@ public ReserveResponse reserve(Long concertId, Long userId) {
 
 ```bash
 docker-compose -f kafka-docker-compose.yml up -d              # 1. Kafka 기동
-./gradlew bootRun                                             # 2. 앱 실행 (application.yml의 MySQL 비번 수정)
+cp src/main/resources/application-local.yml.example \
+   src/main/resources/application-local.yml               # 2. 로컬 설정 복사 후 DB 비밀번호 수정
+./gradlew bootRun                                             # 3. 앱 실행 (default profile: local)
 
-# 3. 부하 테스트 (재고 reset 후 실행)
+# 4. 부하 테스트 (재고 reset 후 실행)
 cd load-test/gatling
 curl -X POST "http://localhost:8080/api/concerts/1/reset?stock=100"
 mvn gatling:test -Dgatling.simulationClass=ScenarioASimulation -DVERSION=v5 -DUSERS=500
+
+# V6 비동기 예약 + 폴링 예시
+curl -X POST "http://localhost:8080/api/v6/concerts/1/reserve" \
+     -H "Content-Type: application/json" -d '{"userId": 1}'
+# → {"status":"PENDING","ticketToken":"550e8400-..."}
+
+curl "http://localhost:8080/api/v6/reservations/550e8400-.../status"
+# → {"reservationId":42,"status":"SUCCESS","ticketToken":"550e8400-..."}
 ```
 
 ---
