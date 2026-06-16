@@ -18,7 +18,7 @@ public class ReservationTransaction {
     private final ReservationRepository reservationRepository;
     private final RedisStockRepository redisStockRepository;
 
-    @Async
+    @Async("waitingRoomTaskExecutor")
     @Transactional
     public void saveReservationAsync(Long concertId, Long userId) {
         try {
