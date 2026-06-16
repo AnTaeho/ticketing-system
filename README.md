@@ -91,7 +91,6 @@ public ReserveResponse reserve(Long concertId, Long userId) {
 - Sorted Set `score = currentTimeMs + TTL` → FIFO + TTL 만료를 단일 자료구조로.
 - `QueueScheduler` 3초마다 만료 토큰 제거 + 대기→처리 승격.
 - 예약 `POST /api/waitingroom/concerts/{id}/reserve`, 토큰 `POST /api/waitingroom/concerts/{id}/queue/token`.
-- `/waitingroom/demo` SSE로 대기열/처리열/재고 실시간 시각화(데모 전용).
 
 > **V6 vs WaitingRoom**: V6은 처리량 최적화, WaitingRoom은 "제어 가능한 처리량 + FIFO 공정성". 운영자가 트래픽 규모로 선택.
 
@@ -178,8 +177,7 @@ src/main/java/com/example/ticketing/
 │   ├── service/            # ReservationService, ReservationTransaction, QueueCommand/QueryService
 │   ├── repository/         # QueueRedisRepository
 │   ├── scheduler/          # QueueScheduler (만료 제거 + 승격)
-│   ├── dto/                # ReserveRequest, Queue*Response
-│   └── demo/               # 실시간 SSE 시각화 (데모 전용)
+│   └── dto/                # ReserveRequest, Queue*Response
 ├── payment/                # 결제 Mock (100~200ms 지연)
 ├── dashboard/              # TestResult + Chart.js 대시보드
 └── global/
