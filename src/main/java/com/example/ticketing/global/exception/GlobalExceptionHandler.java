@@ -17,6 +17,12 @@ public class GlobalExceptionHandler {
                 .body(Map.of("error", e.getMessage()));
     }
 
+    @ExceptionHandler(ReservationNotFoundException.class)
+    public ResponseEntity<Map<String, String>> handleReservationNotFound(ReservationNotFoundException e) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(Map.of("error", e.getMessage()));
+    }
+
     @ExceptionHandler(SoldOutException.class)
     public ResponseEntity<Map<String, String>> handleSoldOut(SoldOutException e) {
         return ResponseEntity.status(HttpStatus.CONFLICT)

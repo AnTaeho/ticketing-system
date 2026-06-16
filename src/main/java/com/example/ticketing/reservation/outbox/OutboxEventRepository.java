@@ -9,4 +9,6 @@ public interface OutboxEventRepository extends JpaRepository<OutboxEvent, Long> 
     List<OutboxEvent> findByStatusAndCreatedAtBefore(OutboxStatus status, LocalDateTime threshold);
 
     long countByStatus(OutboxStatus status);
+
+    boolean existsByTicketToken(String ticketToken);
 }

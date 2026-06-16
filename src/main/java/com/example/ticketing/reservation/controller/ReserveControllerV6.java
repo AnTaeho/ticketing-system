@@ -6,6 +6,7 @@ import com.example.ticketing.reservation.service.v6.TicketServiceV6;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -24,5 +25,10 @@ public class ReserveControllerV6 {
             @PathVariable Long concertId,
             @RequestBody @Valid ReserveRequest request) {
         return ResponseEntity.ok(ticketService.reserve(concertId, request.userId()));
+    }
+
+    @GetMapping("/reservations/{ticketToken}/status")
+    public ResponseEntity<ReserveResponse> getStatus(@PathVariable String ticketToken) {
+        return ResponseEntity.ok(ticketService.getReservationStatus(ticketToken));
     }
 }
