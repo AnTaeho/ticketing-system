@@ -6,5 +6,6 @@ public enum LockType {
     OPTIMISTIC,
     LETTUCE_SPIN,
     REDISSON_PUBSUB,
-    KAFKA_QUEUE
+    KAFKA_QUEUE,
+    WAITING_QUEUE
 }

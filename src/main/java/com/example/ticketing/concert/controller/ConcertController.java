@@ -4,13 +4,11 @@ import com.example.ticketing.concert.domain.Concert;
 import com.example.ticketing.concert.dto.ConcertCreateRequest;
 import com.example.ticketing.concert.service.ConcertService;
 import jakarta.validation.Valid;
-import jakarta.validation.constraints.Positive;
 import java.util.List;
 import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -19,7 +17,6 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-@Validated
 @RestController
 @RequestMapping("/api/concerts")
 @RequiredArgsConstructor
@@ -52,14 +49,5 @@ public class ConcertController {
     @GetMapping("/{concertId}/stock")
     public ResponseEntity<Map<String, Integer>> getStock(@PathVariable Long concertId) {
         return ResponseEntity.ok(Map.of("stock", concertService.getStock(concertId)));
-    }
-
-    // 공통 유틸 — 재고 초기화 (테스트용)
-    @PostMapping("/{concertId}/reset")
-    public ResponseEntity<Map<String, String>> resetStock(
-            @PathVariable Long concertId,
-            @Positive @RequestParam(defaultValue = "100") int stock) {
-        concertService.resetStock(concertId, stock);
-        return ResponseEntity.ok(Map.of("result", "재고가 " + stock + "으로 초기화되었습니다."));
     }
 }

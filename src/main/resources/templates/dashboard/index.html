@@ -48,6 +48,7 @@
         .badge-v4 { background: #14532d; color: #86efac; }
         .badge-v5 { background: #1e3a5f; color: #93c5fd; }
         .badge-v6 { background: #3b1160; color: #d8b4fe; }
+        .badge-waiting { background: #134e4a; color: #5eead4; }
         .badge-a { background: #450a0a; color: #fca5a5; }
         .badge-b { background: #0c1a3a; color: #93c5fd; }
         .text-danger { color: #f87171; }
@@ -192,7 +193,8 @@
                                                (r.version.name() == 'V2' ? 'badge-v2' :
                                                (r.version.name() == 'V3' ? 'badge-v3' :
                                                (r.version.name() == 'V4' ? 'badge-v4' :
-                                               (r.version.name() == 'V5' ? 'badge-v5' : 'badge-v6'))))}"
+                                               (r.version.name() == 'V5' ? 'badge-v5' :
+                                               (r.version.name() == 'V6' ? 'badge-v6' : 'badge-waiting')))))}"
                                 th:text="${r.version}"></span>
                         </td>
                         <td class="text-muted" th:text="${r.lockType}"></td>

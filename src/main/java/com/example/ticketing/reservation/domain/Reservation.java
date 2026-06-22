@@ -1,5 +1,6 @@
 package com.example.ticketing.reservation.domain;
 
+import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EntityListeners;
 import jakarta.persistence.EnumType;
@@ -26,6 +27,11 @@ public class Reservation {
 
     private Long concertId;
     private Long userId;
+
+    // V6 멱등성 DB 최후 방어선 — 컨슈머 existsByTicketToken 체크가 1차 방어이지만,
+    // 컨슈머 다중화/at-least-once 중복 전달 시 중복 INSERT를 DB가 차단한다.
+    // V1~V5·WaitingRoom 예약은 ticketToken=null (MySQL은 NULL을 중복으로 보지 않으므로 다중 NULL 허용).
+    @Column(unique = true)
     private String ticketToken;
 
     @Enumerated(EnumType.STRING)
