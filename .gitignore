@@ -1,6 +1,4 @@
-CLAUDE.md
-portfolio.md
-portfolio-deep-dive.md
+*.md
 
 ### Sensitive config (use application-local.yml.example as template) ###
 src/main/resources/application-local.yml
