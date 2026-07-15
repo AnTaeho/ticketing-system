@@ -26,7 +26,7 @@ public class ReservationService {
         preemptStock(concertId, queueToken);
         transaction.saveReservationAsync(concertId, userId);
         log.info("[WaitingRoom] 재고 선점 성공, 비동기 DB 처리 중 - concertId={}, userId={}", concertId, userId);
-        return new ReserveResponse(null, ReservationStatus.SUCCESS);
+        return new ReserveResponse(null, ReservationStatus.PENDING);
     }
 
     private void validateInProcessingQueue(Long concertId, String queueToken) {

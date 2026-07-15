@@ -51,8 +51,11 @@ dependencies {
 
 tasks.named('test') {
 	useJUnitPlatform()
+	systemProperty 'spring.jpa.show-sql', 'false'
+	systemProperty 'logging.level.org.apache.kafka', 'WARN'
+	systemProperty 'logging.level.org.hibernate.SQL', 'WARN'
 	testLogging {
 		events "passed", "failed", "skipped"
-		showStandardStreams = true
+		showStandardStreams = false
 	}
 }

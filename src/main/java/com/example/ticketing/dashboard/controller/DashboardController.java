@@ -13,7 +13,6 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
 
 @Controller
@@ -49,7 +48,7 @@ public class DashboardController {
         ScenarioType targetScenario = scenario != null ? scenario : ScenarioType.SCENARIO_A;
         int targetUsers = users != null ? users : 500;
 
-        List<TestResult> relevant = dashboardService.findByScenarioTypeAndUsers(targetScenario, targetUsers);
+        List<TestResult> relevant = dashboardService.findLatestByScenarioAndUsers(targetScenario, targetUsers);
 
         List<String> labels = new ArrayList<>();
         List<Double> tpsList = new ArrayList<>();

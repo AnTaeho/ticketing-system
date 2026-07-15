@@ -1,5 +1,6 @@
 package com.example.ticketing.reservation.outbox;
 
+import com.example.ticketing.global.stock.RedisStockRepository;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
@@ -24,12 +25,13 @@ public class OutboxRelay {
 
     private final OutboxEventRepository outboxEventRepository;
     private final KafkaTemplate<String, String> kafkaTemplate;
+    private final RedisStockRepository redisStockRepository;
 
     @Value("${ticketing.kafka.topic}")
     private String topic;
 
     // 정상 경로: 트랜잭션 커밋 직후 즉시 발행
-    @Async
+    @Async("outboxTaskExecutor")
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void onOutboxCreated(OutboxCreatedEvent event) {
         outboxEventRepository.findById(event.outboxEventId())
@@ -60,15 +62,20 @@ public class OutboxRelay {
     }
 
     private void publishAndSave(OutboxEvent event) {
+        boolean restoreStock = false;
         try {
             kafkaTemplate.send(topic, String.valueOf(event.getConcertId()), event.getPayload())
                     .get(KAFKA_SEND_TIMEOUT_SECONDS, TimeUnit.SECONDS);
             event.markPublished();
             log.info("[Outbox] 발행 성공 - outboxId={}, ticketToken={}", event.getId(), event.getTicketToken());
         } catch (Exception e) {
-            event.incrementRetry();
+            restoreStock = event.incrementRetry();
             log.error("[Outbox] 발행 실패 - outboxId={}, retryCount={}", event.getId(), event.getRetryCount(), e);
         }
-        outboxEventRepository.save(event);
+        outboxEventRepository.saveAndFlush(event);
+        if (restoreStock) {
+            redisStockRepository.increment(event.getConcertId());
+            log.warn("[Outbox] 최종 발행 실패, Redis 재고 복구 - concertId={}", event.getConcertId());
+        }
     }
 }

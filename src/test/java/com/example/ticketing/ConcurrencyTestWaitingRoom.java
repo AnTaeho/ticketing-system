@@ -70,14 +70,14 @@ class ConcurrencyTestWaitingRoom {
     // ── 1. 단건 정상 예약 ────────────────────────────────────────────────────────
 
     @Test
-    @DisplayName("처리열 토큰 발급 → reserve() 즉시 SUCCESS → 비동기 DB 저장 완료 확인")
+    @DisplayName("처리열 토큰 발급 → reserve() 즉시 PENDING → 비동기 DB 저장 완료 확인")
     void 단건_정상_예약_처리열_즉시_입장() throws InterruptedException {
         QueueTokenResponse tokenResp = queueCommandService.issueTokenAndEnqueue(1L, concertId);
         assertThat(tokenResp.status()).isEqualTo("PROCESSING");
 
         ReserveResponse response = reservationService.reserve(concertId, 1L, tokenResp.token());
 
-        assertThat(response.status()).isEqualTo(ReservationStatus.SUCCESS);
+        assertThat(response.status()).isEqualTo(ReservationStatus.PENDING);
         assertThat(redisStockRepository.getStock(concertId)).isEqualTo(INITIAL_STOCK - 1);
 
         // 처리열에서 제거 확인 (reserve 내부에서 removeFromProcessing 호출)
@@ -88,7 +88,7 @@ class ConcurrencyTestWaitingRoom {
         assertThat(reservationRepository.countByConcertId(concertId)).isEqualTo(1);
 
         System.out.println("\n=== WaitingRoom 단건 예약 ===");
-        System.out.println("처리열 즉시 입장 ✅  |  SUCCESS 즉시 응답 ✅  |  DB 저장 완료 ✅");
+        System.out.println("처리열 즉시 입장 ✅  |  PENDING 즉시 응답 ✅  |  DB 저장 완료 ✅");
     }
 
     // ── 2. 처리열 미등록 토큰 → 즉시 차단 ───────────────────────────────────────
@@ -233,7 +233,7 @@ class ConcurrencyTestWaitingRoom {
 
         // 승격된 토큰으로 예약 → 성공
         ReserveResponse response = reservationService.reserve(concertId, 201L, waitingToken);
-        assertThat(response.status()).isEqualTo(ReservationStatus.SUCCESS);
+        assertThat(response.status()).isEqualTo(ReservationStatus.PENDING);
 
         awaitReservationCount(1);
         assertThat(reservationRepository.countByConcertId(concertId)).isEqualTo(1);

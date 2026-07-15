@@ -15,13 +15,12 @@ public interface TestResultRepository extends JpaRepository<TestResult, Long> {
 
     List<TestResult> findByScenarioTypeOrderByTestedAtDesc(ScenarioType scenarioType);
 
-    List<TestResult> findByVersionOrderByTestedAtDesc(LockVersion version);
-
-    List<TestResult> findByScenarioTypeAndConcurrentUsersOrderByVersionAsc(ScenarioType scenarioType, int concurrentUsers);
-
     @Query("SELECT t FROM TestResult t WHERE t.id IN (" +
-           "SELECT MAX(t2.id) FROM TestResult t2 GROUP BY t2.version, t2.scenarioType, t2.concurrentUsers)")
-    List<TestResult> findLatestPerVersionAndScenario();
+           "SELECT MAX(t2.id) FROM TestResult t2 " +
+           "WHERE t2.scenarioType = :scenario AND t2.concurrentUsers = :users " +
+           "GROUP BY t2.version) ORDER BY t.version")
+    List<TestResult> findLatestByScenarioAndUsers(@Param("scenario") ScenarioType scenario,
+                                                  @Param("users") int users);
 
     @Query("SELECT t FROM TestResult t WHERE " +
            "(:scenario IS NULL OR t.scenarioType = :scenario) AND " +

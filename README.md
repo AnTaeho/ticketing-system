@@ -41,7 +41,7 @@
     ├── V4~V5: Redis 분산 락 → MySQL (V4 Lettuce 스핀 / V5 Redisson Pub-Sub)
     └── V6:    Redis DECR 선점 → 즉시 PENDING+토큰 → Kafka → 멱등 Consumer → MySQL
 
-WaitingRoom (별도 모듈): Sorted Set 대기열 → DECR 선점 → 즉시 SUCCESS/FAIL → 비동기 DB
+WaitingRoom (별도 모듈): Sorted Set 대기열 → DECR 선점 → 즉시 PENDING/FAIL → 비동기 DB
 ```
 
 ---
@@ -81,7 +81,7 @@ public ReserveResponse reserve(Long concertId, Long userId) {
     return new ReserveResponse(null, PENDING, ticketToken);       // 즉시 PENDING + 토큰
 }
 ```
-- **Outbox 패턴**: 커밋 직후(`@TransactionalEventListener AFTER_COMMIT`) Kafka 발행 + 5분 주기 미발행 복구 → at-least-once.
+- **Outbox 패턴**: 커밋 직후(`@TransactionalEventListener AFTER_COMMIT`) Kafka 발행 + 5분 주기 미발행 복구 → at-least-once. Outbox 트랜잭션 롤백이나 최종 발행 실패 시 Redis 재고를 보상한다.
 - **단일 파티션 Consumer**: 멱등(`existsByTicketToken`) 예약 INSERT만 수행. **재고 SSOT = Redis**(재검증 X).
 - **DLT**: 처리 불가 메시지는 2회 재시도 후 `<topic>.DLT` 격리 → 컨슈머 정지(HoL) 방지. ack는 DB 커밋 후 등록.
 
@@ -111,7 +111,7 @@ GET /api/v6/reservations/{ticketToken}/status
 - **입장 판정/승격을 Lua로 원자화** → 정원 초과 입장(TOCTOU) 제거.
 - Sorted Set `score = currentTimeMs + TTL` → FIFO + TTL 만료를 단일 자료구조로.
 - `QueueScheduler` 3초마다 만료 토큰 제거 + 대기→처리 승격.
-- 예약 `POST /api/waitingroom/concerts/{id}/reserve`, 토큰 `POST /api/waitingroom/concerts/{id}/queue/token`.
+- 예약 `POST /api/waitingroom/concerts/{id}/reserve`는 비동기 저장 전 `PENDING`을 반환하고, 토큰은 `POST /api/waitingroom/concerts/{id}/queue/token`으로 발급한다.
 
 > **V6 vs WaitingRoom**: V6은 처리량 최적화, WaitingRoom은 "제어 가능한 처리량 + FIFO 공정성". 운영자가 트래픽 규모로 선택.
 

@@ -23,6 +23,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -36,7 +37,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  *   3. 동시 500명 요청에서 오버부킹이 0건임을 검증한다.
  *   4. OutboxEvent가 PENDING → PUBLISHED로 전환됨을 검증한다. (Outbox 정상 동작)
  *   5. Kafka Consumer가 성공 건에 한해 DB 예약 레코드를 저장함을 검증한다.
- *   6. 최종 Redis 재고와 DB 재고가 일치함을 검증한다.
+ *   6. Redis가 V6 재고의 SSOT이며 DB 재고는 변경되지 않음을 검증한다.
  *
  * 실행 환경: MySQL, Redis, Kafka 실행 필요
  *   Kafka 기동: docker-compose -f kafka-docker-compose.yml up -d
@@ -54,12 +55,14 @@ class ConcurrencyTestV6 {
     @Autowired private OutboxEventRepository  outboxEventRepository;
     @Autowired private RedisStockRepository   redisStockRepository;
     @Autowired private StringRedisTemplate    redisTemplate;
+    @Autowired private ThreadPoolTaskExecutor outboxTaskExecutor;
 
     private Long concertId;
 
     @BeforeEach
-    void setUp() {
-        outboxEventRepository.deleteAll();
+    void setUp() throws InterruptedException {
+        awaitOutboxExecutorIdle();
+        outboxEventRepository.deleteAllInBatch();
         reservationRepository.deleteAll();
         concertRepository.deleteAll();
         Concert concert = concertRepository.save(Concert.create("V6 테스트 공연", INITIAL_STOCK));
@@ -97,7 +100,9 @@ class ConcurrencyTestV6 {
         assertThat(reservationCount).isEqualTo(1);
 
         int dbStock = concertRepository.findById(concertId).orElseThrow().getStock();
-        assertThat(dbStock).isEqualTo(INITIAL_STOCK - 1);
+        assertThat(dbStock)
+                .as("V6 재고 SSOT는 Redis이므로 DB 재고는 변경하지 않는다")
+                .isEqualTo(INITIAL_STOCK);
 
         System.out.println("\n=== V6 단건 예약 ===");
         System.out.println("즉시 PENDING 응답 ✅");
@@ -195,9 +200,9 @@ class ConcurrencyTestV6 {
         assertThat(dbStock)
                 .as("DB 재고 음수 발생")
                 .isGreaterThanOrEqualTo(0);
-        assertThat((long) dbStock)
-                .as("Redis 재고와 DB 재고 불일치")
-                .isEqualTo(redisStock);
+        assertThat(dbStock)
+                .as("V6 재고 SSOT는 Redis이므로 DB 재고는 변경하지 않는다")
+                .isEqualTo(INITIAL_STOCK);
     }
 
     // ── 4. 재고 소진 후 추가 요청 — 즉시 실패, DB 추가 저장 없음 ─────────────────
@@ -229,6 +234,17 @@ class ConcurrencyTestV6 {
     private long getRedisStock(Long concertId) {
         String value = redisTemplate.opsForValue().get(STOCK_KEY_PREFIX + concertId);
         return value == null ? 0L : Long.parseLong(value);
+    }
+
+    private void awaitOutboxExecutorIdle() throws InterruptedException {
+        for (int i = 0; i < 100; i++) {
+            if (outboxTaskExecutor.getActiveCount() == 0
+                    && outboxTaskExecutor.getThreadPoolExecutor().getQueue().isEmpty()) {
+                return;
+            }
+            Thread.sleep(50);
+        }
+        throw new IllegalStateException("이전 테스트의 Outbox 비동기 작업이 종료되지 않았습니다.");
     }
 
     // Kafka 비동기 처리 완료를 폴링으로 대기 (최대 30초)
@@ -264,6 +280,6 @@ class ConcurrencyTestV6 {
         System.out.println("오버부킹          : " + (reservationCount > INITIAL_STOCK
                 ? "발생 (" + (reservationCount - INITIAL_STOCK) + "건) ❌"
                 : "없음 ✅"));
-        System.out.println("Redis-DB 재고 일치: " + (redisStock == dbStock ? "✅" : "❌"));
+        System.out.println("재고 SSOT          : Redis");
     }
 }

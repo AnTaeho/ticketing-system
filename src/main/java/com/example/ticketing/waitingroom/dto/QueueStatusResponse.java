@@ -13,6 +13,6 @@ public record QueueStatusResponse(String status, Integer position, Integer estim
     }
 
     public static QueueStatusResponse notInQueue() {
-        return new QueueStatusResponse(STATUS_NOT_IN_QUEUE, 0, 0);
+        return new QueueStatusResponse(STATUS_NOT_IN_QUEUE, null, null);
     }
 }

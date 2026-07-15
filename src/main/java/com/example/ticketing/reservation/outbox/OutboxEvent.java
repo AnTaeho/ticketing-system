@@ -7,6 +7,7 @@ import jakarta.persistence.Enumerated;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.Version;
 import java.time.LocalDateTime;
 import lombok.AccessLevel;
 import lombok.Getter;
@@ -25,6 +26,9 @@ public class OutboxEvent {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
+
+    @Version
+    private Long version;
 
     private String ticketToken;
     private Long concertId;
@@ -55,10 +59,15 @@ public class OutboxEvent {
         this.publishedAt = LocalDateTime.now();
     }
 
-    public void incrementRetry() {
+    public boolean incrementRetry() {
+        if (this.status != OutboxStatus.PENDING) {
+            return false;
+        }
         this.retryCount++;
         if (this.retryCount >= MAX_RETRY) {
             this.status = OutboxStatus.FAILED;
+            return true;
         }
+        return false;
     }
 }

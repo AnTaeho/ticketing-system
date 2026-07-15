@@ -4,7 +4,7 @@ import com.example.ticketing.payment.domain.Payment;
 import com.example.ticketing.payment.domain.PaymentStatus;
 import com.example.ticketing.reservation.domain.Reservation;
 import com.example.ticketing.reservation.domain.ReservationStatus;
-import com.example.ticketing.global.exception.ConcertNotFoundException;
+import com.example.ticketing.global.exception.ReservationNotFoundException;
 import com.example.ticketing.payment.repository.PaymentRepository;
 import com.example.ticketing.reservation.repository.ReservationRepository;
 import java.util.concurrent.ThreadLocalRandom;
@@ -38,7 +38,7 @@ public class PaymentService {
 
     private Reservation findReservationById(Long reservationId) {
         return reservationRepository.findById(reservationId)
-                .orElseThrow(() -> new ConcertNotFoundException(reservationId));
+                .orElseThrow(() -> new ReservationNotFoundException(reservationId));
     }
 
     private void simulateExternalPgDelay() {

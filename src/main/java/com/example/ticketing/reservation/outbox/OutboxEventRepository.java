@@ -2,6 +2,7 @@ package com.example.ticketing.reservation.outbox;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface OutboxEventRepository extends JpaRepository<OutboxEvent, Long> {
@@ -10,5 +11,5 @@ public interface OutboxEventRepository extends JpaRepository<OutboxEvent, Long> 
 
     long countByStatus(OutboxStatus status);
 
-    boolean existsByTicketToken(String ticketToken);
+    Optional<OutboxEvent> findByTicketToken(String ticketToken);
 }

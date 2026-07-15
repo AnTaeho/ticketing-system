@@ -10,6 +10,7 @@ import com.example.ticketing.reservation.kafka.ReservationMessage;
 import com.example.ticketing.reservation.outbox.OutboxCreatedEvent;
 import com.example.ticketing.reservation.outbox.OutboxEvent;
 import com.example.ticketing.reservation.outbox.OutboxEventRepository;
+import com.example.ticketing.reservation.outbox.OutboxStatus;
 import com.example.ticketing.reservation.repository.ReservationRepository;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
@@ -17,6 +18,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
 
@@ -41,6 +44,8 @@ public class TicketServiceV6 {
             throw new SoldOutException(concertId);
         }
 
+        restoreStockWhenTransactionRollsBack(concertId);
+
         String ticketToken = UUID.randomUUID().toString();
         String payload = serializeMessage(concertId, userId, ticketToken);
 
@@ -62,13 +67,15 @@ public class TicketServiceV6 {
             return new ReserveResponse(reservation.getId(), ReservationStatus.SUCCESS, ticketToken);
         }
 
-        // OutboxEvent가 존재하면 아직 Kafka Consumer 처리 중 (PENDING)
-        if (outboxEventRepository.existsByTicketToken(ticketToken)) {
-            log.info("[V6] 예약 처리 중 - ticketToken={}", ticketToken);
-            return new ReserveResponse(null, ReservationStatus.PENDING, ticketToken);
+        OutboxEvent outboxEvent = outboxEventRepository.findByTicketToken(ticketToken)
+                .orElseThrow(() -> new ReservationNotFoundException(ticketToken));
+        if (outboxEvent.getStatus() == OutboxStatus.FAILED) {
+            log.info("[V6] 예약 처리 실패 - ticketToken={}", ticketToken);
+            return new ReserveResponse(null, ReservationStatus.FAIL, ticketToken);
         }
 
-        throw new ReservationNotFoundException(ticketToken);
+        log.info("[V6] 예약 처리 중 - ticketToken={}", ticketToken);
+        return new ReserveResponse(null, ReservationStatus.PENDING, ticketToken);
     }
 
     private String serializeMessage(Long concertId, Long userId, String ticketToken) {
@@ -77,5 +84,17 @@ public class TicketServiceV6 {
         } catch (JacksonException e) {
             throw new RuntimeException("Outbox 메시지 직렬화 실패", e);
         }
+    }
+
+    private void restoreStockWhenTransactionRollsBack(Long concertId) {
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCompletion(int status) {
+                if (status != STATUS_COMMITTED) {
+                    redisStockRepository.increment(concertId);
+                    log.warn("[V6] Outbox 트랜잭션 롤백, Redis 재고 복구 - concertId={}", concertId);
+                }
+            }
+        });
     }
 }

@@ -36,16 +36,12 @@ public class DashboardService {
         return testResultRepository.findByScenarioTypeOrderByTestedAtDesc(scenarioType);
     }
 
-    public List<TestResult> findLatestPerVersionAndScenario() {
-        return testResultRepository.findLatestPerVersionAndScenario();
-    }
-
     public List<TestResult> findByFilters(ScenarioType scenario, LockVersion version, Integer users) {
         return testResultRepository.findByFilters(scenario, version, users);
     }
 
-    public List<TestResult> findByScenarioTypeAndUsers(ScenarioType scenario, int users) {
-        return testResultRepository.findByScenarioTypeAndConcurrentUsersOrderByVersionAsc(scenario, users);
+    public List<TestResult> findLatestByScenarioAndUsers(ScenarioType scenario, int users) {
+        return testResultRepository.findLatestByScenarioAndUsers(scenario, users);
     }
 
     @Transactional
