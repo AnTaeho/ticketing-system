@@ -41,3 +41,6 @@ out/
 
 ### Gatling build output ###
 load-test/gatling/target/
+
+### macOS ###
+.DS_Store
