@@ -32,10 +32,6 @@ public class QueueCommandService {
         log.info("[WaitingRoom-Queue] 처리열 토큰 제거 - concertId={}", concertId);
     }
 
-    public void removeFromWaiting(Long concertId, String token) {
-        queueRepository.removeFromWaiting(concertId, token);
-    }
-
     public void purgeExpiredTokens() {
         queueRepository.purgeExpiredTokens();
     }

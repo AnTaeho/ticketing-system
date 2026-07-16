@@ -21,12 +21,6 @@ import org.springframework.boot.test.context.SpringBootTest;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/**
- * V2 — Pessimistic Lock 통합 테스트
- *
- * 목적: SELECT FOR UPDATE로 오버부킹이 원천 차단됨을 검증한다.
- * 추가 검증: 재고 정확 소진(경계값), 데드락 해소는 DeadlockTest.java 참조.
- */
 @SpringBootTest
 class ConcurrencyTestV2 {
 
@@ -47,8 +41,6 @@ class ConcurrencyTestV2 {
         concertId = concert.getId();
     }
 
-    // ── 1. 단건 정상 예약 ────────────────────────────────────────────────────────
-
     @Test
     @DisplayName("단건 예약 → SUCCESS 응답, 재고 정확히 1 감소")
     void 단건_예약_정상_동작() {
@@ -64,8 +56,6 @@ class ConcurrencyTestV2 {
         assertThat(reservationCount).isEqualTo(1);
     }
 
-    // ── 2. 재고 0 상태에서 예약 시도 ─────────────────────────────────────────────
-
     @Test
     @DisplayName("재고 0인 공연 예약 → SoldOutException 즉시 발생")
     void 재고_0에서_예약시_SoldOut_예외() {
@@ -74,8 +64,6 @@ class ConcurrencyTestV2 {
         assertThatThrownBy(() -> ticketServiceV2.reserve(soldOut.getId(), 1L))
                 .isInstanceOf(SoldOutException.class);
     }
-
-    // ── 3. 동시 500명 — 오버부킹 0건 검증 ────────────────────────────────────────
 
     @Test
     @DisplayName("동시 500명 / 재고 100개 → 오버부킹 0건, 재고 ≥ 0 보장")
@@ -108,28 +96,23 @@ class ConcurrencyTestV2 {
         printResult("V2 Pessimistic Lock", THREAD_COUNT, successCount.get(),
                 failCount.get(), finalStock, reservationCount);
 
-        // 핵심 검증: 오버부킹 0건
         assertThat(reservationCount)
                 .as("오버부킹 발생 — 예약 수가 초기 재고를 초과함")
                 .isLessThanOrEqualTo(INITIAL_STOCK);
 
-        // 재고는 음수가 될 수 없음
         assertThat(finalStock)
                 .as("재고가 음수가 됨 — 정합성 위반")
                 .isGreaterThanOrEqualTo(0);
 
-        // 성공 건수 + 남은 재고 = 초기 재고 (정확한 재고 차감)
         assertThat(successCount.get() + finalStock)
                 .as("성공 예약 수 + 남은 재고가 초기 재고와 일치하지 않음")
                 .isEqualTo(INITIAL_STOCK);
     }
 
-    // ── 4. 재고 정확히 소진 경계값 ───────────────────────────────────────────────
-
     @Test
     @DisplayName("동시 100명 / 재고 100개 → 정확히 100건 성공, 재고 0 소진")
     void 재고_정확히_소진_경계값_검증() throws InterruptedException {
-        int exactThreads = INITIAL_STOCK;  // 재고와 동일한 수의 요청
+        int exactThreads = INITIAL_STOCK;
         ExecutorService executor = Executors.newFixedThreadPool(exactThreads);
         CountDownLatch latch = new CountDownLatch(exactThreads);
         AtomicInteger successCount = new AtomicInteger(0);
@@ -159,14 +142,11 @@ class ConcurrencyTestV2 {
         System.out.println("성공: " + successCount.get() + " / 실패: " + failCount.get());
         System.out.println("최종 재고: " + finalStock + " / 예약 수: " + reservationCount);
 
-        // 재고와 정확히 같은 수의 요청 → 모두 성공해야 함
         assertThat(successCount.get()).isEqualTo(INITIAL_STOCK);
         assertThat(failCount.get()).isEqualTo(0);
         assertThat(finalStock).isEqualTo(0);
         assertThat(reservationCount).isEqualTo(INITIAL_STOCK);
     }
-
-    // ── 출력 헬퍼 ────────────────────────────────────────────────────────────────
 
     private void printResult(String label, int total, int success, int fail,
                              int finalStock, int reservationCount) {

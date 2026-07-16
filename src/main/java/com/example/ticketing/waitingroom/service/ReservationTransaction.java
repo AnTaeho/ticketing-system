@@ -23,7 +23,6 @@ public class ReservationTransaction {
     public void saveReservationAsync(Long concertId, Long userId) {
         try {
             Reservation reservation = Reservation.of(concertId, userId, ReservationStatus.SUCCESS);
-            // flush까지 이 메서드 안에서 수행해야 제약조건/SQL 오류를 잡아 Redis 재고를 보상할 수 있다.
             reservationRepository.saveAndFlush(reservation);
             log.info("[WaitingRoom] DB 저장 완료 - concertId={}, userId={}", concertId, userId);
         } catch (Exception e) {

@@ -73,10 +73,6 @@ public class KafkaConfig {
         return factory;
     }
 
-    /**
-     * 처리 불가 메시지(역직렬화 실패 등)가 단일 파티션 컨슈머를 영구 정지시키지 않도록,
-     * 2회 재시도 후 Dead Letter Topic(<topic>.DLT)으로 격리한다.
-     */
     private DefaultErrorHandler deadLetterErrorHandler() {
         DeadLetterPublishingRecoverer recoverer =
                 new DeadLetterPublishingRecoverer(kafkaTemplate());

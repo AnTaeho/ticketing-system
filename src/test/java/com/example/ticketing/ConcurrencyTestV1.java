@@ -21,12 +21,6 @@ import org.springframework.boot.test.context.SpringBootTest;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/**
- * V1 — No Lock 통합 테스트
- *
- * 목적: 락이 없을 때 Race Condition이 실제로 발생함을 증명한다.
- * 실행 환경: 로컬 MySQL, Redis 실행 필요 (Kafka 불필요)
- */
 @SpringBootTest
 class ConcurrencyTestV1 {
 
@@ -47,8 +41,6 @@ class ConcurrencyTestV1 {
         concertId = concert.getId();
     }
 
-    // ── 1. 단건 정상 예약 ────────────────────────────────────────────────────────
-
     @Test
     @DisplayName("단건 예약 → SUCCESS 응답, 재고 1 감소")
     void 단건_예약_정상_동작() {
@@ -64,8 +56,6 @@ class ConcurrencyTestV1 {
         assertThat(reservationCount).isEqualTo(1);
     }
 
-    // ── 2. 재고 0 상태에서 예약 시도 ─────────────────────────────────────────────
-
     @Test
     @DisplayName("재고 0인 공연 예약 → SoldOutException 즉시 발생")
     void 재고_0에서_예약시_SoldOut_예외() {
@@ -74,8 +64,6 @@ class ConcurrencyTestV1 {
         assertThatThrownBy(() -> ticketServiceV1.reserve(soldOut.getId(), 1L))
                 .isInstanceOf(SoldOutException.class);
     }
-
-    // ── 3. 동시 500명 요청 — 오버부킹 발생 확인 (V1의 의도된 동작) ──────────────
 
     @Test
     @DisplayName("동시 500명 / 재고 100개 → Lock 없으므로 오버부킹 발생 (Race Condition 증명)")
@@ -109,10 +97,8 @@ class ConcurrencyTestV1 {
         printResult("V1 No Lock", THREAD_COUNT, successCount.get(), failCount.get(),
                 finalStock, reservationCount);
 
-        // V1은 정합성을 보장하지 않는다. 모든 요청은 성공 또는 예외로 끝나야 한다.
         assertThat(successCount.get() + failCount.get()).isEqualTo(THREAD_COUNT);
 
-        // 오버부킹이 발생했는지 출력 (Race Condition 증명)
         if (isOverBooked) {
             System.out.println("✅ 오버부킹 발생 확인 — Race Condition 재현 성공: "
                     + (reservationCount - INITIAL_STOCK) + "건 초과");
@@ -121,8 +107,6 @@ class ConcurrencyTestV1 {
                     + "(스레드 실행 순서에 따라 달라질 수 있음)");
         }
     }
-
-    // ── 4. 재고와 동일한 수의 동시 요청 — 일부 오버부킹 가능성 ──────────────────
 
     @Test
     @DisplayName("동시 200명 / 재고 100개 → 오버부킹 가능성 (비결정적)")
@@ -156,15 +140,11 @@ class ConcurrencyTestV1 {
         printResult("V1 No Lock (200명/100재고)", threads, successCount.get(),
                 failCount.get(), finalStock, reservationCount);
 
-        // 성공 + 실패 = 전체 요청 수 (아무 요청도 유실되지 않아야 함)
         assertThat(successCount.get() + failCount.get()).isEqualTo(threads);
 
-        // V1은 정합성 보장 없음 — 재고가 음수가 될 수도 있음을 기록
         System.out.printf("재고 정합성: %s%n",
                 finalStock >= 0 ? "재고 ≥ 0 (이번은 정상)" : "재고 < 0 ⚠️ (정합성 위반)");
     }
-
-    // ── 출력 헬퍼 ────────────────────────────────────────────────────────────────
 
     private void printResult(String label, int total, int success, int fail,
                              int finalStock, int reservationCount) {

@@ -21,7 +21,6 @@ public class QueueController {
     private final QueueCommandService queueCommandService;
     private final QueueQueryService queueQueryService;
 
-    // 대기열 진입 + 토큰 발급
     @PostMapping("/token")
     public ResponseEntity<QueueTokenResponse> issueToken(
             @PathVariable Long concertId,
@@ -29,7 +28,6 @@ public class QueueController {
         return ResponseEntity.ok(queueCommandService.issueTokenAndEnqueue(userId, concertId));
     }
 
-    // 대기열 상태 조회 (폴링)
     @GetMapping("/status")
     public ResponseEntity<QueueStatusResponse> getStatus(
             @PathVariable Long concertId,

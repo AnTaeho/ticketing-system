@@ -28,20 +28,6 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/**
- * V6 — Redis 재고 선점 + Kafka 비동기 DB 처리 + Outbox Pattern 통합 테스트
- *
- * 목적:
- *   1. Redis DECR로 재고를 원자적으로 선점해 즉시 PENDING 응답을 반환하는지 검증한다.
- *   2. 재고 초과 시 INCR 복구로 Redis 재고가 음수가 되지 않음을 검증한다.
- *   3. 동시 500명 요청에서 오버부킹이 0건임을 검증한다.
- *   4. OutboxEvent가 PENDING → PUBLISHED로 전환됨을 검증한다. (Outbox 정상 동작)
- *   5. Kafka Consumer가 성공 건에 한해 DB 예약 레코드를 저장함을 검증한다.
- *   6. Redis가 V6 재고의 SSOT이며 DB 재고는 변경되지 않음을 검증한다.
- *
- * 실행 환경: MySQL, Redis, Kafka 실행 필요
- *   Kafka 기동: docker-compose -f kafka-docker-compose.yml up -d
- */
 @SpringBootTest
 class ConcurrencyTestV6 {
 
@@ -70,31 +56,24 @@ class ConcurrencyTestV6 {
         redisStockRepository.initStock(concertId, INITIAL_STOCK);
     }
 
-    // ── 1. 단건 정상 예약 ────────────────────────────────────────────────────────
-
     @Test
     @DisplayName("단건 예약 → 즉시 PENDING 응답, OutboxEvent PUBLISHED 전환, Kafka 처리 후 DB 저장 확인")
     void 단건_예약_정상_동작() throws InterruptedException {
         ReserveResponse response = ticketServiceV6.reserve(concertId, 1L);
 
-        // 즉시 PENDING 응답 (비동기 처리)
         assertThat(response.status()).isEqualTo(ReservationStatus.PENDING);
         assertThat(response.reservationId()).isNull();
 
-        // Redis 재고 즉시 감소 확인
         long redisStock = getRedisStock(concertId);
         assertThat(redisStock).isEqualTo(INITIAL_STOCK - 1);
 
-        // OutboxEvent 생성 확인 (DB 저장 즉시)
         List<OutboxEvent> outboxEvents = outboxEventRepository.findAll();
         assertThat(outboxEvents).hasSize(1);
 
-        // OutboxRelay 처리 완료 대기 → PUBLISHED 전환 확인
         awaitOutboxPublished(1);
         OutboxEvent outboxEvent = outboxEventRepository.findAll().get(0);
         assertThat(outboxEvent.getStatus()).isEqualTo(OutboxStatus.PUBLISHED);
 
-        // Kafka Consumer 처리 완료 대기 → DB 저장 확인
         awaitReservationCount(1);
         int reservationCount = reservationRepository.countByConcertId(concertId);
         assertThat(reservationCount).isEqualTo(1);
@@ -111,8 +90,6 @@ class ConcurrencyTestV6 {
         System.out.println("DB 예약 건수: " + reservationCount + " ✅");
     }
 
-    // ── 2. 재고 0 상태에서 예약 시도 ─────────────────────────────────────────────
-
     @Test
     @DisplayName("재고 0인 공연 예약 → 즉시 SoldOutException, Redis INCR 복구로 음수 미발생, OutboxEvent 미생성")
     void 재고_0에서_예약시_즉시_SoldOut_및_Redis_복구() {
@@ -123,13 +100,11 @@ class ConcurrencyTestV6 {
         assertThatThrownBy(() -> ticketServiceV6.reserve(soldOutId, 1L))
                 .isInstanceOf(SoldOutException.class);
 
-        // DECR로 -1이 됐다가 INCR로 복구 → 0 유지 확인
         long redisStock = getRedisStock(soldOutId);
         assertThat(redisStock)
                 .as("Redis 재고 음수 발생 — INCR 복구 실패")
                 .isGreaterThanOrEqualTo(0);
 
-        // SoldOut 예외 시 OutboxEvent가 생성되지 않아야 함 (트랜잭션 롤백)
         assertThat(outboxEventRepository.findAll()).isEmpty();
 
         System.out.println("\n=== V6 재고 0 예약 시도 ===");
@@ -137,8 +112,6 @@ class ConcurrencyTestV6 {
         System.out.println("Redis 재고 복구 후: " + redisStock + " ✅");
         System.out.println("OutboxEvent 미생성 ✅");
     }
-
-    // ── 3. 동시 500명 — Redis 선점으로 오버부킹 0건 검증 ─────────────────────────
 
     @Test
     @DisplayName("동시 500명 / 재고 100개 → Redis 선점으로 오버부킹 0건, Outbox 전량 PUBLISHED, DB 일치")
@@ -165,7 +138,6 @@ class ConcurrencyTestV6 {
         latch.await(30, TimeUnit.SECONDS);
         executor.shutdown();
 
-        // Redis 선점 결과 즉시 검증
         long redisStock = getRedisStock(concertId);
 
         assertThat(successCount.get())
@@ -178,7 +150,6 @@ class ConcurrencyTestV6 {
                 .as("성공 수 + Redis 재고 ≠ 초기 재고")
                 .isEqualTo(INITIAL_STOCK);
 
-        // OutboxEvent 전량 PUBLISHED 전환 확인
         awaitOutboxPublished(successCount.get());
         long pendingCount = outboxEventRepository.findAll().stream()
                 .filter(e -> e.getStatus() == OutboxStatus.PENDING)
@@ -187,7 +158,6 @@ class ConcurrencyTestV6 {
                 .as("PENDING 상태 OutboxEvent 잔존 — Outbox 릴레이 실패")
                 .isEqualTo(0);
 
-        // Kafka Consumer 처리 완료 대기 후 DB 검증
         awaitReservationCount(successCount.get());
         int reservationCount = reservationRepository.countByConcertId(concertId);
         int dbStock          = concertRepository.findById(concertId).orElseThrow().getStock();
@@ -204,8 +174,6 @@ class ConcurrencyTestV6 {
                 .as("V6 재고 SSOT는 Redis이므로 DB 재고는 변경하지 않는다")
                 .isEqualTo(INITIAL_STOCK);
     }
-
-    // ── 4. 재고 소진 후 추가 요청 — 즉시 실패, DB 추가 저장 없음 ─────────────────
 
     @Test
     @DisplayName("재고 소진 후 추가 요청 → 즉시 SoldOutException, DB 예약 건수 초과 없음")
@@ -229,8 +197,6 @@ class ConcurrencyTestV6 {
         System.out.println("DB 예약 건수: " + reservationCount + " (초과 없음) ✅");
     }
 
-    // ── 헬퍼 메서드 ──────────────────────────────────────────────────────────────
-
     private long getRedisStock(Long concertId) {
         String value = redisTemplate.opsForValue().get(STOCK_KEY_PREFIX + concertId);
         return value == null ? 0L : Long.parseLong(value);
@@ -247,7 +213,6 @@ class ConcurrencyTestV6 {
         throw new IllegalStateException("이전 테스트의 Outbox 비동기 작업이 종료되지 않았습니다.");
     }
 
-    // Kafka 비동기 처리 완료를 폴링으로 대기 (최대 30초)
     private void awaitReservationCount(int expectedCount) throws InterruptedException {
         for (int i = 0; i < 60; i++) {
             if (reservationRepository.countByConcertId(concertId) >= expectedCount) return;
@@ -256,7 +221,6 @@ class ConcurrencyTestV6 {
         System.out.println("⚠️ Kafka 처리 대기 타임아웃 (30초 초과)");
     }
 
-    // OutboxRelay PUBLISHED 전환 완료를 폴링으로 대기 (최대 15초)
     private void awaitOutboxPublished(int expectedCount) throws InterruptedException {
         for (int i = 0; i < 30; i++) {
             long publishedCount = outboxEventRepository.findAll().stream()

@@ -59,7 +59,6 @@ public class TicketServiceV6 {
     }
 
     public ReserveResponse getReservationStatus(String ticketToken) {
-        // Kafka Consumer가 이미 처리 완료한 경우
         Reservation reservation = reservationRepository.findByTicketToken(ticketToken)
                 .orElse(null);
         if (reservation != null) {

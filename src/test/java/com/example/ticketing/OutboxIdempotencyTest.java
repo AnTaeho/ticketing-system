@@ -16,16 +16,6 @@ import tools.jackson.databind.ObjectMapper;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/**
- * Outbox + Consumer 멱등성 테스트
- *
- * 목적:
- *   Outbox 릴레이가 같은 메시지를 두 번 발행하거나 (릴레이 크래시 후 복구 시 중복 발행 가능),
- *   Kafka at-least-once 정책으로 동일 메시지가 두 번 전달될 때
- *   예약 레코드가 정확히 1건만 생성됨을 검증한다.
- *
- * 실행 환경: MySQL, Redis 실행 필요 (Kafka 불필요 — Consumer를 직접 호출)
- */
 @SpringBootTest
 class OutboxIdempotencyTest {
 
@@ -34,7 +24,6 @@ class OutboxIdempotencyTest {
     @Autowired private ReservationRepository reservationRepository;
     @Autowired private ObjectMapper          objectMapper;
 
-    // 수동 커밋 호출을 무시하는 no-op Acknowledgment
     private static final Acknowledgment NO_OP_ACK = () -> {};
 
     private Long concertId;
@@ -55,7 +44,6 @@ class OutboxIdempotencyTest {
                 new ReservationMessage(concertId, 1L, ticketToken)
         );
 
-        // 동일 메시지 2회 처리 (크래시 복구 후 중복 발행 시나리오)
         ticketConsumer.consumeReservationRequest(payload, NO_OP_ACK);
         ticketConsumer.consumeReservationRequest(payload, NO_OP_ACK);
 

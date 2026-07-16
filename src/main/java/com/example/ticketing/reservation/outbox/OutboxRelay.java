@@ -30,7 +30,6 @@ public class OutboxRelay {
     @Value("${ticketing.kafka.topic}")
     private String topic;
 
-    // 정상 경로: 트랜잭션 커밋 직후 즉시 발행
     @Async("outboxTaskExecutor")
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void onOutboxCreated(OutboxCreatedEvent event) {
@@ -38,7 +37,6 @@ public class OutboxRelay {
                 .ifPresent(this::publishAndSave);
     }
 
-    // 복구 경로: 크래시/Kafka 장애로 발행 못 한 이벤트 재처리 (5분마다)
     @Scheduled(fixedDelay = RECOVERY_INTERVAL_MS)
     public void recoverStuckEvents() {
         LocalDateTime threshold = LocalDateTime.now().minusMinutes(STUCK_THRESHOLD_MINUTES);
@@ -53,7 +51,6 @@ public class OutboxRelay {
         alertDeadLetteredEvents();
     }
 
-    // MAX_RETRY 초과로 FAILED 격리된 이벤트는 복구 대상에서 제외되므로, 방치되지 않도록 노출한다.
     private void alertDeadLetteredEvents() {
         long failedCount = outboxEventRepository.countByStatus(OutboxStatus.FAILED);
         if (failedCount > 0) {

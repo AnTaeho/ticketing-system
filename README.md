@@ -84,6 +84,7 @@ public ReserveResponse reserve(Long concertId, Long userId) {
 - **Outbox 패턴**: 커밋 직후(`@TransactionalEventListener AFTER_COMMIT`) Kafka 발행 + 5분 주기 미발행 복구 → at-least-once. Outbox 트랜잭션 롤백이나 최종 발행 실패 시 Redis 재고를 보상한다.
 - **단일 파티션 Consumer**: 멱등(`existsByTicketToken`) 예약 INSERT만 수행. **재고 SSOT = Redis**(재검증 X).
 - **DLT**: 처리 불가 메시지는 2회 재시도 후 `<topic>.DLT` 격리 → 컨슈머 정지(HoL) 방지. ack는 DB 커밋 후 등록.
+- **실패 보상**: Outbox 트랜잭션이 롤백되거나 발행 재시도를 모두 소진하면 선점한 Redis 재고를 복구한다.
 
 **예약 상태 폴링 API**
 
@@ -101,17 +102,18 @@ GET /api/v6/reservations/{ticketToken}/status
 
 → {"reservationId": null, "status": "PENDING", "ticketToken": "..."}  # Kafka 처리 중
 → {"reservationId": 42,   "status": "SUCCESS", "ticketToken": "..."}  # 처리 완료
+→ {"reservationId": null, "status": "FAIL",    "ticketToken": "..."}  # 최종 발행 실패
 → 404 Not Found                                                         # 유효하지 않은 토큰
 ```
 
-> OutboxEvent 존재 여부(PENDING) → Reservation 저장 여부(SUCCESS) 순으로 판별. 토큰이 두 테이블 모두 없으면 404.
+> Reservation이 있으면 `SUCCESS`, Outbox가 `FAILED`이면 `FAIL`, 그 외 Outbox 상태는 `PENDING`이다. 토큰이 두 테이블 모두 없으면 404를 반환한다.
 
 ### WaitingRoom — Redis 선점 + 대기열 *(별도 모듈, 구 V7)*
 독립 패키지 `com.example.ticketing.waitingroom`. 동시 처리 인원을 `PROCESSING_QUEUE_SIZE=200`으로 묶어 부하를 통제하고 FIFO 공정성 확보.
 - **입장 판정/승격을 Lua로 원자화** → 정원 초과 입장(TOCTOU) 제거.
 - Sorted Set `score = currentTimeMs + TTL` → FIFO + TTL 만료를 단일 자료구조로.
 - `QueueScheduler` 3초마다 만료 토큰 제거 + 대기→처리 승격.
-- 예약 `POST /api/waitingroom/concerts/{id}/reserve`는 비동기 저장 전 `PENDING`을 반환하고, 토큰은 `POST /api/waitingroom/concerts/{id}/queue/token`으로 발급한다.
+- 예약 `POST /api/waitingroom/concerts/{id}/reserve`는 비동기 저장 전 `PENDING`을 반환하고, 토큰은 `POST /api/waitingroom/concerts/{id}/queue/token`으로 발급한다. 비동기 저장은 `saveAndFlush()`로 DB 오류를 감지하고 실패 시 Redis 재고를 복구한다.
 
 > **V6 vs WaitingRoom**: V6은 처리량 최적화, WaitingRoom은 "제어 가능한 처리량 + FIFO 공정성". 운영자가 트래픽 규모로 선택.
 
@@ -156,13 +158,16 @@ GET /api/v6/reservations/{ticketToken}/status
 
 ## 실행 방법
 
-**사전 요구사항**: Java 17+ · MySQL 8.x(`ticketing` DB) · Redis 7.x · Docker(Kafka)
+**사전 요구사항**: Java 17+ · MySQL 8.x(`ticketing` DB) · Redis 7.x · Docker(Kafka). 전체 통합 테스트도 세 인프라가 모두 실행 중이어야 한다.
 
 ```bash
-docker-compose -f kafka-docker-compose.yml up -d              # 1. Kafka 기동
+docker compose -f kafka-docker-compose.yml up -d              # 1. Kafka 기동
 cp src/main/resources/application-local.yml.example \
    src/main/resources/application-local.yml               # 2. 로컬 설정 복사 후 DB 비밀번호 수정
 ./gradlew bootRun                                             # 3. 앱 실행 (default profile: local)
+
+# 전체 통합 테스트
+./gradlew test
 
 # 4. 부하 테스트 (재고 reset 후 실행)
 cd load-test/gatling

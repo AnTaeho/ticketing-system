@@ -24,14 +24,12 @@ public class ConcertController {
 
     private final ConcertService concertService;
 
-    // 공통 유틸 — 콘서트 생성 (데모/테스트용)
     @PostMapping
     public ResponseEntity<Concert> createConcert(@Valid @RequestBody ConcertCreateRequest request) {
         Concert concert = concertService.createConcert(request.title(), request.stock());
         return ResponseEntity.status(HttpStatus.CREATED).body(concert);
     }
 
-    // 시나리오 B — 공연 목록 (페이징)
     @GetMapping
     public ResponseEntity<List<Concert>> getConcerts(
             @RequestParam(defaultValue = "0") int page,
@@ -39,13 +37,11 @@ public class ConcertController {
         return ResponseEntity.ok(concertService.getConcerts(page, size));
     }
 
-    // 시나리오 B — 공연 상세 + 잔여석 수
     @GetMapping("/{concertId}")
     public ResponseEntity<Concert> getConcert(@PathVariable Long concertId) {
         return ResponseEntity.ok(concertService.getConcert(concertId));
     }
 
-    // 공통 유틸 — 현재 재고 조회
     @GetMapping("/{concertId}/stock")
     public ResponseEntity<Map<String, Integer>> getStock(@PathVariable Long concertId) {
         return ResponseEntity.ok(Map.of("stock", concertService.getStock(concertId)));

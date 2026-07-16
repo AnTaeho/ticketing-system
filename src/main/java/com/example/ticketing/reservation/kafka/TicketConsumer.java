@@ -44,8 +44,6 @@ public class TicketConsumer {
     }
 
     private void saveReservation(Long concertId, Long userId, String ticketToken) {
-        // 재고 차감은 V6 진입 시 Redis DECR로 이미 원자적으로 선점됨(SSOT=Redis).
-        // 컨슈머는 재고를 재검증하지 않고 예약 기록만 영속화한다(대기열(waitingroom) 버전과 동일 모델).
         Reservation reservation = Reservation.ofV6(concertId, userId, ReservationStatus.SUCCESS, ticketToken);
         reservationRepository.save(reservation);
         log.info("[V6] DB 저장 완료 - reservationId={}, concertId={}, userId={}",

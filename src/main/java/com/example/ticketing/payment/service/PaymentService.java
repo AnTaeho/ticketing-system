@@ -3,7 +3,6 @@ package com.example.ticketing.payment.service;
 import com.example.ticketing.payment.domain.Payment;
 import com.example.ticketing.payment.domain.PaymentStatus;
 import com.example.ticketing.reservation.domain.Reservation;
-import com.example.ticketing.reservation.domain.ReservationStatus;
 import com.example.ticketing.global.exception.ReservationNotFoundException;
 import com.example.ticketing.payment.repository.PaymentRepository;
 import com.example.ticketing.reservation.repository.ReservationRepository;
@@ -29,7 +28,6 @@ public class PaymentService {
         Reservation reservation = findReservationById(reservationId);
         simulateExternalPgDelay();
 
-        reservation.updateStatus(ReservationStatus.SUCCESS);
         Payment payment = paymentRepository.save(Payment.of(reservationId, PaymentStatus.PAID));
 
         log.info("[결제] 결제 완료 - reservationId={}, paymentId={}", reservationId, payment.getId());

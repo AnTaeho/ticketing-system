@@ -19,11 +19,6 @@ public class QueueRedisRepository {
 
     private static final long SCAN_COUNT = 100;
 
-    /**
-     * 입장 판정과 등록을 한 번에 처리(TOCTOU 제거).
-     * 처리열에 빈자리가 있고 대기열이 비었으면 처리열에 등록(반환 1), 아니면 대기열에 등록(반환 0).
-     * KEYS[1]=처리열, KEYS[2]=대기열 / ARGV[1]=처리만료score, ARGV[2]=대기만료score, ARGV[3]=정원, ARGV[4]=토큰
-     */
     private static final DefaultRedisScript<Long> ADMIT_SCRIPT = new DefaultRedisScript<>(
             "if redis.call('ZCARD', KEYS[1]) < tonumber(ARGV[3]) and redis.call('ZCARD', KEYS[2]) == 0 then " +
             "  redis.call('ZADD', KEYS[1], ARGV[1], ARGV[4]); return 1 " +
@@ -33,10 +28,6 @@ public class QueueRedisRepository {
             Long.class
     );
 
-    /**
-     * 처리열 빈자리만큼 대기열 선두 토큰을 원자적으로 승격. 이동한 토큰 수 반환.
-     * KEYS[1]=처리열, KEYS[2]=대기열 / ARGV[1]=처리만료score, ARGV[2]=정원
-     */
     private static final DefaultRedisScript<Long> PROMOTE_SCRIPT = new DefaultRedisScript<>(
             "local slots = tonumber(ARGV[2]) - redis.call('ZCARD', KEYS[1]); " +
             "if slots <= 0 then return 0 end; " +
@@ -51,9 +42,6 @@ public class QueueRedisRepository {
 
     private final StringRedisTemplate redisTemplate;
 
-    /**
-     * @return true=처리열 즉시 입장, false=대기열 진입
-     */
     public boolean admitOrEnqueue(Long concertId, String token) {
         long now = System.currentTimeMillis();
         Long admitted = redisTemplate.execute(
@@ -67,9 +55,6 @@ public class QueueRedisRepository {
         return Long.valueOf(1).equals(admitted);
     }
 
-    /**
-     * @return 대기→처리로 승격된 토큰 수
-     */
     public int promoteWaiting(Long concertId) {
         long expiryScore = System.currentTimeMillis() + PROCESSING_TOKEN_TTL_MS;
         Long moved = redisTemplate.execute(
@@ -94,29 +79,10 @@ public class QueueRedisRepository {
         zSet().remove(processingKey(concertId), token);
     }
 
-    public void removeFromWaiting(Long concertId, String token) {
-        zSet().remove(waitingKey(concertId), token);
-    }
-
     public void purgeExpiredTokens() {
         long now = System.currentTimeMillis();
         purgeKeys(PROCESSING_KEY_PREFIX + "*", now);
         purgeKeys(WAITING_KEY_PREFIX + "*", now);
-    }
-
-    public int getProcessingCount(Long concertId) {
-        Long count = zSet().zCard(processingKey(concertId));
-        return count == null ? 0 : count.intValue();
-    }
-
-    public int getWaitingCount(Long concertId) {
-        Long count = zSet().zCard(waitingKey(concertId));
-        return count == null ? 0 : count.intValue();
-    }
-
-    public void clearQueues(Long concertId) {
-        redisTemplate.delete(processingKey(concertId));
-        redisTemplate.delete(waitingKey(concertId));
     }
 
     public Set<String> findAllWaitingKeys() {
@@ -128,9 +94,6 @@ public class QueueRedisRepository {
                 zSet().removeRangeByScore(key, Double.NEGATIVE_INFINITY, now));
     }
 
-    /**
-     * 프로덕션 Redis를 블로킹하는 {@code KEYS} 대신 커서 기반 {@code SCAN}으로 키를 순회한다.
-     */
     private Set<String> scanKeys(String pattern) {
         Set<String> keys = new HashSet<>();
         ScanOptions options = ScanOptions.scanOptions().match(pattern).count(SCAN_COUNT).build();
