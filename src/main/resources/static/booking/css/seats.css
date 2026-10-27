@@ -1,0 +1,79 @@
+/* 좌석 선택 화면. 공통 모양은 booking.css에 있다 */
+.seats-page{--col:752px;padding-bottom:calc(var(--bar-h,150px) + 16px)}
+.meta{padding:12px 14px;display:flex;flex-direction:column;gap:8px;margin-bottom:16px}
+.map{max-width:720px;margin:0 auto}
+.tabs{display:grid;grid-template-columns:repeat(4,1fr);margin:14px 0 14px;border-bottom:1px solid var(--line)}
+.tabs.many{overflow-x:auto;scrollbar-width:none}
+.tab{padding:8px 2px 9px;text-align:center;border-bottom:2px solid transparent;margin-bottom:-1px}
+.tab strong{display:block;font-size:15px;font-weight:600;color:var(--muted)}
+.tab span{display:block;font-size:12px;color:var(--faint)}
+.tab[aria-selected=true]{border-bottom-color:var(--text)}
+.tab[aria-selected=true] strong{color:var(--text);font-weight:700}
+.tab[aria-selected=true] span{color:var(--muted)}
+.where{font-size:13px;color:var(--muted);margin-bottom:8px;text-align:center}
+@media (min-width:760px){
+  .meta{flex-direction:row;justify-content:space-between;align-items:center}
+}
+
+/* 등급 범례 */
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:13px}
+.legend li{list-style:none;display:flex;align-items:center;gap:6px;white-space:nowrap}
+.legend b{font-weight:700}
+.legend .price{color:var(--muted)}
+.chip{width:14px;height:14px;border-radius:3px;border:2px solid var(--gc,var(--line-strong));background:#fff;flex:none}
+.chip.free{border-color:var(--faint)}
+.chip.off{background:var(--off);border-color:var(--off)}
+.chip.mine{background:var(--accent);border-color:var(--accent)}
+.states{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:13px;color:var(--muted)}
+.states li{list-style:none;display:flex;align-items:center;gap:6px}
+.g-VIP{--gc:var(--g-vip)} .g-R{--gc:var(--g-r)} .g-S{--gc:var(--g-s)} .g-A{--gc:var(--g-a)}
+
+/* 무대 */
+.stage{height:28px;display:grid;place-items:center;font-size:12px;font-weight:600;color:var(--muted);letter-spacing:.2em;background:#ebebe6;border-radius:4px 4px 40% 40%/4px 4px 14px 14px}
+
+/* 좌석 격자 */
+.sgrid{--seat-min:14px;display:grid;grid-template-columns:14px repeat(10,minmax(var(--seat-min),1fr)) 4px repeat(10,minmax(var(--seat-min),1fr)) 14px;gap:3px 2px;align-items:center;max-width:600px;margin:0 auto}
+/* 360폭에서도 20석이 한 줄에 들어가게 좌석 최소 폭을 줄인다 */
+@media (max-width:379px){.sgrid{--seat-min:12px}}
+.sgrid .cn{font-size:9px;color:var(--faint);text-align:center;line-height:1}
+.sgrid .rn{font-size:10px;color:var(--muted);text-align:center;font-weight:600}
+.seat{aspect-ratio:1;width:100%;border-radius:3px;border:2px solid var(--gc);background:#fff;padding:0;position:relative}
+.seat:hover{background:color-mix(in srgb,var(--gc) 14%,#fff)}
+.seat.off{background:var(--off);border-color:var(--off);cursor:default}
+.seat.mine{background:var(--accent);border-color:var(--accent)}
+.seat.mine::after{content:"";position:absolute;left:50%;top:45%;width:28%;height:48%;border:solid #fff;border-width:0 2px 2px 0;transform:translate(-50%,-50%) rotate(45deg)}
+.seat.lost{border-color:var(--warn);box-shadow:0 0 0 2px var(--warn);z-index:1}
+.band{grid-column:1/-1;height:0;border-top:1px dashed var(--line);margin:1px 0}
+.map-state{margin-top:8px}
+
+/* 도움말 다시 보기 */
+.help-again{margin-top:20px;text-align:center}
+.link{font-size:13px;color:var(--muted);text-decoration:underline;text-underline-offset:3px;padding:6px 8px}
+.link:hover{color:var(--text)}
+
+/* 고른 자리 요약 */
+.pick{display:flex;flex-direction:column;gap:10px}
+.pick-text{min-width:0}
+.pick-seats{font-size:15px;font-weight:700}
+.pick-sub{font-size:14px;color:var(--muted)}
+.pick-sub b{color:var(--text)}
+.pick .btn.is-empty{background:#ecece7;border:1px solid #ecece7;color:var(--muted);font-weight:600;opacity:1}
+
+/* 더 고를 수 없을 때 띠에 뜨는 상자 */
+.stop{display:flex;flex-direction:column;gap:10px}
+.stop-text{min-width:0}
+.stop-title{font-size:16px;font-weight:800}
+.stop-sub{font-size:14px;color:var(--muted)}
+
+/* 띠 위 알림 */
+.bar-note{max-width:var(--col);margin:0 auto;padding:0 16px}
+.seat-note{margin-top:10px}
+.seat-note:empty{margin:0;padding:0;background:none}
+
+@media (min-width:760px){
+  .pick,.stop{flex-direction:row;align-items:center;justify-content:space-between;gap:24px}
+  .pick .btn,.stop .btn{width:280px;flex:none}
+}
+
+/* 더 고를 수 없을 때 좌석은 흐리게 둔다 */
+.seats-page.is-stopped .sgrid{opacity:.45}

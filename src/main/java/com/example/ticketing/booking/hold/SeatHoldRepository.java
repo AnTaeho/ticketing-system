@@ -19,6 +19,13 @@ public interface SeatHoldRepository extends JpaRepository<SeatHold, Long> {
                AND status IN ('HELD', 'PAYING')""", nativeQuery = true)
     long countActive(@Param("userId") long userId, @Param("performanceId") long performanceId);
 
+    @Query(value = """
+            SELECT * FROM seat_hold
+             WHERE user_id = :userId AND performance_id = :performanceId
+               AND status IN ('HELD', 'PAYING')
+             ORDER BY id DESC LIMIT 1""", nativeQuery = true)
+    Optional<SeatHold> findActive(@Param("userId") long userId, @Param("performanceId") long performanceId);
+
     @Query(value = "SELECT * FROM seat_hold WHERE id = :id AND user_id = :userId FOR UPDATE", nativeQuery = true)
     Optional<SeatHold> lockByIdAndUserId(@Param("id") long id, @Param("userId") long userId);
 

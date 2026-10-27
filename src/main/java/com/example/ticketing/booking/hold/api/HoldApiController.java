@@ -2,6 +2,7 @@ package com.example.ticketing.booking.hold.api;
 
 import com.example.ticketing.booking.common.CurrentUser;
 import com.example.ticketing.booking.hold.SeatHoldService;
+import com.example.ticketing.booking.hold.dto.ActiveHold;
 import com.example.ticketing.booking.hold.dto.HoldCreated;
 import com.example.ticketing.booking.hold.dto.HoldDetail;
 import lombok.RequiredArgsConstructor;
@@ -25,6 +26,11 @@ public class HoldApiController {
     public HoldCreated hold(@CurrentUser Long userId, @PathVariable long performanceId,
                             @RequestBody CreateHoldRequest request) {
         return seatHoldService.hold(userId, performanceId, request.seatIds(), request.queueToken());
+    }
+
+    @GetMapping("/api/performances/{performanceId}/holds/mine")
+    public ActiveHold mine(@CurrentUser Long userId, @PathVariable long performanceId) {
+        return seatHoldService.getActiveHold(userId, performanceId);
     }
 
     @GetMapping("/api/holds/{holdId}")

@@ -7,6 +7,7 @@ import com.example.ticketing.booking.common.DbClock;
 import com.example.ticketing.booking.hold.SeatHoldTransaction.PersistedHold;
 import com.example.ticketing.booking.hold.SeatHoldTransaction.ReleasedHold;
 import com.example.ticketing.booking.hold.domain.SeatHold;
+import com.example.ticketing.booking.hold.dto.ActiveHold;
 import com.example.ticketing.booking.hold.dto.HoldCreated;
 import com.example.ticketing.booking.hold.dto.HoldDetail;
 import com.example.ticketing.booking.hold.dto.HoldSeatView;
@@ -118,6 +119,14 @@ public class SeatHoldService {
         Long paymentId = paymentRepository.findIdByHoldId(holdId).orElse(null);
         return new HoldDetail(hold.getId(), hold.getStatus(), hold.getExpiresAt(), hold.getPayDeadline(),
                 dbClock.now(), seats, hold.getTotalAmount(), paymentId);
+    }
+
+    // 이미 잡아 둔 자리가 있다는 응답을 받은 화면이 결제 화면으로 이어 가려고 쓴다
+    public ActiveHold getActiveHold(long userId, long performanceId) {
+        SeatHold hold = seatHoldRepository.findActive(userId, performanceId)
+                .orElseThrow(() -> new BookingException(BookingErrorCode.HOLD_NOT_FOUND,
+                        Map.of("performanceId", performanceId)));
+        return new ActiveHold(hold.getId(), hold.getStatus(), hold.getExpiresAt());
     }
 
     // 커밋이 끝난 뒤 게이트 키를 지운다
