@@ -5,7 +5,9 @@
   <script th:src="@{/booking/js/shows.js}" defer></script>
 </head>
 <body class="narrow">
+<th:block th:with="topLink=@{/booking/bookings}, topLinkText='내 예매'">
 <header th:replace="~{booking/layout :: top('공연 고르기', '보고 싶은 공연을 눌러 날짜를 골라 주세요', null)}"></header>
+</th:block>
 <main class="wrap">
   <p class="empty" id="shows-loading">공연을 불러오고 있어요</p>
   <p class="alert" id="shows-error" role="alert" hidden></p>

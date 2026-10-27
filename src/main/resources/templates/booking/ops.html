@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="ko" xmlns:th="http://www.thymeleaf.org">
+<head>
+  <th:block th:replace="~{booking/layout :: assets('운영 현황')}"></th:block>
+  <link rel="stylesheet" th:href="@{/booking/css/ops.css}">
+  <script th:src="@{/booking/js/ops.js}" defer></script>
+</head>
+<body class="ops-page" th:data-performance-id="${performanceId}">
+<header th:replace="~{booking/layout :: top('운영 현황', '회차 정보를 불러오고 있어요', null)}"></header>
+<main class="wrap">
+  <div class="ops-bar">
+    <span class="ops-live"><i aria-hidden="true"></i>2초마다 새로 읽어요</span>
+    <span class="num" id="ops-at"></span>
+  </div>
+  <p class="alert" id="ops-error" role="alert" hidden></p>
+  <p class="alert" id="ops-redis-down" role="status" hidden>Redis를 읽지 못했어요. 대기열과 게이트 키 칸은 비워 두고, 나머지는 DB에서 읽은 값으로 보여요.</p>
+  <section class="ops-attn" id="ops-attn" aria-live="polite" hidden></section>
+  <p class="empty" id="ops-loading" role="status">집계를 불러오고 있어요</p>
+  <div class="ops-grid" id="ops-grid"></div>
+</main>
+</body>
+</html>

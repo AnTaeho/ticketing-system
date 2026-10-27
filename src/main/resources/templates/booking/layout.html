@@ -19,6 +19,7 @@
       <h1 id="page-title" th:text="${title}">티켓 예매</h1>
       <p id="page-sub" th:text="${sub}" th:hidden="${sub == null or sub == ''}"></p>
     </div>
+    <a class="top-link" id="page-link" th:if="${topLink != null}" th:href="${topLink}" th:text="${topLinkText}"></a>
   </div>
 </header>
 </body>

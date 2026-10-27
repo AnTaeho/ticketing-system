@@ -61,4 +61,9 @@ public class BookingPageController {
         model.addAttribute("demoPg", demoPg);
         return "booking/checkout";
     }
+
+    @GetMapping("/booking/bookings")
+    public String bookings() {
+        return "booking/bookings";
+    }
 }

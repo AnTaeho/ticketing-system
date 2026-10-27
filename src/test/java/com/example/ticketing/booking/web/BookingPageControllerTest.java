@@ -45,7 +45,9 @@ class BookingPageControllerTest {
             "/booking/shows/7, booking/show, /booking/js/show.js",
             "/booking/performances/9/queue, booking/queue, /booking/js/queue.js",
             "/booking/performances/9/seats, booking/seats, /booking/js/seats.js",
-            "/booking/holds/5/checkout, booking/checkout, /booking/js/checkout.js"
+            "/booking/holds/5/checkout, booking/checkout, /booking/js/checkout.js",
+            "/booking/bookings, booking/bookings, /booking/js/bookings.js",
+            "/booking/ops/performances/9, booking/ops, /booking/js/ops.js"
     })
     @DisplayName("각 화면 경로는 200과 해당 뷰를 돌려주고, 레이아웃의 공통 머리·스타일·스크립트가 함께 렌더링된다")
     void rendersPage(String path, String viewName, String pageScript) throws Exception {
@@ -135,6 +137,42 @@ class BookingPageControllerTest {
     }
 
     @Test
+    @DisplayName("공연 목록 머리에 내 예매로 가는 링크를 두고, 다른 화면 머리에는 두지 않는다")
+    void showsLinksToBookings() throws Exception {
+        mockMvc.perform(get("/booking/shows"))
+                .andExpect(content().string(containsString("id=\"page-link\"")))
+                .andExpect(content().string(containsString("href=\"/booking/bookings\"")))
+                .andExpect(content().string(containsString(">내 예매</a>")));
+        mockMvc.perform(get("/booking/shows/7"))
+                .andExpect(content().string(not(containsString("id=\"page-link\""))));
+    }
+
+    @Test
+    @DisplayName("내 예매는 뒤로 가기를 공연 목록에 걸고, 예매가 없을 때 공연 보러 가기 단추를 둔다")
+    void bookingsPage() throws Exception {
+        String html = mockMvc.perform(get("/booking/bookings"))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString("id=\"bookings\"")))
+                .andExpect(content().string(containsString("아직 예매한 공연이 없어요")))
+                .andExpect(content().string(containsString("공연 보러 가기")))
+                .andReturn().getResponse().getContentAsString();
+        assertThat(html).contains("id=\"page-back\" href=\"/booking/shows\"");
+        assertThat(html.indexOf("href=\"/booking/css/bookings.css\""))
+                .isGreaterThan(html.indexOf("href=\"/booking/css/booking.css\""));
+    }
+
+    @Test
+    @DisplayName("운영 현황은 경로의 회차 번호를 화면에 넘기고 넓은 화면 스타일을 붙인다")
+    void opsPassesPerformanceId() throws Exception {
+        mockMvc.perform(get("/booking/ops/performances/9"))
+                .andExpect(model().attribute("performanceId", 9L))
+                .andExpect(content().string(containsString("data-performance-id=\"9\"")))
+                .andExpect(content().string(containsString("href=\"/booking/css/ops.css\"")))
+                .andExpect(content().string(containsString("id=\"ops-grid\"")))
+                .andExpect(content().string(containsString("Redis를 읽지 못했어요")));
+    }
+
+    @Test
     @DisplayName("/booking은 공연 목록으로 보낸다")
     void homeRedirectsToShows() throws Exception {
         mockMvc.perform(get("/booking"))
@@ -153,7 +191,11 @@ class BookingPageControllerTest {
             "/booking/js/seats.js",
             "/booking/css/seats.css",
             "/booking/js/checkout.js",
-            "/booking/css/checkout.css"
+            "/booking/css/checkout.css",
+            "/booking/js/bookings.js",
+            "/booking/css/bookings.css",
+            "/booking/js/ops.js",
+            "/booking/css/ops.css"
     })
     @DisplayName("화면이 쓰는 정적 파일이 제공된다")
     void servesStaticFiles(String path) throws Exception {

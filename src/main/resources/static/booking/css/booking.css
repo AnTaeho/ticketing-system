@@ -25,7 +25,9 @@ a{color:inherit}
 .back{width:32px;height:32px;margin-left:-6px;display:grid;place-items:center;border-radius:6px;flex:none}
 .back:hover{background:var(--bg)}
 .back svg{width:20px;height:20px}
-.show{min-width:0}
+.show{min-width:0;flex:1}
+.top-link{flex:none;display:flex;align-items:center;min-height:36px;padding:0 12px;border:1px solid var(--line-strong);border-radius:var(--radius);font-size:14px;font-weight:600;text-decoration:none;white-space:nowrap}
+.top-link:hover{background:var(--bg)}
 .show h1{font-size:16px;font-weight:700;line-height:1.35}
 .show p{font-size:13px;color:var(--muted)}
 
@@ -94,6 +96,7 @@ a{color:inherit}
 .card .next{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;margin-top:12px;padding-top:12px;border-top:1px solid var(--line);font-size:14px}
 .tag{display:inline-block;font-size:12px;font-weight:700;line-height:20px;padding:0 7px;border-radius:4px;background:#ecece7;color:var(--muted);white-space:nowrap}
 .tag.open{background:var(--accent-soft);color:var(--accent-ink)}
+.tag.warn{background:var(--warn-soft);color:var(--warn)}
 
 /* 공연 상세 */
 .about{padding:16px;margin-bottom:20px;color:var(--text)}
