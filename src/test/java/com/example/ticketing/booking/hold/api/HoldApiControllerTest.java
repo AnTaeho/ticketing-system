@@ -153,7 +153,7 @@ class HoldApiControllerTest {
     }
 
     @Test
-    @DisplayName("두 번째 선점은 409 USER_HAS_HOLD, 이미 잡힌 좌석은 409 SEAT_STATE_CHANGED")
+    @DisplayName("두 번째 선점은 409 USER_HAS_HOLD, 이미 잡힌 좌석은 게이트가 409 SEAT_TAKEN(detail.seatId)")
     void conflicts() throws Exception {
         long pid = fixtures.newPerformance(1, 1, 4);
         List<Long> ids = seatIds(pid);
@@ -166,7 +166,8 @@ class HoldApiControllerTest {
                 .andExpect(jsonPath("$.code").value("USER_HAS_HOLD"));
         hold(userB, pid, List.of(ids.get(0), ids.get(1)))
                 .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value("SEAT_STATE_CHANGED"));
+                .andExpect(jsonPath("$.code").value("SEAT_TAKEN"))
+                .andExpect(jsonPath("$.detail.seatId").value(ids.get(0)));
         assertThat(jdbcTemplate.queryForObject("SELECT status FROM seat WHERE id = ?", String.class, ids.get(1)))
                 .isEqualTo("AVAILABLE");
     }

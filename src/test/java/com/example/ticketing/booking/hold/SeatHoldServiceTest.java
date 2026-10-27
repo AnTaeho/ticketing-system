@@ -8,6 +8,7 @@ import com.example.ticketing.booking.common.BookingException;
 import com.example.ticketing.booking.hold.dto.HoldCreated;
 import com.example.ticketing.booking.support.BookingFixtures;
 import com.example.ticketing.booking.support.BookingIntegrationTest;
+import com.example.ticketing.booking.support.RedisKeyCleaner;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
@@ -25,6 +26,8 @@ class SeatHoldServiceTest {
     private BookingFixtures fixtures;
     @Autowired
     private JdbcTemplate jdbcTemplate;
+    @Autowired
+    private RedisKeyCleaner redisKeyCleaner;
 
     @Test
     @DisplayName("선점하면 hold는 HELD, 좌석은 HELD이고 held_until = expires_at = DB 시각 + 5분")
@@ -106,15 +109,18 @@ class SeatHoldServiceTest {
         long otherUser = fixtures.newUser();
 
         assertThatThrownBy(() -> seatHoldService.hold(otherUser, pid, target, null))
-                .extracting("code").isEqualTo(BookingErrorCode.SEAT_STATE_CHANGED);
+                .extracting("code").isEqualTo(BookingErrorCode.SEAT_TAKEN);
 
+        // 게이트 키는 선점과 같은 TTL이라 held_until이 지나면 함께 사라진다. DB 시각만 당겼으므로 키도 지운다
         jdbcTemplate.update("UPDATE seat SET held_until = NOW(6) - INTERVAL 1 SECOND "
                 + "WHERE performance_id = ? AND hold_id = ?", pid, holdA.holdId());
+        redisKeyCleaner.clean(pid);
         HoldCreated holdB = seatHoldService.hold(userB, pid, target, null);
 
         assertThat(heldSeats(pid, holdB.holdId())).containsExactlyElementsOf(target);
         assertThat(heldSeats(pid, holdA.holdId())).isEmpty();
         assertThat(holdStatus(holdA.holdId())).isEqualTo("HELD");
+        redisKeyCleaner.clean(pid);
     }
 
     @Test

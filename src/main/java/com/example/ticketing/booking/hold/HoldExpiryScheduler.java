@@ -2,8 +2,10 @@ package com.example.ticketing.booking.hold;
 
 import com.example.ticketing.booking.BookingProperties;
 import com.example.ticketing.booking.hold.HoldExpiryTransaction.ExpiredHold;
+import com.example.ticketing.booking.hold.gate.RedisSeatGate;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
+import java.time.Duration;
 import java.util.List;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -19,13 +21,19 @@ public class HoldExpiryScheduler {
     static final int MAX_ROUNDS = 10;
 
     private final HoldExpiryTransaction expiryTransaction;
+    private final RedisSeatGate gate;
+    private final boolean gateEnabled;
     private final int batchSize;
+    private final Duration reholdCooldown;
     private final Counter expiredCounter;
 
-    public HoldExpiryScheduler(HoldExpiryTransaction expiryTransaction, BookingProperties properties,
-                               MeterRegistry meterRegistry) {
+    public HoldExpiryScheduler(HoldExpiryTransaction expiryTransaction, RedisSeatGate gate,
+                               BookingProperties properties, MeterRegistry meterRegistry) {
         this.expiryTransaction = expiryTransaction;
+        this.gate = gate;
+        this.gateEnabled = properties.gate().enabled();
         this.batchSize = properties.hold().expiryBatchSize();
+        this.reholdCooldown = properties.hold().reholdCooldown();
         this.expiredCounter = meterRegistry.counter("booking.hold.expired");
     }
 
@@ -45,8 +53,18 @@ public class HoldExpiryScheduler {
         }
     }
 
-    // 커밋이 끝난 뒤라 Redis를 불러도 된다. 게이트 해제와 재선점 쿨다운(S3.2)이 여기에 붙는다
+    // 커밋이 끝난 뒤라 Redis를 불러도 된다. 남이 가져간 좌석은 seatIds에서 빠져 쿨다운도 걸지 않는다
     private void afterCommit(List<ExpiredHold> expired) {
         expiredCounter.increment(expired.size());
+        if (!gateEnabled) {
+            return;
+        }
+        // 쿨다운을 먼저 걸어 키가 풀린 틈에 같은 사용자가 다시 잡지 못하게 한다
+        for (ExpiredHold hold : expired) {
+            if (!hold.seatIds().isEmpty()) {
+                gate.setReholdCooldownQuietly(hold.performanceId(), hold.userId(), hold.seatIds(), reholdCooldown);
+            }
+            gate.releaseQuietly(hold.performanceId(), hold.userId(), hold.seatIds(), hold.holdToken());
+        }
     }
 }

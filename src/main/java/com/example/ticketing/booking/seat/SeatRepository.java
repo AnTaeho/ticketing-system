@@ -30,6 +30,9 @@ public interface SeatRepository extends JpaRepository<Seat, Long> {
                   @Param("holdId") long holdId,
                   @Param("heldUntil") LocalDateTime heldUntil);
 
+    @Query(value = "SELECT id FROM seat WHERE hold_id = :holdId AND status = 'HELD' ORDER BY id", nativeQuery = true)
+    List<Long> findHeldSeatIds(@Param("holdId") long holdId);
+
     // hold_id 조건 덕분에 남이 이미 가져간 좌석은 건드리지 않는다
     @Modifying
     @Query(value = """

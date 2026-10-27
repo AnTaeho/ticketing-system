@@ -1,13 +1,19 @@
 package com.example.ticketing.booking.hold;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.example.ticketing.booking.BookingProperties;
 import com.example.ticketing.booking.hold.HoldExpiryTransaction.ExpiredHold;
+import com.example.ticketing.booking.hold.gate.RedisSeatGate;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Duration;
 import java.util.List;
@@ -20,18 +26,46 @@ class HoldExpirySchedulerTest {
 
     private static final int BATCH = 3;
 
+    private static final Duration COOLDOWN = Duration.ofMinutes(10);
+
     private HoldExpiryTransaction expiryTransaction;
+    private RedisSeatGate gate;
     private SimpleMeterRegistry meterRegistry;
     private HoldExpiryScheduler scheduler;
 
     @BeforeEach
     void setUp() {
         expiryTransaction = mock(HoldExpiryTransaction.class);
+        gate = mock(RedisSeatGate.class);
         meterRegistry = new SimpleMeterRegistry();
-        BookingProperties properties = new BookingProperties(null, null,
-                new BookingProperties.Hold(Duration.ofMinutes(5), 4, 1000, BATCH, Duration.ofMinutes(10)),
-                null, null, null, null, null, null, null, null);
-        scheduler = new HoldExpiryScheduler(expiryTransaction, properties, meterRegistry);
+        scheduler = scheduler(true);
+    }
+
+    @Test
+    @DisplayName("게이트 ON: hold마다 게이트 키를 지우고, 좌석이 남아 있던 hold에만 재선점 쿨다운을 건다")
+    void releasesGateAndSetsCooldown() {
+        ExpiredHold withSeats = new ExpiredHold(1L, 7L, 11L, "token-1", List.of(101L, 102L));
+        ExpiredHold seatsTaken = new ExpiredHold(2L, 7L, 12L, "token-2", List.of());
+        when(expiryTransaction.claimAndExpire(BATCH)).thenReturn(List.of(withSeats, seatsTaken));
+
+        scheduler.scan();
+
+        verify(gate).releaseQuietly(7L, 11L, List.of(101L, 102L), "token-1");
+        verify(gate).setReholdCooldownQuietly(7L, 11L, List.of(101L, 102L), COOLDOWN);
+        verify(gate).releaseQuietly(7L, 12L, List.of(), "token-2");
+        verify(gate, never()).setReholdCooldownQuietly(anyLong(), eq(12L), any(), any());
+    }
+
+    @Test
+    @DisplayName("게이트 OFF: 만료 처리 뒤 Redis를 부르지 않는다")
+    void gateOffSkipsRedis() {
+        scheduler = scheduler(false);
+        when(expiryTransaction.claimAndExpire(BATCH)).thenReturn(holds(2));
+
+        scheduler.scan();
+
+        verifyNoInteractions(gate);
+        assertThat(expiredCount()).isEqualTo(2);
     }
 
     @Test
@@ -66,6 +100,13 @@ class HoldExpirySchedulerTest {
 
         verify(expiryTransaction, times(1)).claimAndExpire(BATCH);
         assertThat(expiredCount()).isZero();
+    }
+
+    private HoldExpiryScheduler scheduler(boolean gateEnabled) {
+        BookingProperties properties = new BookingProperties(null, null,
+                new BookingProperties.Hold(Duration.ofMinutes(5), 4, 1000, BATCH, COOLDOWN),
+                null, new BookingProperties.Gate(gateEnabled, 20), null, null, null, null, null, null);
+        return new HoldExpiryScheduler(expiryTransaction, gate, properties, meterRegistry);
     }
 
     private double expiredCount() {

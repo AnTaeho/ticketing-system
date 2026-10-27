@@ -6,6 +6,7 @@ import com.example.ticketing.booking.hold.HoldExpiryTransaction.ExpiredHold;
 import com.example.ticketing.booking.hold.dto.HoldCreated;
 import com.example.ticketing.booking.support.BookingFixtures;
 import com.example.ticketing.booking.support.BookingIntegrationTest;
+import com.example.ticketing.booking.support.RedisKeyCleaner;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -38,6 +39,8 @@ class HoldExpiryTransactionTest {
     private JdbcTemplate jdbcTemplate;
     @Autowired
     private ApplicationContext context;
+    @Autowired
+    private RedisKeyCleaner redisKeyCleaner;
 
     @Test
     @DisplayName("만료 hold 120개를 4스레드가 동시에 치우면 각 hold는 정확히 한 번 EXPIRED, 좌석은 모두 AVAILABLE")
@@ -128,6 +131,8 @@ class HoldExpiryTransactionTest {
         List<Long> target = seatIds(pid).subList(0, 2);
         HoldCreated holdA = seatHoldService.hold(fixtures.newUser(), pid, target, null);
         expireHold(holdA.holdId());
+        // 게이트 키는 선점과 같은 TTL이라 만료 시각이 지나면 함께 사라진다. DB 시각만 당겼으므로 키도 지운다
+        redisKeyCleaner.clean(pid);
         HoldCreated holdB = seatHoldService.hold(fixtures.newUser(), pid, target, null);
 
         List<ExpiredHold> returned = drain();
@@ -139,6 +144,7 @@ class HoldExpiryTransactionTest {
                 .singleElement()
                 .satisfies(h -> assertThat(h.seatIds()).isEmpty());
         assertThat(returned).extracting(ExpiredHold::holdId).doesNotContain(holdB.holdId());
+        redisKeyCleaner.clean(pid);
     }
 
     @Test

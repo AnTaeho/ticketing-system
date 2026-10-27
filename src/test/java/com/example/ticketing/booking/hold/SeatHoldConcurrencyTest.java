@@ -2,11 +2,13 @@ package com.example.ticketing.booking.hold;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.example.ticketing.booking.BookingProperties;
 import com.example.ticketing.booking.common.BookingErrorCode;
 import com.example.ticketing.booking.common.BookingException;
 import com.example.ticketing.booking.hold.dto.HoldCreated;
 import com.example.ticketing.booking.support.BookingFixtures;
 import com.example.ticketing.booking.support.BookingIntegrationTest;
+import com.example.ticketing.booking.support.RedisKeyCleaner;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.util.ArrayList;
 import java.util.List;
@@ -24,6 +26,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.jdbc.core.JdbcTemplate;
 
+// 게이트 ON에서 돈다. 같은 테스트를 게이트 OFF로 돌리는 것은 SeatHoldConcurrencyGateOffTest
 @BookingIntegrationTest
 class SeatHoldConcurrencyTest {
 
@@ -38,11 +41,23 @@ class SeatHoldConcurrencyTest {
     private JdbcTemplate jdbcTemplate;
     @Autowired
     private MeterRegistry meterRegistry;
+    @Autowired
+    private BookingProperties properties;
+    @Autowired
+    private RedisKeyCleaner redisKeyCleaner;
 
     @Test
-    @DisplayName("같은 2석에 500명이 동시에 선점하면 성공 1, 나머지는 409 SEAT_STATE_CHANGED")
+    @DisplayName("같은 2석에 500명이 동시에 선점하면 성공 1, 나머지는 409(게이트 ON: SEAT_TAKEN, OFF: SEAT_STATE_CHANGED)")
     void sameSeatsFiveHundredUsers() throws InterruptedException {
         long pid = fixtures.newPerformance(1, 1, 4);
+        try {
+            sameSeatsFiveHundredUsers(pid);
+        } finally {
+            redisKeyCleaner.clean(pid);
+        }
+    }
+
+    private void sameSeatsFiveHundredUsers(long pid) throws InterruptedException {
         List<Long> target = seatIds(pid).subList(0, 2);
         List<Long> users = new ArrayList<>(THREAD_COUNT);
         for (int i = 0; i < THREAD_COUNT; i++) {
@@ -50,6 +65,10 @@ class SeatHoldConcurrencyTest {
         }
         double okBefore = dbCounter("ok");
         double changedBefore = dbCounter("state_changed");
+        double dbBefore = dbTotal();
+        double gateOkBefore = gateCounter("ok");
+        double gateTakenBefore = gateCounter("seat_taken");
+        double gateSkippedBefore = gateCounter("skipped");
 
         ExecutorService executor = Executors.newFixedThreadPool(THREAD_COUNT);
         CountDownLatch ready = new CountDownLatch(THREAD_COUNT);
@@ -81,15 +100,18 @@ class SeatHoldConcurrencyTest {
         boolean finished = done.await(60, TimeUnit.SECONDS);
         long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt);
         executor.shutdownNow();
-        System.out.printf("[S2.1] 500명 동시 선점: %dms, 성공 %d, 거절 %s, 예기치 못한 예외 %d%n",
-                elapsedMs, success.get(), rejected, unexpected.size());
+        double dbDelta = dbTotal() - dbBefore;
+        System.out.printf("[S3.2] 500명 동시 선점(게이트 %s): %dms, 성공 %d, 거절 %s, booking.hold.db 증가 %.0f, "
+                        + "예기치 못한 예외 %d%n",
+                gateLabel(), elapsedMs, success.get(), rejected, dbDelta, unexpected.size());
 
         assertThat(finished).isTrue();
         unexpected.forEach(Throwable::printStackTrace);
         assertThat(unexpected).isEmpty();
         assertThat(success.get()).isEqualTo(1);
-        assertThat(rejected).containsOnlyKeys(BookingErrorCode.SEAT_STATE_CHANGED);
-        assertThat(rejected.get(BookingErrorCode.SEAT_STATE_CHANGED).get()).isEqualTo(THREAD_COUNT - 1);
+        BookingErrorCode expected = seatConflictCode();
+        assertThat(rejected).containsOnlyKeys(expected);
+        assertThat(rejected.get(expected).get()).isEqualTo(THREAD_COUNT - 1);
 
         List<Long> holdIds = jdbcTemplate.queryForList(
                 "SELECT id FROM seat_hold WHERE performance_id = ?", Long.class, pid);
@@ -101,13 +123,33 @@ class SeatHoldConcurrencyTest {
                 "SELECT COUNT(*) FROM seat WHERE performance_id = ? AND status = 'HELD'",
                 Long.class, pid)).isEqualTo(2);
         assertThat(dbCounter("ok") - okBefore).isEqualTo(1);
-        assertThat(dbCounter("state_changed") - changedBefore).isEqualTo(THREAD_COUNT - 1);
+        if (gateEnabled()) {
+            // 게이트가 Redis에서 거절하므로 DB에 닿는 선점은 이긴 1건뿐이다
+            assertThat(dbDelta).isEqualTo(1);
+            assertThat(dbCounter("state_changed") - changedBefore).isZero();
+            assertThat(gateCounter("ok") - gateOkBefore).isEqualTo(1);
+            assertThat(gateCounter("seat_taken") - gateTakenBefore).isEqualTo(THREAD_COUNT - 1);
+        } else {
+            assertThat(dbDelta).isEqualTo(THREAD_COUNT);
+            assertThat(dbCounter("state_changed") - changedBefore).isEqualTo(THREAD_COUNT - 1);
+            assertThat(gateCounter("skipped") - gateSkippedBefore).isEqualTo(THREAD_COUNT);
+            assertThat(redisKeyCleaner.keys(pid)).isEmpty();
+        }
     }
 
     @Test
     @DisplayName("교차 선점 A[1,2] / B[2,1]를 200회 반복해도 데드락 0, 매 회 성공 1")
     void crossOrderNoDeadlock() throws InterruptedException {
         long pid = fixtures.newPerformance(1, 1, 2);
+        try {
+            crossOrderNoDeadlock(pid);
+        } finally {
+            redisKeyCleaner.clean(pid);
+        }
+    }
+
+    private void crossOrderNoDeadlock(long pid) throws InterruptedException {
+        BookingErrorCode conflict = seatConflictCode();
         List<Long> ids = seatIds(pid);
         List<Long> forward = List.of(ids.get(0), ids.get(1));
         List<Long> reverse = List.of(ids.get(1), ids.get(0));
@@ -125,7 +167,7 @@ class SeatHoldConcurrencyTest {
                 CountDownLatch start = new CountDownLatch(1);
                 CountDownLatch done = new CountDownLatch(2);
                 List<HoldCreated> created = new CopyOnWriteArrayList<>();
-                AtomicInteger stateChanged = new AtomicInteger();
+                AtomicInteger conflicted = new AtomicInteger();
                 for (Object[] attempt : new Object[][]{{userA, forward}, {userB, reverse}}) {
                     long userId = (long) attempt[0];
                     @SuppressWarnings("unchecked")
@@ -135,8 +177,8 @@ class SeatHoldConcurrencyTest {
                             start.await();
                             created.add(seatHoldService.hold(userId, pid, seats, null));
                         } catch (BookingException e) {
-                            if (e.getCode() == BookingErrorCode.SEAT_STATE_CHANGED) {
-                                stateChanged.incrementAndGet();
+                            if (e.getCode() == conflict) {
+                                conflicted.incrementAndGet();
                             } else {
                                 unexpected.add(e);
                             }
@@ -152,7 +194,7 @@ class SeatHoldConcurrencyTest {
                 }
                 start.countDown();
                 assertThat(done.await(60, TimeUnit.SECONDS)).isTrue();
-                if (created.size() != 1 || stateChanged.get() != 1) {
+                if (created.size() != 1 || conflicted.get() != 1) {
                     badRounds.add(round);
                 }
                 // 다음 회차를 위해 이긴 쪽의 선점을 풀어 같은 좌석을 다시 쓴다
@@ -166,8 +208,8 @@ class SeatHoldConcurrencyTest {
             executor.shutdownNow();
         }
         long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt);
-        System.out.printf("[S2.1] 교차 선점 %d회: %dms, 데드락 %d, 성공 1이 아닌 회차 %s, 예기치 못한 예외 %d%n",
-                CROSS_ROUNDS, elapsedMs, deadlocks.get(), badRounds, unexpected.size());
+        System.out.printf("[S3.2] 교차 선점 %d회(게이트 %s): %dms, 데드락 %d, 성공 1이 아닌 회차 %s, 예기치 못한 예외 %d%n",
+                CROSS_ROUNDS, gateLabel(), elapsedMs, deadlocks.get(), badRounds, unexpected.size());
 
         unexpected.forEach(Throwable::printStackTrace);
         assertThat(deadlocks.get()).isZero();
@@ -176,13 +218,23 @@ class SeatHoldConcurrencyTest {
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM seat_hold WHERE performance_id = ? AND status = 'RELEASED'",
                 Long.class, pid)).isEqualTo(CROSS_ROUNDS);
+        // 매 회 취소가 게이트 키도 지운다. 게이트 OFF면 처음부터 키가 없다
+        assertThat(redisKeyCleaner.keys(pid)).isEmpty();
     }
 
     @Test
     @DisplayName("같은 사용자가 서로 다른 좌석으로 동시에 10번 선점해도 성공 1, 나머지는 USER_HAS_HOLD")
     void sameUserConcurrent() throws InterruptedException {
+        long pid = fixtures.newPerformance(1, 1, 10);
+        try {
+            sameUserConcurrent(pid);
+        } finally {
+            redisKeyCleaner.clean(pid);
+        }
+    }
+
+    private void sameUserConcurrent(long pid) throws InterruptedException {
         int attempts = 10;
-        long pid = fixtures.newPerformance(1, 1, attempts);
         List<Long> ids = seatIds(pid);
         long userId = fixtures.newUser();
 
@@ -223,6 +275,30 @@ class SeatHoldConcurrencyTest {
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM seat WHERE performance_id = ? AND status = 'HELD'",
                 Long.class, pid)).isEqualTo(1);
+        if (!gateEnabled()) {
+            assertThat(redisKeyCleaner.keys(pid)).isEmpty();
+        }
+    }
+
+    private boolean gateEnabled() {
+        return properties.gate().enabled();
+    }
+
+    private String gateLabel() {
+        return gateEnabled() ? "ON" : "OFF";
+    }
+
+    // 이미 잡힌 좌석을 게이트가 거르면 SEAT_TAKEN, 게이트 없이 DB가 거르면 SEAT_STATE_CHANGED
+    private BookingErrorCode seatConflictCode() {
+        return gateEnabled() ? BookingErrorCode.SEAT_TAKEN : BookingErrorCode.SEAT_STATE_CHANGED;
+    }
+
+    private double dbTotal() {
+        return dbCounter("ok") + dbCounter("state_changed") + dbCounter("user_has_hold");
+    }
+
+    private double gateCounter(String result) {
+        return meterRegistry.counter("booking.hold.gate", "result", result).count();
     }
 
     private static boolean isDeadlock(Throwable t) {

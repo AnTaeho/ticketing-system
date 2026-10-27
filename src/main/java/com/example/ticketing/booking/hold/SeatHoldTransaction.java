@@ -12,6 +12,7 @@ import com.example.ticketing.booking.seat.SeatRepository;
 import com.example.ticketing.booking.show.domain.PerformanceState;
 import com.example.ticketing.booking.user.AppUserRepository;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
@@ -57,17 +58,23 @@ public class SeatHoldTransaction {
         return new PersistedHold(hold.getId(), holdToken, expiresAt);
     }
 
+    // 게이트 키를 지울 좌석 ID는 좌석을 풀기 전에 읽어 둔다
     @Transactional(isolation = Isolation.READ_COMMITTED)
-    public void releaseHold(long userId, long holdId) {
+    public ReleasedHold releaseHold(long userId, long holdId) {
         SeatHold hold = seatHoldRepository.lockByIdAndUserId(holdId, userId)
                 .orElseThrow(() -> new BookingException(BookingErrorCode.HOLD_NOT_FOUND, Map.of("holdId", holdId)));
         if (seatHoldRepository.markReleased(holdId) == 0) {
             throw new BookingException(BookingErrorCode.HOLD_NOT_CANCELLABLE,
                     Map.of("holdId", holdId, "status", hold.getStatus().name()));
         }
+        List<Long> seatIds = seatRepository.findHeldSeatIds(holdId);
         seatRepository.releaseHeldSeats(holdId);
+        return new ReleasedHold(holdId, hold.getPerformanceId(), userId, hold.getHoldToken(), List.copyOf(seatIds));
     }
 
     public record PersistedHold(long holdId, String holdToken, LocalDateTime expiresAt) {
+    }
+
+    public record ReleasedHold(long holdId, long performanceId, long userId, String holdToken, List<Long> seatIds) {
     }
 }
