@@ -378,6 +378,71 @@ class PaymentReconcileTest {
         assertThat(db.payment(approvedId)).containsEntry("last_error", null);
     }
 
+    @Test
+    @DisplayName("REQUESTED 고아 + PG 조회 APPROVED(승인 뒤 요청 스레드가 멈춤) → 대사가 CONFIRMED: booking 1, 좌석 SOLD")
+    void requestedOrphanApprovedIsConfirmed() {
+        Fixture f = newHold(2);
+        long paymentId = orphan(f);
+        stubPg.queryWith(PgResult.of(PgStatus.APPROVED, "pg-orphan-ok"));
+        db.makeDue(paymentId);
+
+        scheduler.scan();
+
+        assertThat(db.payment(paymentId)).containsEntry("status", "APPROVED").containsEntry("next_check_at", null);
+        assertThat(db.holdStatus(f.holdId)).isEqualTo("CONFIRMED");
+        assertThat(db.bookingCountOfHold(f.holdId)).isEqualTo(1);
+        f.seatIds.forEach(seatId -> assertThat(db.seat(seatId)).containsEntry("status", "SOLD"));
+    }
+
+    @Test
+    @DisplayName("REQUESTED 고아 + PG 조회 DECLINED → 결제 DECLINED, hold RELEASED, 좌석 AVAILABLE")
+    void requestedOrphanDeclinedIsReleased() {
+        Fixture f = newHold(1);
+        long paymentId = orphan(f);
+        stubPg.queryWith(PgResult.of(PgStatus.DECLINED, null));
+        db.makeDue(paymentId);
+
+        scheduler.scan();
+
+        assertThat(db.payment(paymentId)).containsEntry("status", "DECLINED").containsEntry("next_check_at", null);
+        assertThat(db.holdStatus(f.holdId)).isEqualTo("RELEASED");
+        assertThat(db.seat(f.seatIds.get(0))).containsEntry("status", "AVAILABLE").containsEntry("hold_id", null);
+    }
+
+    @Test
+    @DisplayName("UNKNOWN + PG 조회 CANCELLED(망취소가 이미 끝남) → 결제 CANCELLED, hold RELEASED, 좌석 AVAILABLE, 게이트 키 삭제")
+    void unknownCancelledAtPgIsReleased() {
+        Fixture f = newHold(2);
+        long paymentId = unknownPayment(f);
+        stubPg.queryWith(PgResult.of(PgStatus.CANCELLED, null));
+        db.makeDue(paymentId);
+
+        scheduler.scan();
+
+        assertThat(db.payment(paymentId)).containsEntry("status", "CANCELLED").containsEntry("next_check_at", null);
+        assertThat(db.holdStatus(f.holdId)).isEqualTo("RELEASED");
+        f.seatIds.forEach(seatId -> assertThat(db.seat(seatId)).containsEntry("status", "AVAILABLE")
+                .containsEntry("hold_id", null));
+        assertThat(redisKeyCleaner.keys(f.pid)).isEmpty();
+        assertThat(stubPg.cancelCalls()).isZero();
+    }
+
+    @Test
+    @DisplayName("UNKNOWN + PG NOT_FOUND(요청이 PG에 닿지 않음), 생성 30초 지남 → 망취소 → 결제 CANCELLED, hold RELEASED, 좌석 AVAILABLE")
+    void unknownNotFoundIsCancelledAfterWindow() {
+        Fixture f = newHold(1);
+        long paymentId = unknownPayment(f);
+        db.ageCreatedAt(paymentId, 60);
+        db.makeDue(paymentId);
+
+        scheduler.scan();
+
+        assertThat(stubPg.cancelCalls()).isEqualTo(1);
+        assertThat(db.payment(paymentId)).containsEntry("status", "CANCELLED").containsEntry("next_check_at", null);
+        assertThat(db.holdStatus(f.holdId)).isEqualTo("RELEASED");
+        assertThat(db.seat(f.seatIds.get(0))).containsEntry("status", "AVAILABLE").containsEntry("hold_id", null);
+    }
+
     private Fixture newHold(int seatCount) {
         long pid = fixtures.newPerformance(1, 1, 6);
         performances.add(pid);
