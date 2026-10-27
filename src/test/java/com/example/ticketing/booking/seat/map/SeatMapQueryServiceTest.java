@@ -37,6 +37,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.dao.QueryTimeoutException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import tools.jackson.databind.json.JsonMapper;
@@ -161,20 +162,69 @@ class SeatMapQueryServiceTest {
     }
 
     @Test
-    @DisplayName("Redis 예외 + 로컬 캐시 있음: 1초가 지났어도 로컬 캐시를 돌려주고 DB를 읽지 않는다")
-    void redisFailureUsesStaleLocalCache() throws InterruptedException {
+    @DisplayName("Redis 예외 + 1초 지난 로컬 캐시: DB로 다시 빌드(fallback +1, 새 generatedAt)하고, 1초 안의 반복은 다시 빌드하지 않는다")
+    void redisFailureRebuildsStaleLocalCache() throws InterruptedException {
+        long pid = performance();
+        String old = builder.build(pid).orElseThrow();
+        SeatMapStore mockStore = mock(SeatMapStore.class);
+        when(mockStore.get(pid)).thenReturn(old).thenThrow(new QueryTimeoutException("redis timeout"));
+        SeatMapQueryService service = service(mockStore, builder);
+        double fallbackBefore = rebuilds("fallback");
+
+        assertThat(service.get(pid)).isEqualTo(old);
+        Thread.sleep(props.seatmap().localCacheMs() + 100);
+
+        String rebuilt = service.get(pid);
+        assertThat(generatedAt(rebuilt)).isGreaterThan(generatedAt(old));
+        assertThat(rebuilds("fallback") - fallbackBefore).isEqualTo(1.0);
+
+        for (int i = 0; i < 5; i++) {
+            assertThat(service.get(pid)).isEqualTo(rebuilt);
+        }
+        assertThat(rebuilds("fallback") - fallbackBefore).isEqualTo(1.0);
+        verify(mockStore, times(2)).get(pid);
+    }
+
+    @Test
+    @DisplayName("Redis 예외 + 1초 지난 로컬 캐시 + DB 빌드 실패: 오래된 캐시를 돌려주고, 1초 안에는 DB를 다시 읽지 않는다")
+    void redisFailureKeepsStaleCacheWhenBuildFails() throws InterruptedException {
         long pid = performance();
         SeatMapStore mockStore = mock(SeatMapStore.class);
         when(mockStore.get(pid)).thenReturn("cached-v1").thenThrow(new QueryTimeoutException("redis timeout"));
-        SeatMapQueryService service = service(mockStore, builder);
-        double fallbackBefore = rebuilds("fallback");
+        SeatMapBuilder failingBuilder = mock(SeatMapBuilder.class);
+        when(failingBuilder.build(pid)).thenThrow(new DataAccessResourceFailureException("db down"));
+        SeatMapQueryService service = service(mockStore, failingBuilder);
 
         assertThat(service.get(pid)).isEqualTo("cached-v1");
         Thread.sleep(props.seatmap().localCacheMs() + 100);
 
         assertThat(service.get(pid)).isEqualTo("cached-v1");
-        verify(mockStore, times(2)).get(pid);
-        assertThat(rebuilds("fallback")).isEqualTo(fallbackBefore);
+        assertThat(service.get(pid)).isEqualTo("cached-v1");
+        verify(failingBuilder, times(1)).build(pid);
+
+        Thread.sleep(props.seatmap().localCacheMs() + 100);
+        assertThat(service.get(pid)).isEqualTo("cached-v1");
+        verify(failingBuilder, times(2)).build(pid);
+    }
+
+    @Test
+    @DisplayName("Redis 예외 + 1초 지난 로컬 캐시 + 동시 20건: fallback 빌드는 1번, 20건 모두 새 generatedAt 하나")
+    void concurrentStaleFallbackIsSingleFlight() throws Exception {
+        long pid = performance();
+        String old = builder.build(pid).orElseThrow();
+        SeatMapStore mockStore = mock(SeatMapStore.class);
+        when(mockStore.get(pid)).thenReturn(old).thenThrow(new QueryTimeoutException("redis timeout"));
+        SeatMapQueryService service = service(mockStore, slowBuilder(200));
+        assertThat(service.get(pid)).isEqualTo(old);
+        Thread.sleep(props.seatmap().localCacheMs() + 100);
+        double fallbackBefore = rebuilds("fallback");
+
+        List<String> results = runConcurrently(20, () -> service.get(pid));
+
+        Set<Long> generatedAts = results.stream().map(this::generatedAt).collect(Collectors.toSet());
+        System.out.println("[S9.1] 오래된 캐시 + 동시 20건 fallback 재생성 수: " + (rebuilds("fallback") - fallbackBefore));
+        assertThat(rebuilds("fallback") - fallbackBefore).isEqualTo(1.0);
+        assertThat(generatedAts).hasSize(1).doesNotContain(generatedAt(old));
     }
 
     @Test

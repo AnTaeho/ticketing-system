@@ -194,27 +194,37 @@ class SeatHoldQueueTest {
     }
 
     @Test
-    @DisplayName("처리열 확인이 Redis 예외로 실패하면 503 QUEUE_UNAVAILABLE이고 게이트·DB에 닿지 않는다")
-    void queueCheckFailureIsUnavailable() throws IOException {
+    @DisplayName("처리열 확인이 Redis 예외로 실패하면 게이트를 부르지 않고 DB 판정으로 201(fail-open)")
+    void queueCheckFailureFailsOpen() throws IOException {
         long pid = newPerformance();
         long userId = fixtures.newUser();
         BookingRedis deadRedis = TestBookingRedis.connectTo("localhost", closedPort(), properties);
         try {
             BookingQueueService deadQueue = new BookingQueueService(new BookingQueueRepository(deadRedis),
                     seatCatalog, dbClock, properties);
-            SeatHoldService service = newService(deadQueue, properties);
-            double gateBefore = counterSum("booking.hold.gate");
-            double dbBefore = counterSum("booking.hold.db");
-
+            RedisSeatGate spyGate = mock(RedisSeatGate.class);
+            SeatHoldService service = new SeatHoldService(seatCatalog, seatHoldTransaction, seatHoldRepository,
+                    seatRepository, paymentRepository, dbClock, spyGate, deadQueue, properties, meterRegistry);
+            // 토큰 주인 확인은 Redis 없이 하므로 장애 중에도 남의 토큰은 403이다
             assertThatThrownBy(() -> service.hold(userId, pid, seatIds(pid).subList(0, 1),
-                    userId + "." + UUID.randomUUID()))
-                    .isInstanceOf(BookingException.class)
-                    .extracting("code").isEqualTo(BookingErrorCode.QUEUE_UNAVAILABLE);
+                    (userId + 1) + "." + UUID.randomUUID()))
+                    .extracting("code").isEqualTo(BookingErrorCode.NOT_ADMITTED);
+            double gateErrorBefore = meterRegistry.counter("booking.hold.gate", "result", "error").count();
+            double dbOkBefore = meterRegistry.counter("booking.hold.db", "result", "ok").count();
+            double acquiredBefore = meterRegistry.counter("booking.hold.fallback", "result", "acquired").count();
+            double consumeFailureBefore = consumeFailures();
 
-            assertThat(BookingErrorCode.QUEUE_UNAVAILABLE.getStatus().value()).isEqualTo(503);
-            assertThat(counterSum("booking.hold.gate")).isEqualTo(gateBefore);
-            assertThat(counterSum("booking.hold.db")).isEqualTo(dbBefore);
-            assertThat(holdCount(pid)).isZero();
+            HoldCreated hold = service.hold(userId, pid, seatIds(pid).subList(0, 1), userId + "." + UUID.randomUUID());
+
+            assertThat(hold.holdId()).isPositive();
+            verifyNoInteractions(spyGate);
+            assertThat(meterRegistry.counter("booking.hold.gate", "result", "error").count() - gateErrorBefore)
+                    .isEqualTo(1);
+            assertThat(meterRegistry.counter("booking.hold.db", "result", "ok").count() - dbOkBefore).isEqualTo(1);
+            assertThat(meterRegistry.counter("booking.hold.fallback", "result", "acquired").count() - acquiredBefore)
+                    .isEqualTo(1);
+            assertThat(consumeFailures() - consumeFailureBefore).isEqualTo(1);
+            assertThat(holdCount(pid)).isEqualTo(1);
         } finally {
             deadRedis.destroy();
         }

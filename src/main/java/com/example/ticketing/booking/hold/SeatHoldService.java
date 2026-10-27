@@ -24,10 +24,11 @@ import io.lettuce.core.RedisException;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Duration;
-import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.Semaphore;
+import java.util.concurrent.atomic.AtomicLong;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Service;
@@ -39,7 +40,9 @@ public class SeatHoldService {
 
     private static final String DB_COUNTER = "booking.hold.db";
     private static final String GATE_COUNTER = "booking.hold.gate";
+    private static final String FALLBACK_COUNTER = "booking.hold.fallback";
     private static final String REFLECT_FAILURE = "booking.redis.reflect.failure";
+    private static final long REDIS_WARN_INTERVAL_NANOS = Duration.ofSeconds(10).toNanos();
 
     private final SeatCatalog seatCatalog;
     private final SeatHoldTransaction seatHoldTransaction;
@@ -60,7 +63,13 @@ public class SeatHoldService {
     private final Counter gateUserHasHold;
     private final Counter gateCooldown;
     private final Counter gateSkipped;
+    private final Counter gateError;
+    private final Counter fallbackAcquired;
+    private final Counter fallbackRejected;
     private final Counter queueConsumeFailure;
+    private final Semaphore fallbackPermits;
+    private final AtomicLong lastRedisWarnNanos = new AtomicLong(System.nanoTime() - REDIS_WARN_INTERVAL_NANOS);
+    private final AtomicLong suppressedRedisWarns = new AtomicLong();
 
     public SeatHoldService(SeatCatalog seatCatalog, SeatHoldTransaction seatHoldTransaction,
                            SeatHoldRepository seatHoldRepository, SeatRepository seatRepository,
@@ -86,28 +95,26 @@ public class SeatHoldService {
         this.gateUserHasHold = meterRegistry.counter(GATE_COUNTER, "result", "user_has_hold");
         this.gateCooldown = meterRegistry.counter(GATE_COUNTER, "result", "cooldown");
         this.gateSkipped = meterRegistry.counter(GATE_COUNTER, "result", "skipped");
+        this.gateError = meterRegistry.counter(GATE_COUNTER, "result", "error");
+        this.fallbackAcquired = meterRegistry.counter(FALLBACK_COUNTER, "result", "acquired");
+        this.fallbackRejected = meterRegistry.counter(FALLBACK_COUNTER, "result", "rejected");
+        this.fallbackPermits = new Semaphore(properties.gate().fallbackMaxConcurrency());
         this.queueConsumeFailure = meterRegistry.counter(REFLECT_FAILURE, "op", "queue_consume");
     }
 
     // 토큰은 커밋까지 성공했을 때만 소모한다. 게이트·DB에서 진 사용자는 같은 토큰으로 다른 좌석을 고른다
     public HoldCreated hold(long userId, long performanceId, List<Long> seatIds, String queueToken) {
         SeatSelection selection = validate(performanceId, seatIds);
-        ensureAdmitted(userId, performanceId, queueToken);
         String holdToken = UUID.randomUUID().toString();
-        passGate(userId, selection, holdToken);
-        PersistedHold persisted;
-        try {
-            persisted = decideInDb(userId, selection, holdToken);
-        } catch (Throwable e) {
-            // 게이트에 방금 쓴 키를 지운다. DB가 거절했든 DB 예외든 같다
-            if (gateEnabled) {
-                gate.releaseQuietly(performanceId, userId, selection.seatIds(), holdToken);
-            }
-            throw e;
+        if (!ensureAdmitted(userId, performanceId, queueToken)) {
+            // Redis가 죽은 걸 이미 봤으니 게이트는 부르지 않는다
+            (gateEnabled ? gateError : gateSkipped).increment();
+            return holdWithoutRedis(userId, selection, holdToken, queueToken, false);
         }
-        consumeQuietly(userId, performanceId, queueToken);
-        return new HoldCreated(persisted.holdId(), persisted.expiresAt(),
-                selection.seats().stream().map(HoldSeatView::of).toList(), selection.totalAmount());
+        if (!passGate(userId, selection, holdToken)) {
+            return holdWithoutRedis(userId, selection, holdToken, queueToken, true);
+        }
+        return persist(userId, selection, holdToken, queueToken, gateEnabled);
     }
 
     public HoldDetail getHold(long userId, long holdId) {
@@ -138,20 +145,20 @@ public class SeatHoldService {
         }
     }
 
-    // 서버 시계로 거르는 사전 확인이다. 경계 판정은 트랜잭션 안에서 DB 시각으로 다시 한다
+    // 대기열과 같은 DB 추정 시각으로 거르는 사전 확인이다. 경계 판정은 트랜잭션 안에서 DB 시각으로 다시 한다
     private SeatSelection validate(long performanceId, List<Long> seatIds) {
         PerformanceInfo performance = seatCatalog.performance(performanceId);
-        if (PerformanceState.of(performance.openAt(), performance.startsAt(), LocalDateTime.now())
+        if (PerformanceState.of(performance.openAt(), performance.startsAt(), dbClock.estimatedNow())
                 != PerformanceState.OPEN) {
             throw new BookingException(BookingErrorCode.NOT_OPEN, Map.of("performanceId", performanceId));
         }
         return seatCatalog.validateSeats(performanceId, seatIds);
     }
 
-    // 게이트 스위치와 별개다. 처리열을 끄는 것은 booking.queue.required뿐이다
-    private void ensureAdmitted(long userId, long performanceId, String queueToken) {
+    // 게이트 스위치와 별개다. 처리열을 끄는 것은 booking.queue.required뿐이다. false면 Redis 장애로 확인을 건너뛴 것이다
+    private boolean ensureAdmitted(long userId, long performanceId, String queueToken) {
         if (!queueRequired) {
-            return;
+            return true;
         }
         if (queueToken == null || queueToken.isBlank()) {
             throw new BookingException(BookingErrorCode.NOT_ADMITTED);
@@ -160,13 +167,13 @@ public class SeatHoldService {
         try {
             admitted = queueService.isAdmitted(performanceId, queueToken, userId);
         } catch (DataAccessException | RedisException e) {
-            // S9.1에서 이 자리를 fail-open + 벌크헤드로 바꾼다(D16). 그때까지는 확인 못 하면 막는다
-            log.warn("[booking hold] 처리열 확인 실패로 선점을 막는다 performanceId={}: {}", performanceId, e.toString());
-            throw new BookingException(BookingErrorCode.QUEUE_UNAVAILABLE);
+            warnRedisFailure("queue_check", performanceId, e);
+            return false;
         }
         if (!admitted) {
             throw new BookingException(BookingErrorCode.NOT_ADMITTED);
         }
+        return true;
     }
 
     // 선점은 이미 커밋됐으므로 실패해도 응답을 바꾸지 않는다. 남은 토큰은 처리열 만료로 빠진다
@@ -178,17 +185,24 @@ public class SeatHoldService {
             queueService.consume(performanceId, queueToken, userId);
         } catch (DataAccessException | RedisException e) {
             queueConsumeFailure.increment();
-            log.warn("[booking hold] Redis 반영 실패 op=queue_consume, performanceId={}: {}", performanceId, e.toString());
+            warnRedisFailure("queue_consume", performanceId, e);
         }
     }
 
-    // 게이트 OFF면 Redis를 부르지 않는다. 거절이면 DB에 닿지 않고 409로 끝난다
-    private void passGate(long userId, SeatSelection selection, String holdToken) {
+    // 게이트 OFF면 Redis를 부르지 않는다. 거절이면 DB에 닿지 않고 409로 끝난다. false면 Redis 장애로 판정을 못 한 것이다
+    private boolean passGate(long userId, SeatSelection selection, String holdToken) {
         if (!gateEnabled) {
             gateSkipped.increment();
-            return;
+            return true;
         }
-        GateResult result = gate.tryHold(selection.performanceId(), userId, selection.seatIds(), holdToken, holdTtl);
+        GateResult result;
+        try {
+            result = gate.tryHold(selection.performanceId(), userId, selection.seatIds(), holdToken, holdTtl);
+        } catch (DataAccessException | RedisException e) {
+            gateError.increment();
+            warnRedisFailure("gate", selection.performanceId(), e);
+            return false;
+        }
         switch (result.type()) {
             case OK -> gateOk.increment();
             case USER_HAS_HOLD -> {
@@ -203,6 +217,53 @@ public class SeatHoldService {
                 gateCooldown.increment();
                 throw new BookingException(BookingErrorCode.COOLDOWN, Map.of("seatId", result.seatId()));
             }
+        }
+        return true;
+    }
+
+    // Redis 없이 DB가 판정한다(1인 1선점도 DB가 지키고 쿨다운은 꺼진다). 동시 수는 세마포어로 묶고 자리가 없으면 기다리지 않는다
+    private HoldCreated holdWithoutRedis(long userId, SeatSelection selection, String holdToken, String queueToken,
+                                         boolean gateTried) {
+        if (!fallbackPermits.tryAcquire()) {
+            fallbackRejected.increment();
+            throw new BookingException(BookingErrorCode.BUSY, Map.of("performanceId", selection.performanceId()));
+        }
+        fallbackAcquired.increment();
+        try {
+            // 시간 초과로 끊긴 hold.lua가 실제로는 키를 썼을 수 있어 게이트를 불렀을 때만 실패 시 지운다
+            return persist(userId, selection, holdToken, queueToken, gateTried);
+        } finally {
+            fallbackPermits.release();
+        }
+    }
+
+    private HoldCreated persist(long userId, SeatSelection selection, String holdToken, String queueToken,
+                                boolean releaseGateOnFailure) {
+        PersistedHold persisted;
+        try {
+            persisted = decideInDb(userId, selection, holdToken);
+        } catch (Throwable e) {
+            // 게이트에 방금 쓴 키를 지운다. DB가 거절했든 DB 예외든 같다
+            if (releaseGateOnFailure) {
+                gate.releaseQuietly(selection.performanceId(), userId, selection.seatIds(), holdToken);
+            }
+            throw e;
+        }
+        consumeQuietly(userId, selection.performanceId(), queueToken);
+        return new HoldCreated(persisted.holdId(), persisted.expiresAt(),
+                selection.seats().stream().map(HoldSeatView::of).toList(), selection.totalAmount());
+    }
+
+    // 장애 중 요청마다 warn을 남기면 로그가 넘친다. 10초에 한 번만 warn으로 남기고 그사이는 debug로 센다
+    private void warnRedisFailure(String op, long performanceId, RuntimeException e) {
+        long now = System.nanoTime();
+        long last = lastRedisWarnNanos.get();
+        if (now - last >= REDIS_WARN_INTERVAL_NANOS && lastRedisWarnNanos.compareAndSet(last, now)) {
+            log.warn("[booking hold] Redis 실패 op={}, performanceId={}, 앞서 생략 {}건: {}",
+                    op, performanceId, suppressedRedisWarns.getAndSet(0), e.toString());
+        } else {
+            suppressedRedisWarns.incrementAndGet();
+            log.debug("[booking hold] Redis 실패 op={}, performanceId={}: {}", op, performanceId, e.toString());
         }
     }
 

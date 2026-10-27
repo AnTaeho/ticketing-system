@@ -2,13 +2,34 @@ package com.example.ticketing.booking.hold;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
+import com.example.ticketing.booking.BookingProperties;
+import com.example.ticketing.booking.BookingProperties.Queue;
 import com.example.ticketing.booking.common.BookingErrorCode;
 import com.example.ticketing.booking.common.BookingException;
+import com.example.ticketing.booking.common.DbClock;
+import com.example.ticketing.booking.common.TestDbClock;
+import com.example.ticketing.booking.hold.SeatHoldTransaction.PersistedHold;
 import com.example.ticketing.booking.hold.dto.HoldCreated;
+import com.example.ticketing.booking.hold.gate.GateResult;
+import com.example.ticketing.booking.hold.gate.RedisSeatGate;
+import com.example.ticketing.booking.payment.BookingPaymentRepository;
+import com.example.ticketing.booking.queue.BookingQueueService;
+import com.example.ticketing.booking.seat.SeatCatalog;
+import com.example.ticketing.booking.seat.SeatCatalog.SeatSelection;
+import com.example.ticketing.booking.seat.SeatRepository;
 import com.example.ticketing.booking.support.BookingFixtures;
 import com.example.ticketing.booking.support.BookingIntegrationTest;
 import com.example.ticketing.booking.support.RedisKeyCleaner;
+import io.micrometer.core.instrument.MeterRegistry;
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
@@ -28,6 +49,20 @@ class SeatHoldServiceTest {
     private JdbcTemplate jdbcTemplate;
     @Autowired
     private RedisKeyCleaner redisKeyCleaner;
+    @Autowired
+    private SeatCatalog seatCatalog;
+    @Autowired
+    private SeatHoldRepository seatHoldRepository;
+    @Autowired
+    private SeatRepository seatRepository;
+    @Autowired
+    private BookingPaymentRepository paymentRepository;
+    @Autowired
+    private BookingQueueService queueService;
+    @Autowired
+    private BookingProperties properties;
+    @Autowired
+    private MeterRegistry meterRegistry;
 
     @Test
     @DisplayName("선점하면 hold는 HELD, 좌석은 HELD이고 held_until = expires_at = DB 시각 + 5분")
@@ -150,6 +185,44 @@ class SeatHoldServiceTest {
                 .extracting("code").isEqualTo(BookingErrorCode.LOGIN_REQUIRED);
         assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM seat_hold WHERE performance_id = ?",
                 Long.class, pid)).isZero();
+    }
+
+    @Test
+    @DisplayName("사전 오픈 판정은 DB 시각 기준: DB가 2시간 앞서면 1시간 뒤 오픈 회차도 DB 판정까지 가고, 2시간 뒤지면 열린 회차도 409 NOT_OPEN")
+    void openCheckUsesDbTime() {
+        LocalDateTime now = fixtures.dbNow();
+        long show = fixtures.newShow();
+        long opensInAnHour = fixtures.newPerformance(show, now.plusHours(1), now.plusDays(1), 1, 1, 2);
+        long openedAnHourAgo = fixtures.newPerformance(show, now.minusHours(1), now.plusDays(1), 1, 1, 2);
+        SeatHoldTransaction tx = mock(SeatHoldTransaction.class);
+        when(tx.persistHold(anyLong(), any(SeatSelection.class), anyString()))
+                .thenReturn(new PersistedHold(1L, "t", now.plusMinutes(5)));
+        SeatHoldService dbAhead = serviceWith(TestDbClock.withDbShift(jdbcTemplate, Duration.ofHours(2)), tx);
+        SeatHoldService dbBehind = serviceWith(TestDbClock.withDbShift(jdbcTemplate, Duration.ofHours(-2)), tx);
+
+        assertThat(dbAhead.hold(1L, opensInAnHour, seatIds(opensInAnHour).subList(0, 1), null).holdId())
+                .isEqualTo(1L);
+        verify(tx).persistHold(anyLong(), any(SeatSelection.class), anyString());
+
+        List<Long> openedSeats = seatIds(openedAnHourAgo).subList(0, 1);
+        assertThatThrownBy(() -> dbBehind.hold(2L, openedAnHourAgo, openedSeats, null))
+                .isInstanceOf(BookingException.class)
+                .extracting("code").isEqualTo(BookingErrorCode.NOT_OPEN);
+        // 두 번째 회차는 사전 판정에서 막혀 DB 판정 호출 수가 그대로다
+        verify(tx, times(1)).persistHold(anyLong(), any(SeatSelection.class), anyString());
+    }
+
+    // 처리열·게이트는 통과시키고 DB 판정은 목으로 받아 사전 판정만 본다
+    private SeatHoldService serviceWith(DbClock clock, SeatHoldTransaction tx) {
+        BookingProperties p = properties;
+        Queue q = p.queue();
+        BookingProperties noQueue = new BookingProperties(p.seed(), p.redis(), p.hold(), p.payment(), p.gate(),
+                new Queue(q.capacity(), q.processingTokenTtl(), q.waitingTokenTtl(), q.promoteIntervalMs(), false),
+                p.seatmap(), p.outbox(), p.ops(), p.pg(), p.fakePg());
+        RedisSeatGate openGate = mock(RedisSeatGate.class);
+        when(openGate.tryHold(anyLong(), anyLong(), any(), anyString(), any())).thenReturn(GateResult.ok());
+        return new SeatHoldService(seatCatalog, tx, seatHoldRepository, seatRepository, paymentRepository, clock,
+                openGate, queueService, noQueue, meterRegistry);
     }
 
     private String holdStatus(long holdId) {

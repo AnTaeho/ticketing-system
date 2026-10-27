@@ -19,7 +19,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Service;
 
-// 로컬 캐시 → Redis 스냅샷 → (없으면) 리스를 잡은 한 요청만 DB 빌드. Redis 장애 때는 인스턴스 안에서 회차당 한 요청만 DB를 읽는다
+// 로컬 캐시 → Redis 스냅샷 → (없으면) 리스를 잡은 한 요청만 DB 빌드. Redis 장애 때는 인스턴스 안에서 회차당 초당 한 번만 DB를 읽는다
 @Slf4j
 @Service
 public class SeatMapQueryService {
@@ -39,6 +39,7 @@ public class SeatMapQueryService {
 
     private final ConcurrentMap<Long, Cached> localCache = new ConcurrentHashMap<>();
     private final ConcurrentMap<Long, CompletableFuture<String>> fallbackInFlight = new ConcurrentHashMap<>();
+    private final ConcurrentMap<Long, Long> lastFallbackAttemptNanos = new ConcurrentHashMap<>();
     private final AtomicLong leaseSeq = new AtomicLong();
 
     public SeatMapQueryService(SeatCatalog seatCatalog, SeatMapBuilder builder, SeatMapStore store,
@@ -129,32 +130,55 @@ public class SeatMapQueryService {
         }
     }
 
-    // 오래된 로컬 캐시라도 있으면 쓴다. 없으면 회차별로 한 요청만 DB를 읽고 나머지는 그 결과를 기다린다
+    // 로컬 캐시가 오래됐으면 회차별로 한 요청만 DB를 읽고 나머지는 그 결과를 기다린다. 빌드가 실패하면 오래된 캐시를 쓴다
     private String onRedisFailure(long performanceId, RuntimeException cause) {
         log.debug("[booking seatmap] 회차 {} Redis 실패, 로컬 캐시·DB로 넘어간다: {}", performanceId, cause.toString());
-        Cached local = localCache.get(performanceId);
-        if (local != null) {
-            return local.json();
+        Cached stale = localCache.get(performanceId);
+        if (stale != null && stale.isFresh(localCacheNanos)) {
+            return stale.json();
         }
         CompletableFuture<String> mine = new CompletableFuture<>();
         CompletableFuture<String> running = fallbackInFlight.putIfAbsent(performanceId, mine);
         if (running != null) {
-            return await(running);
+            try {
+                return await(running);
+            } catch (RuntimeException e) {
+                return staleOrThrow(stale, e);
+            }
         }
         try {
-            // 앞선 빌드가 막 끝나 자리를 비웠을 수 있다. 그 결과가 로컬 캐시에 있으면 다시 읽지 않는다
-            Cached justBuilt = localCache.get(performanceId);
-            String json = justBuilt != null
-                    ? justBuilt.json()
-                    : cache(performanceId, buildOrUnavailable(performanceId, fallbackRebuilds));
+            String json = fallbackBuild(performanceId);
             mine.complete(json);
             return json;
         } catch (RuntimeException e) {
             mine.completeExceptionally(e);
-            throw e;
+            return staleOrThrow(stale, e);
         } finally {
             fallbackInFlight.remove(performanceId, mine);
         }
+    }
+
+    // 실패한 빌드도 한 번으로 센다. 그래서 DB가 느리거나 죽어도 회차당 local-cache-ms에 한 번만 읽는다
+    private String fallbackBuild(long performanceId) {
+        // 앞선 빌드가 막 끝나 자리를 비웠을 수 있다. 그 결과가 로컬 캐시에 있으면 다시 읽지 않는다
+        Cached latest = localCache.get(performanceId);
+        if (latest != null && latest.isFresh(localCacheNanos)) {
+            return latest.json();
+        }
+        long now = System.nanoTime();
+        Long lastAttempt = lastFallbackAttemptNanos.get(performanceId);
+        if (lastAttempt != null && now - lastAttempt < localCacheNanos) {
+            throw unavailable(performanceId);
+        }
+        lastFallbackAttemptNanos.put(performanceId, now);
+        return cache(performanceId, buildOrUnavailable(performanceId, fallbackRebuilds));
+    }
+
+    private static String staleOrThrow(Cached stale, RuntimeException e) {
+        if (stale == null) {
+            throw e;
+        }
+        return stale.json();
     }
 
     private String buildOrUnavailable(long performanceId, Counter counter) {
