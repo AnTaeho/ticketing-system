@@ -71,9 +71,12 @@ public class BookingPaymentTransaction {
             if (sameHold.get().getIdempotencyKey().equals(idempotencyKey)) {
                 return new Existing(current(sameHold.get(), hold));
             }
-            throw new BookingException(BookingErrorCode.ALREADY_PAYING, Map.of("holdId", holdId));
+            throw otherPaymentOnHold(sameHold.get(), hold);
         }
 
+        if (hold.getStatus() == HoldStatus.EXPIRED) {
+            throw new BookingException(BookingErrorCode.HOLD_EXPIRED, Map.of("holdId", holdId));
+        }
         if (hold.getStatus() != HoldStatus.HELD) {
             throw new BookingException(BookingErrorCode.HOLD_NOT_PAYABLE,
                     Map.of("holdId", holdId, "status", hold.getStatus().name()));
@@ -189,7 +192,18 @@ public class BookingPaymentTransaction {
         if (sameHold.get().getIdempotencyKey().equals(idempotencyKey)) {
             return Optional.of(new Existing(current(sameHold.get())));
         }
-        throw new BookingException(BookingErrorCode.ALREADY_PAYING, Map.of("holdId", holdId));
+        SeatHold hold = seatHoldRepository.findById(holdId)
+                .orElseThrow(() -> new IllegalStateException("결제 " + sameHold.get().getId() + "의 hold가 없다"));
+        throw otherPaymentOnHold(sameHold.get(), hold);
+    }
+
+    // 다른 키의 결제가 이미 끝나 자리가 풀렸으면 다시 고르게 하고, 아직 진행 중이면 다른 화면에서 결제 중이라고 알린다
+    private static BookingException otherPaymentOnHold(BookingPayment other, SeatHold hold) {
+        if (other.getStatus() == BookingPaymentStatus.DECLINED || other.getStatus() == BookingPaymentStatus.CANCELLED) {
+            return new BookingException(BookingErrorCode.HOLD_NOT_PAYABLE,
+                    Map.of("holdId", hold.getId(), "status", hold.getStatus().name()));
+        }
+        return new BookingException(BookingErrorCode.ALREADY_PAYING, Map.of("holdId", hold.getId()));
     }
 
     private PaymentSettlement releaseAfterPg(long paymentId, BookingPaymentStatus target) {
@@ -278,7 +292,7 @@ public class BookingPaymentTransaction {
         }
     }
 
-    private static String abbreviate(String detail) {
+    static String abbreviate(String detail) {
         if (detail == null) {
             return null;
         }

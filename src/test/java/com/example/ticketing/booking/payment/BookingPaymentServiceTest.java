@@ -323,6 +323,45 @@ class BookingPaymentServiceTest {
     }
 
     @Test
+    @DisplayName("끝난 결제(DECLINED·CANCELLED)가 있는 hold에 다른 키로 보내면 409 HOLD_NOT_PAYABLE(detail.status RELEASED), "
+            + "결제 행은 그대로 1")
+    void finishedPaymentOnHoldIsNotPayable() {
+        Fixture declined = newHold(1);
+        stubPg.approveWith(PgResult.of(PgStatus.DECLINED, null));
+        catchBooking(() -> paymentService.pay(declined.userId, declined.holdId, key(), Optional.empty()));
+        Fixture cancelled = newHold(1);
+        stubPg.approveWith(PgResult.unknown("timeout"));
+        long cancelledPayment = paymentService.pay(cancelled.userId, cancelled.holdId, key(), Optional.empty())
+                .paymentId();
+        paymentTransaction.cancelAndRelease(cancelledPayment);
+
+        for (Fixture f : List.of(declined, cancelled)) {
+            BookingException e = catchBooking(() -> paymentService.pay(f.userId, f.holdId, key(), Optional.empty()));
+            assertThat(e.getCode()).isEqualTo(BookingErrorCode.HOLD_NOT_PAYABLE);
+            assertThat(e.getDetail()).containsEntry("status", "RELEASED").containsEntry("holdId", f.holdId);
+            assertThat(db.paymentCountOfHold(f.holdId)).isEqualTo(1);
+        }
+        assertThat(stubPg.approveCalls()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("만료 스케줄러가 EXPIRED로 바꾼 hold는 409 HOLD_EXPIRED, 결제 행·PG 호출 없음")
+    void expiredStatusHoldIsHoldExpired() {
+        Fixture f = newHold(1);
+        db.expireHold(f.holdId);
+        for (int round = 0; round < 50 && !"EXPIRED".equals(db.holdStatus(f.holdId)); round++) {
+            expiryTransaction.claimAndExpire(50);
+        }
+        assertThat(db.holdStatus(f.holdId)).isEqualTo("EXPIRED");
+
+        BookingException e = catchBooking(() -> paymentService.pay(f.userId, f.holdId, key(), Optional.empty()));
+
+        assertThat(e.getCode()).isEqualTo(BookingErrorCode.HOLD_EXPIRED);
+        assertThat(db.paymentCountOfHold(f.holdId)).isZero();
+        assertThat(stubPg.approveCalls()).isZero();
+    }
+
+    @Test
     @DisplayName("빈 멱등키는 400 IDEMPOTENCY_KEY_REQUIRED, 64자 초과는 400 INVALID_REQUEST")
     void idempotencyKeyValidation() {
         Fixture f = newHold(1);

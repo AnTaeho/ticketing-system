@@ -13,6 +13,7 @@ import org.springframework.test.context.TestPropertySource;
 @TestPropertySource(properties = {
         "booking.seed.enabled=false",
         "booking.hold.expiry-enabled=false",
+        "booking.payment.reconcile-enabled=false",
         "spring.datasource.url=jdbc:mysql://localhost:3306/ticketing_booking_test"
                 + "?createDatabaseIfNotExist=true&serverTimezone=Asia/Seoul&characterEncoding=UTF-8"
 })

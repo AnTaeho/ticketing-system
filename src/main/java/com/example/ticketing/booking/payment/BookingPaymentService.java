@@ -13,7 +13,6 @@ import com.example.ticketing.booking.payment.pg.PgClient;
 import com.example.ticketing.booking.payment.pg.PgResult;
 import com.example.ticketing.booking.payment.pg.PgScenario;
 import java.time.Duration;
-import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import lombok.extern.slf4j.Slf4j;
@@ -33,6 +32,7 @@ public class BookingPaymentService {
     private final PgClient pgClient;
     private final RedisSeatGate gate;
     private final boolean gateEnabled;
+    private final PaymentGateReflector reflector;
 
     public BookingPaymentService(BookingPaymentTransaction paymentTransaction, PgClient pgClient,
                                  RedisSeatGate gate, BookingProperties properties) {
@@ -40,6 +40,7 @@ public class BookingPaymentService {
         this.pgClient = pgClient;
         this.gate = gate;
         this.gateEnabled = properties.gate().enabled();
+        this.reflector = new PaymentGateReflector(gate, gateEnabled);
     }
 
     public PaymentResponse pay(long userId, long holdId, String idempotencyKey, Optional<PgScenario> scenario) {
@@ -62,7 +63,7 @@ public class BookingPaymentService {
             case DECLINED -> paymentTransaction.decline(started.paymentId());
             default -> paymentTransaction.markUnknown(started.paymentId(), unknownDetail(pg));
         };
-        reflect(settlement, started.seatIds());
+        reflector.reflect(settlement, started.seatIds());
         return respond(settlement);
     }
 
@@ -70,21 +71,6 @@ public class BookingPaymentService {
         PaymentSettlement settlement = paymentTransaction.view(userId, paymentId);
         return new PaymentStatusView(settlement.paymentId(), settlement.paymentStatus(), settlement.holdStatus(),
                 settlement.bookingId(), settlement.bookingNumber());
-    }
-
-    // 이번 호출이 상태를 바꿨을 때만 반영한다. 토큰이 같은 키만 건드리므로 시작 때 좌석 전체를 넘겨도 안전하다
-    private void reflect(PaymentSettlement settlement, List<Long> seatIds) {
-        if (!gateEnabled || !settlement.applied()) {
-            return;
-        }
-        switch (settlement.outcome()) {
-            case CONFIRMED -> gate.confirmQuietly(settlement.performanceId(), settlement.userId(), seatIds,
-                    settlement.holdToken(), settlement.gateCloseAt());
-            case SEAT_LOST, DECLINED, CANCELLED -> gate.releaseQuietly(settlement.performanceId(),
-                    settlement.userId(), seatIds, settlement.holdToken());
-            default -> {
-            }
-        }
     }
 
     private PaymentResponse respond(PaymentSettlement settlement) {

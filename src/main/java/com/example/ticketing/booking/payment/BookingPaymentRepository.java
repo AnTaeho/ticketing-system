@@ -43,6 +43,16 @@ public interface BookingPaymentRepository extends JpaRepository<BookingPayment, 
              WHERE id = :id AND status IN ('REQUESTED', 'UNKNOWN')""", nativeQuery = true)
     int markCancelled(@Param("id") long id);
 
+    // 대사가 다음 확인 시각을 정한다. 넘긴 오류가 없으면 이전 last_error를 둔다
+    @Modifying
+    @Query(value = """
+            UPDATE booking_payment
+               SET next_check_at = DATE_ADD(NOW(6), INTERVAL :delayMicros MICROSECOND),
+                   last_error = COALESCE(:lastError, last_error), updated_at = NOW(6)
+             WHERE id = :id AND status IN ('REQUESTED', 'UNKNOWN')""", nativeQuery = true)
+    int reschedule(@Param("id") long id, @Param("delayMicros") long delayMicros,
+                   @Param("lastError") String lastError);
+
     // 이미 확정된 결제는 건드리지 않는다
     @Modifying
     @Query(value = """

@@ -7,6 +7,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.example.ticketing.booking.BookingProperties;
 import com.example.ticketing.booking.payment.fakepg.FakePgTestConfig.GatedSleeper;
 import com.example.ticketing.booking.support.BookingIntegrationTest;
 import java.util.UUID;
@@ -19,6 +20,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
@@ -36,6 +38,10 @@ class FakePgControllerTest {
     private FakePgService fakePgService;
     @Autowired
     private GatedSleeper sleeper;
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+    @Autowired
+    private BookingProperties properties;
 
     private MockMvc mockMvc;
 
@@ -191,6 +197,36 @@ class FakePgControllerTest {
     }
 
     @Test
+    @DisplayName("승인 지연 중 앱이 죽어 남은 PROCESSING: slow-delay-ms+30초보다 오래되면 조회·취소가 DECLINED로 확정한다. "
+            + "최근 PROCESSING은 조회 200 PROCESSING, 취소 409 그대로")
+    void staleProcessingIsDeclined() throws Exception {
+        long staleSeconds = properties.fakePg().slowDelayMs() / 1_000 + 31;
+        String staleForQuery = insertProcessing(staleSeconds);
+        String staleForCancel = insertProcessing(staleSeconds);
+        String recent = insertProcessing(0);
+
+        mockMvc.perform(get(BASE + "/" + staleForQuery))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("DECLINED"));
+        mockMvc.perform(post(BASE + "/" + staleForCancel + "/cancel"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("DECLINED"));
+        assertThat(rowStatus(staleForQuery)).isEqualTo("DECLINED");
+        assertThat(rowStatus(staleForCancel)).isEqualTo("DECLINED");
+        mockMvc.perform(post(BASE + "/" + staleForQuery + "/cancel"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("DECLINED"));
+
+        mockMvc.perform(get(BASE + "/" + recent))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("PROCESSING"));
+        mockMvc.perform(post(BASE + "/" + recent + "/cancel"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.status").value("PROCESSING"));
+        assertThat(rowStatus(recent)).isEqualTo("PROCESSING");
+    }
+
+    @Test
     @DisplayName("모르는 시나리오·빈 orderId·40자 넘는 orderId·음수 금액은 400 INVALID_REQUEST(PG 응답 형식)이고 행을 만들지 않는다")
     void invalidRequests() throws Exception {
         approve(newOrderId(), "EXPLODE")
@@ -219,6 +255,20 @@ class FakePgControllerTest {
                 .header(FakePgController.SCENARIO_HEADER, scenario)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"orderId\":\"" + orderId + "\",\"amount\":1000}"));
+    }
+
+    // 승인 지연 도중 앱이 죽은 상태: PROCESSING 행만 남고 결과를 쓸 스레드가 없다
+    private String insertProcessing(long ageSeconds) {
+        String orderId = newOrderId();
+        jdbcTemplate.update("INSERT INTO fake_pg_transaction (order_id, amount, status, pg_tx_id, created_at, "
+                + "updated_at) VALUES (?, 1000, 'PROCESSING', NULL, NOW(6) - INTERVAL ? SECOND, "
+                + "NOW(6) - INTERVAL ? SECOND)", orderId, ageSeconds, ageSeconds);
+        return orderId;
+    }
+
+    private String rowStatus(String orderId) {
+        return jdbcTemplate.queryForObject("SELECT status FROM fake_pg_transaction WHERE order_id = ?",
+                String.class, orderId);
     }
 
     private static String newOrderId() {

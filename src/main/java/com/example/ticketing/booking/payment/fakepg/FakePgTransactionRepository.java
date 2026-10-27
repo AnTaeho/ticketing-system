@@ -33,6 +33,14 @@ public interface FakePgTransactionRepository extends JpaRepository<FakePgTransac
              WHERE order_id = :orderId AND status = 'PROCESSING'""", nativeQuery = true)
     int declineProcessing(@Param("orderId") String orderId);
 
+    // 승인 지연 중에 앱이 죽어 남은 PROCESSING을 승인 시간 초과로 보고 거절로 끝낸다
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query(value = """
+            UPDATE fake_pg_transaction SET status = 'DECLINED', updated_at = NOW(6)
+             WHERE order_id = :orderId AND status = 'PROCESSING'
+               AND created_at < DATE_SUB(NOW(6), INTERVAL :staleMicros MICROSECOND)""", nativeQuery = true)
+    int declineStaleProcessing(@Param("orderId") String orderId, @Param("staleMicros") long staleMicros);
+
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query(value = """
             UPDATE fake_pg_transaction SET status = 'CANCELLED', updated_at = NOW(6)

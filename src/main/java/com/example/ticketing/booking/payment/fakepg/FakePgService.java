@@ -1,5 +1,7 @@
 package com.example.ticketing.booking.payment.fakepg;
 
+import com.example.ticketing.booking.BookingProperties;
+import java.time.Duration;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -15,18 +17,21 @@ public class FakePgService {
     // 상태는 앞으로만 가므로(없음 → PROCESSING/CANCELLED, APPROVED → CANCELLED) 세 번이면 결론이 난다
     private static final int MAX_CANCEL_ATTEMPTS = 3;
     private static final String PG_TX_ID_PREFIX = "fpg_";
+    private static final Duration STALE_MARGIN = Duration.ofSeconds(30);
 
     private final FakePgTransactionRepository repository;
     private final FakePgDecider decider;
     private final FakePgSleeper sleeper;
     private final TransactionTemplate write;
     private final TransactionTemplate freshRead;
+    private final long staleMicros;
 
     public FakePgService(FakePgTransactionRepository repository, FakePgDecider decider, FakePgSleeper sleeper,
-                         PlatformTransactionManager transactionManager) {
+                         PlatformTransactionManager transactionManager, BookingProperties properties) {
         this.repository = repository;
         this.decider = decider;
         this.sleeper = sleeper;
+        this.staleMicros = Duration.ofMillis(properties.fakePg().slowDelayMs()).plus(STALE_MARGIN).toNanos() / 1_000;
         this.write = new TransactionTemplate(transactionManager);
         this.write.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
         this.write.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
@@ -58,13 +63,13 @@ public class FakePgService {
     }
 
     public FakePgReply query(String orderId) {
-        return find(orderId).map(FakePgReply::of).orElseGet(() -> FakePgReply.notFound(orderId));
+        return findSettlingStale(orderId).map(FakePgReply::of).orElseGet(() -> FakePgReply.notFound(orderId));
     }
 
     // PROCESSING이면 바꾸지 않고 PROCESSING을 돌려준다(HTTP 409)
     public FakePgReply cancel(String orderId) {
         for (int attempt = 0; attempt < MAX_CANCEL_ATTEMPTS; attempt++) {
-            Optional<FakePgTransaction> row = find(orderId);
+            Optional<FakePgTransaction> row = findSettlingStale(orderId);
             if (row.isEmpty()) {
                 try {
                     write.executeWithoutResult(status -> repository.insertCancelled(orderId));
@@ -84,6 +89,16 @@ public class FakePgService {
             }
         }
         throw new IllegalStateException("Fake PG 취소가 결론을 내지 못했다: " + orderId);
+    }
+
+    // 가장 느린 승인보다도 오래 PROCESSING이면 승인 시간 초과로 거절을 확정한 뒤 규칙을 적용한다
+    private Optional<FakePgTransaction> findSettlingStale(String orderId) {
+        Optional<FakePgTransaction> row = find(orderId);
+        if (row.isEmpty() || row.get().getStatus() != FakePgStatus.PROCESSING) {
+            return row;
+        }
+        Integer updated = write.execute(status -> repository.declineStaleProcessing(orderId, staleMicros));
+        return updated != null && updated == 1 ? find(orderId) : row;
     }
 
     private Optional<FakePgTransaction> find(String orderId) {

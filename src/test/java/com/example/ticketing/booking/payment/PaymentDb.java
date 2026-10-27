@@ -61,6 +61,27 @@ public class PaymentDb {
         jdbc.update("UPDATE seat_hold SET expires_at = NOW(6) - INTERVAL 1 SECOND WHERE id = ?", holdId);
     }
 
+    public void makeDue(long paymentId) {
+        jdbc.update("UPDATE booking_payment SET next_check_at = NOW(6) - INTERVAL 1 SECOND WHERE id = ?", paymentId);
+    }
+
+    public void ageCreatedAt(long paymentId, int seconds) {
+        jdbc.update("UPDATE booking_payment SET created_at = NOW(6) - INTERVAL ? SECOND WHERE id = ?",
+                seconds, paymentId);
+    }
+
+    // 다음 확인 시각까지 남은 시간(ms). 과거면 음수
+    public long recheckMs(long paymentId) {
+        return jdbc.queryForObject("SELECT TIMESTAMPDIFF(MICROSECOND, NOW(6), next_check_at) FROM booking_payment "
+                + "WHERE id = ?", Long.class, paymentId) / 1_000;
+    }
+
+    // 대사 테스트가 이전 테스트들이 남긴 결과 모름·요청 결제를 집지 않게 먼 미래로 미룬다(테스트 전용 DB)
+    public void parkUnsettledPayments() {
+        jdbc.update("UPDATE booking_payment SET next_check_at = '2999-12-31 00:00:00' "
+                + "WHERE status IN ('REQUESTED', 'UNKNOWN')");
+    }
+
     public LocalDateTime dbNow() {
         return jdbc.queryForObject("SELECT NOW(6)", LocalDateTime.class);
     }

@@ -175,7 +175,7 @@ class PaymentApiControllerTest {
     }
 
     @Test
-    @DisplayName("거절은 402 PAYMENT_DECLINED + detail.paymentId. 결제가 한 번 있었던 hold에 다른 키로 보내면 409 ALREADY_PAYING")
+    @DisplayName("거절은 402 PAYMENT_DECLINED + detail.paymentId. 거절로 풀린 hold에 다른 키로 보내면 409 HOLD_NOT_PAYABLE(detail.status RELEASED)")
     void declined() throws Exception {
         Hold h = newHold();
         stubPg.approveWith(PgResult.of(PgStatus.DECLINED, null));
@@ -192,7 +192,8 @@ class PaymentApiControllerTest {
 
         pay(h, UUID.randomUUID().toString())
                 .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value("ALREADY_PAYING"));
+                .andExpect(jsonPath("$.code").value("HOLD_NOT_PAYABLE"))
+                .andExpect(jsonPath("$.detail.status").value("RELEASED"));
     }
 
     @Test
