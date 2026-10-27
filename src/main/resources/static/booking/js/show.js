@@ -82,6 +82,10 @@
   function load() {
     bk.get('/api/shows/' + showId).then(render, function (e) {
       loading.hidden = true;
+      if (e.status === 404) {
+        document.getElementById('show-missing').hidden = false;
+        return;
+      }
       error.textContent = e.message;
       error.hidden = false;
     });

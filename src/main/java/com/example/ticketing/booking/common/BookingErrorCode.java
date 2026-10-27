@@ -30,7 +30,7 @@ public enum BookingErrorCode {
     SEAT_STATE_CHANGED(HttpStatus.CONFLICT, "방금 다른 분이 고른 자리예요. 다른 자리를 골라 주세요"),
     USER_HAS_HOLD(HttpStatus.CONFLICT, "이미 잡아 둔 자리가 있어요"),
     COOLDOWN(HttpStatus.CONFLICT, "시간이 지나 놓친 자리는 10분 뒤에 다시 고를 수 있어요"),
-    HOLD_NOT_CANCELLABLE(HttpStatus.CONFLICT, "결제를 하고 있는 중이라 자리를 놓을 수 없어요"),
+    HOLD_NOT_CANCELLABLE(HttpStatus.CONFLICT, "지금은 이 자리를 놓을 수 없어요"),
     HOLD_EXPIRED(HttpStatus.CONFLICT, "결제 시간이 지나 자리가 풀렸어요"),
     HOLD_NOT_PAYABLE(HttpStatus.CONFLICT, "지금은 이 자리를 결제할 수 없어요"),
     ALREADY_PAYING(HttpStatus.CONFLICT, "다른 화면에서 이미 결제하고 있어요"),

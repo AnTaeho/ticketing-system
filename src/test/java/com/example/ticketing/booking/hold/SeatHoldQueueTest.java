@@ -201,7 +201,7 @@ class SeatHoldQueueTest {
         BookingRedis deadRedis = TestBookingRedis.connectTo("localhost", closedPort(), properties);
         try {
             BookingQueueService deadQueue = new BookingQueueService(new BookingQueueRepository(deadRedis),
-                    seatCatalog, properties);
+                    seatCatalog, dbClock, properties);
             SeatHoldService service = newService(deadQueue, properties);
             double gateBefore = counterSum("booking.hold.gate");
             double dbBefore = counterSum("booking.hold.db");

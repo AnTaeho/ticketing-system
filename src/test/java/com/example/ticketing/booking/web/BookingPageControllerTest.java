@@ -5,13 +5,16 @@ import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.not;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.model;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.redirectedUrl;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.view;
 
 import com.example.ticketing.booking.BookingProperties;
+import com.example.ticketing.booking.common.BookingExceptionHandler;
 import com.example.ticketing.booking.support.BookingIntegrationTest;
+import com.example.ticketing.global.exception.GlobalExceptionHandler;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -64,12 +67,14 @@ class BookingPageControllerTest {
     }
 
     @Test
-    @DisplayName("공연 상세는 경로의 공연 번호를 화면에 넘기고 뒤로 가기를 공연 목록에 건다")
+    @DisplayName("공연 상세는 경로의 공연 번호를 화면에 넘기고 뒤로 가기를 공연 목록에 걸며, 없는 공연이면 보일 안내와 공연 목록 단추를 둔다")
     void showPassesShowId() throws Exception {
         mockMvc.perform(get("/booking/shows/7"))
                 .andExpect(model().attribute("showId", 7L))
                 .andExpect(content().string(containsString("data-show-id=\"7\"")))
-                .andExpect(content().string(containsString("href=\"/booking/shows\"")));
+                .andExpect(content().string(containsString("href=\"/booking/shows\"")))
+                .andExpect(content().string(containsString("id=\"show-missing\"")))
+                .andExpect(content().string(containsString("찾을 수 없는 공연이에요")));
     }
 
     @Test
@@ -170,6 +175,61 @@ class BookingPageControllerTest {
                 .andExpect(content().string(containsString("href=\"/booking/css/ops.css\"")))
                 .andExpect(content().string(containsString("id=\"ops-grid\"")))
                 .andExpect(content().string(containsString("Redis를 읽지 못했어요")));
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @CsvSource({
+            "/booking/shows/abc",
+            "/booking/performances/x/queue",
+            "/booking/performances/1.5/seats",
+            "/booking/holds/abc/checkout",
+            "/booking/ops/performances/abc"
+    })
+    @DisplayName("화면 경로의 번호가 숫자가 아니면 JSON 대신 404 오류 화면과 공연 목록 단추를 보여 준다")
+    void badNumberInPagePathShowsErrorPage(String path) throws Exception {
+        mockMvc.perform(get(path))
+                .andExpect(status().isNotFound())
+                .andExpect(view().name("booking/page-error"))
+                .andExpect(content().contentTypeCompatibleWith("text/html"))
+                .andExpect(content().string(containsString("찾을 수 없는 화면이에요")))
+                .andExpect(content().string(containsString("class=\"btn btn-primary\" href=\"/booking/shows\">공연 목록</a>")))
+                .andExpect(content().string(containsString("href=\"/booking/css/booking.css\"")));
+    }
+
+    @Test
+    @DisplayName("API 경로의 잘못된 번호는 지금처럼 예매 JSON 400으로 답한다")
+    void badNumberInApiPathStaysJson() throws Exception {
+        mockMvc.perform(get("/api/shows/abc"))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().contentTypeCompatibleWith("application/json"))
+                .andExpect(jsonPath("$.code").value("INVALID_REQUEST"));
+    }
+
+    @Test
+    @DisplayName("화면 컨트롤러의 다른 예외도 예매·전역 JSON 처리기보다 먼저 잡혀 500 오류 화면이 된다")
+    void unexpectedPageFailureShowsErrorPage() throws Exception {
+        ThymeleafViewResolver resolver = new ThymeleafViewResolver();
+        resolver.setTemplateEngine(context.getBean(ISpringTemplateEngine.class));
+        resolver.setCharacterEncoding("UTF-8");
+        BookingPageController exploding = new BookingPageController(context.getBean(BookingProperties.class),
+                new MockEnvironment()) {
+            @Override
+            public String shows() {
+                throw new IllegalStateException("boom");
+            }
+        };
+        MockMvc failingMvc = MockMvcBuilders.standaloneSetup(exploding)
+                .setControllerAdvice(new GlobalExceptionHandler(), new BookingExceptionHandler(),
+                        new BookingPageExceptionHandler())
+                .setViewResolvers(resolver)
+                .build();
+
+        failingMvc.perform(get("/booking/shows"))
+                .andExpect(status().isInternalServerError())
+                .andExpect(view().name("booking/page-error"))
+                .andExpect(content().string(containsString("화면을 열지 못했어요")))
+                .andExpect(content().string(containsString(">공연 목록</a>")))
+                .andExpect(content().string(not(containsString("boom"))));
     }
 
     @Test

@@ -13,8 +13,8 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
-// 전역 처리기의 Exception 처리기보다 먼저 잡혀야 예매 응답 형식이 유지된다
-@Order(Ordered.HIGHEST_PRECEDENCE)
+// 전역 처리기의 Exception 처리기보다 먼저 잡혀야 예매 응답 형식이 유지된다. 화면 경로 처리기가 이보다 앞선다
+@Order(Ordered.HIGHEST_PRECEDENCE + 1)
 @RestControllerAdvice(basePackages = "com.example.ticketing.booking")
 public class BookingExceptionHandler {
 

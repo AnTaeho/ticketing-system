@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.within;
 
 import com.example.ticketing.booking.BookingProperties;
 import com.example.ticketing.booking.common.BookingRedis;
+import com.example.ticketing.booking.common.DbClock;
 import com.example.ticketing.booking.common.SchedulerLease;
 import com.example.ticketing.booking.seat.SeatCatalog;
 import com.example.ticketing.booking.support.BookingFixtures;
@@ -31,6 +32,8 @@ class QueuePromotionSchedulerTest {
     private BookingQueueRepository repository;
     @Autowired
     private SeatCatalog seatCatalog;
+    @Autowired
+    private DbClock dbClock;
     @Autowired
     private SchedulerLease lease;
     @Autowired
@@ -192,7 +195,7 @@ class QueuePromotionSchedulerTest {
     }
 
     private BookingQueueService service(int capacity) {
-        return new BookingQueueService(repository, seatCatalog, QueueTestProps.withCapacity(props, capacity));
+        return new BookingQueueService(repository, seatCatalog, dbClock, QueueTestProps.withCapacity(props, capacity));
     }
 
     private QueuePromotionScheduler scheduler(int capacity, SeatCatalog catalog) {

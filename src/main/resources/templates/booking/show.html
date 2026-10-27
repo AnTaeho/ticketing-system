@@ -9,6 +9,11 @@
 <main class="wrap">
   <p class="empty" id="show-loading">공연 정보를 불러오고 있어요</p>
   <p class="alert" id="show-error" role="alert" hidden></p>
+  <section class="panel lost" id="show-missing" role="alert" hidden>
+    <p class="state-title">찾을 수 없는 공연이에요</p>
+    <p class="state-text">공연 목록에서 다시 골라 주세요.</p>
+    <a class="btn btn-primary" th:href="@{/booking/shows}">공연 목록</a>
+  </section>
   <div id="show-body" hidden>
     <p class="panel about" id="show-about" hidden></p>
     <h2 class="sec-title">날짜 고르기</h2>

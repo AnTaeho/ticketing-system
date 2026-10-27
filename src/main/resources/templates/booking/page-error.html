@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="ko" xmlns:th="http://www.thymeleaf.org">
+<head>
+  <th:block th:replace="~{booking/layout :: assets(${errorTitle})}"></th:block>
+</head>
+<body class="narrow">
+<header th:replace="~{booking/layout :: top('티켓 예매', null, @{/booking/shows})}"></header>
+<main class="wrap">
+  <section class="panel lost" role="alert">
+    <p class="state-title" th:text="${errorTitle}">찾을 수 없는 화면이에요</p>
+    <p class="state-text" th:text="${errorText}">주소가 바뀌었거나 잘못 입력됐어요.</p>
+    <a class="btn btn-primary" th:href="@{/booking/shows}">공연 목록</a>
+  </section>
+</main>
+</body>
+</html>

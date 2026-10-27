@@ -3,6 +3,7 @@ package com.example.ticketing.booking.queue;
 import com.example.ticketing.booking.BookingProperties;
 import com.example.ticketing.booking.common.BookingErrorCode;
 import com.example.ticketing.booking.common.BookingException;
+import com.example.ticketing.booking.common.DbClock;
 import com.example.ticketing.booking.queue.BookingQueueRepository.Entered;
 import com.example.ticketing.booking.queue.dto.QueueEntered;
 import com.example.ticketing.booking.queue.dto.QueuePosition;
@@ -10,7 +11,6 @@ import com.example.ticketing.booking.seat.SeatCatalog;
 import com.example.ticketing.booking.seat.SeatCatalog.PerformanceInfo;
 import com.example.ticketing.booking.show.domain.PerformanceState;
 import io.lettuce.core.RedisException;
-import java.time.LocalDateTime;
 import java.util.Map;
 import java.util.UUID;
 import lombok.extern.slf4j.Slf4j;
@@ -26,14 +26,16 @@ public class BookingQueueService {
 
     private final BookingQueueRepository repository;
     private final SeatCatalog seatCatalog;
+    private final DbClock dbClock;
     private final int capacity;
     private final long processingTtlMs;
     private final long waitingTtlMs;
 
-    public BookingQueueService(BookingQueueRepository repository, SeatCatalog seatCatalog,
+    public BookingQueueService(BookingQueueRepository repository, SeatCatalog seatCatalog, DbClock dbClock,
                                BookingProperties properties) {
         this.repository = repository;
         this.seatCatalog = seatCatalog;
+        this.dbClock = dbClock;
         this.capacity = properties.queue().capacity();
         this.processingTtlMs = properties.queue().processingTokenTtl().toMillis();
         this.waitingTtlMs = properties.queue().waitingTokenTtl().toMillis();
@@ -99,9 +101,10 @@ public class BookingQueueService {
         return QueuePosition.expired();
     }
 
+    // 상세 화면이 DB 시각으로 「예매하기」를 띄우므로 같은 기준으로 본다. 진입마다 DB를 치지 않게 차이만 캐시한다
     private void ensureOpen(long performanceId) {
         PerformanceInfo performance = seatCatalog.performance(performanceId);
-        if (PerformanceState.of(performance.openAt(), performance.startsAt(), LocalDateTime.now())
+        if (PerformanceState.of(performance.openAt(), performance.startsAt(), dbClock.estimatedNow())
                 != PerformanceState.OPEN) {
             throw new BookingException(BookingErrorCode.NOT_OPEN, Map.of("performanceId", performanceId));
         }

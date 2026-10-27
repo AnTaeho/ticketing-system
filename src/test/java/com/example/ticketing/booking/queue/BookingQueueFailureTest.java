@@ -6,6 +6,7 @@ import com.example.ticketing.booking.BookingProperties;
 import com.example.ticketing.booking.common.BookingErrorCode;
 import com.example.ticketing.booking.common.BookingException;
 import com.example.ticketing.booking.common.BookingRedis;
+import com.example.ticketing.booking.common.DbClock;
 import com.example.ticketing.booking.common.TestBookingRedis;
 import com.example.ticketing.booking.seat.SeatCatalog;
 import com.example.ticketing.booking.support.BookingFixtures;
@@ -31,6 +32,8 @@ class BookingQueueFailureTest {
     private SeatCatalog seatCatalog;
     @Autowired
     private BookingFixtures fixtures;
+    @Autowired
+    private DbClock dbClock;
 
     private BookingRedis deadRedis;
     private BookingQueueService deadService;
@@ -38,7 +41,7 @@ class BookingQueueFailureTest {
     @BeforeEach
     void setUp() throws IOException {
         deadRedis = TestBookingRedis.connectTo("localhost", closedPort(), props);
-        deadService = new BookingQueueService(new BookingQueueRepository(deadRedis), seatCatalog, props);
+        deadService = new BookingQueueService(new BookingQueueRepository(deadRedis), seatCatalog, dbClock, props);
     }
 
     @AfterEach

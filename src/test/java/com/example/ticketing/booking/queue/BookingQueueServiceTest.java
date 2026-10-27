@@ -7,12 +7,15 @@ import com.example.ticketing.booking.BookingProperties;
 import com.example.ticketing.booking.common.BookingErrorCode;
 import com.example.ticketing.booking.common.BookingException;
 import com.example.ticketing.booking.common.BookingRedis;
+import com.example.ticketing.booking.common.DbClock;
+import com.example.ticketing.booking.common.TestDbClock;
 import com.example.ticketing.booking.queue.dto.QueueEntered;
 import com.example.ticketing.booking.queue.dto.QueuePosition;
 import com.example.ticketing.booking.seat.SeatCatalog;
 import com.example.ticketing.booking.support.BookingFixtures;
 import com.example.ticketing.booking.support.BookingIntegrationTest;
 import com.example.ticketing.booking.support.RedisKeyCleaner;
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -31,6 +34,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 @BookingIntegrationTest
 class BookingQueueServiceTest {
@@ -44,6 +48,10 @@ class BookingQueueServiceTest {
     private BookingQueueRepository repository;
     @Autowired
     private SeatCatalog seatCatalog;
+    @Autowired
+    private DbClock dbClock;
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
     @Autowired
     private BookingProperties props;
     @Autowired
@@ -214,6 +222,26 @@ class BookingQueueServiceTest {
     }
 
     @Test
+    @DisplayName("오픈 판정은 DB 시각 기준: DB가 서버보다 2시간 앞서면 열린 회차, 2시간 뒤지면 오픈 전(409)")
+    void openCheckUsesDbTime() {
+        LocalDateTime now = fixtures.dbNow();
+        long show = fixtures.newShow();
+        long opensInAnHour = track(fixtures.newPerformance(show, now.plusHours(1), now.plusDays(1), 1, 1, 1));
+        long openedAnHourAgo = track(fixtures.newPerformance(show, now.minusHours(1), now.plusDays(1), 1, 1, 1));
+        BookingQueueService dbAhead = new BookingQueueService(repository, seatCatalog,
+                TestDbClock.withDbShift(jdbcTemplate, Duration.ofHours(2)), props);
+        BookingQueueService dbBehind = new BookingQueueService(repository, seatCatalog,
+                TestDbClock.withDbShift(jdbcTemplate, Duration.ofHours(-2)), props);
+
+        assertThat(dbAhead.enter(opensInAnHour, USER_BASE + 1).status()).isEqualTo(QueueTokenStatus.PROCESSING);
+        assertThatThrownBy(() -> dbBehind.enter(openedAnHourAgo, USER_BASE + 2))
+                .isInstanceOf(BookingException.class)
+                .extracting(e -> ((BookingException) e).getCode())
+                .isEqualTo(BookingErrorCode.NOT_OPEN);
+        assertThat(cleaner.keys(openedAnHourAgo)).isEmpty();
+    }
+
+    @Test
     @DisplayName("isAdmitted: 내 처리열 토큰만 true. 남의 토큰·없는 토큰·대기 토큰·형식이 틀린 토큰·만료 점수는 false")
     void isAdmitted() {
         long pid = openPerformance();
@@ -298,7 +326,7 @@ class BookingQueueServiceTest {
     }
 
     private BookingQueueService serviceWithCapacity(int capacity) {
-        return new BookingQueueService(repository, seatCatalog, QueueTestProps.withCapacity(props, capacity));
+        return new BookingQueueService(repository, seatCatalog, dbClock, QueueTestProps.withCapacity(props, capacity));
     }
 
     private long openPerformance() {

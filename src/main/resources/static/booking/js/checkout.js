@@ -157,9 +157,10 @@
 
   // ---- 화면 전환 ----
 
+  // 단추 자리는 남겨 두어 결제 중에 머리글 글자가 옆으로 밀리지 않게 한다
   function setBack(href) {
     if (!back) return;
-    back.hidden = !href;
+    back.style.visibility = href ? '' : 'hidden';
     if (href) back.setAttribute('href', href);
   }
 
@@ -385,6 +386,7 @@
     showCoNote(note || '');
     setPayButton('결제하기', true);
     releaseButton.disabled = false;
+    lockChoices(false);
     showOnly(co);
     setBack(showHref);
     idempotencyKey();
@@ -401,6 +403,14 @@
     return picked ? picked.value : 'CARD';
   }
 
+  // 결제 요청이 나가 있는 동안 고른 것을 바꿔도 그 요청에는 반영되지 않으므로 함께 끈다
+  function lockChoices(locked) {
+    document.querySelectorAll('input[name="method"], input[name="scenario"]').forEach(function (input) {
+      input.disabled = locked;
+    });
+    co.classList.toggle('is-locked', locked);
+  }
+
   payButton.addEventListener('click', function () {
     if (stage !== 'pay' || timeUp) return;
     stage = 'paying';
@@ -408,6 +418,7 @@
     showCoNote('');
     setPayButton('결제하고 있어요', false);
     releaseButton.disabled = true;
+    lockChoices(true);
     setBack(null);
     var chosen = method();
     bk.session.set(methodName, chosen);
@@ -438,6 +449,7 @@
     }
     stage = 'pay';
     releaseButton.disabled = false;
+    lockChoices(false);
     setBack(showHref);
     if (e.status === 0 || e.status >= 500) {
       // 같은 번호로 다시 보내므로 이미 처리된 결제면 같은 결과가 돌아온다
@@ -452,6 +464,34 @@
   }
 
   // ---- 자리 놓기 ----
+
+  // 놓지 못한 까닭은 서버가 알려 준 그 순간의 자리 상태로 고른다
+  function notCancellable(e) {
+    switch (e.detail.status) {
+      case 'RELEASED':
+      case 'EXPIRED':
+        showResult({
+          title: '이미 풀린 자리예요',
+          text: '다시 예매하려면 줄을 서서 자리를 골라 주세요.',
+          main: repick(), sub: showsLink()
+        });
+        return;
+      case 'CONFIRMED':
+        showResult({
+          title: '이미 예매가 끝난 자리예요',
+          text: '취소는 내 예매에서 할 수 있어요.',
+          facts: seatFacts(false),
+          main: { label: '내 예매 보기', href: BOOKINGS_HREF },
+          sub: showsLink()
+        });
+        return;
+      case 'PAYING':
+        reload('결제를 하고 있는 중이라 놓을 수 없어요');
+        return;
+      default:
+        reload(e.message);
+    }
+  }
 
   releaseButton.addEventListener('click', function () {
     if (stage !== 'pay' || timeUp) return;
@@ -480,7 +520,7 @@
     }, function (e) {
       closeAsk();
       if (e.code === 'HOLD_NOT_CANCELLABLE') {
-        reload('결제를 하고 있는 중이라 놓을 수 없어요');
+        notCancellable(e);
       } else if (e.code === 'HOLD_NOT_FOUND') {
         showNotFound();
       } else {
@@ -620,6 +660,7 @@
       showCoNote(note || e.message);
       setPayButton('결제하기', true);
       releaseButton.disabled = false;
+      lockChoices(false);
     });
   }
 

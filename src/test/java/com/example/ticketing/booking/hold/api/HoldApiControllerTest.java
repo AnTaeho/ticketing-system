@@ -110,7 +110,8 @@ class HoldApiControllerTest {
                 .andExpect(jsonPath("$.seats.length()").value(0));
         mockMvc.perform(delete("/api/holds/{holdId}", holdId).header(USER, userId))
                 .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value("HOLD_NOT_CANCELLABLE"));
+                .andExpect(jsonPath("$.code").value("HOLD_NOT_CANCELLABLE"))
+                .andExpect(jsonPath("$.detail.status").value("RELEASED"));
     }
 
     @Test
@@ -151,6 +152,28 @@ class HoldApiControllerTest {
                 .andExpect(jsonPath("$.detail.status").value("PAYING"));
         assertThat(jdbcTemplate.queryForObject("SELECT status FROM seat WHERE id = ?", String.class, seatId))
                 .isEqualTo("HELD");
+    }
+
+    @Test
+    @DisplayName("이미 끝난 hold의 취소는 409 HOLD_NOT_CANCELLABLE과 detail.status(EXPIRED·CONFIRMED·RELEASED)로 까닭을 알린다")
+    void notCancellableCarriesStatus() throws Exception {
+        long pid = fixtures.newPerformance(1, 1, 3);
+        List<String> finishedStates = List.of("EXPIRED", "CONFIRMED", "RELEASED");
+        for (int i = 0; i < finishedStates.size(); i++) {
+            String finished = finishedStates.get(i);
+            long userId = fixtures.newUser();
+            long holdId = body(hold(userId, pid, List.of(seatIds(pid).get(i)))
+                    .andExpect(status().isCreated()).andReturn()).get("holdId").asLong();
+            jdbcTemplate.update("UPDATE seat_hold SET status = ? WHERE id = ?", finished, holdId);
+
+            mockMvc.perform(delete("/api/holds/{holdId}", holdId).header(USER, userId))
+                    .andExpect(status().isConflict())
+                    .andExpect(jsonPath("$.code").value("HOLD_NOT_CANCELLABLE"))
+                    .andExpect(jsonPath("$.message").value("지금은 이 자리를 놓을 수 없어요"))
+                    .andExpect(jsonPath("$.detail.status").value(finished));
+            assertThat(jdbcTemplate.queryForObject("SELECT status FROM seat_hold WHERE id = ?", String.class, holdId))
+                    .isEqualTo(finished);
+        }
     }
 
     @Test

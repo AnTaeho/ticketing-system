@@ -109,20 +109,25 @@
     showState('줄을 서지 못했어요', e.message, { label: '다시 시도', run: retry });
   }
 
-  function poll(token) {
+  // arrived: 이 화면에 막 들어와 저장된 표를 처음 확인하는 중. 이미 쓴 표일 수 있어 끝났으면 말없이 새로 선다
+  function poll(token, arrived) {
     bk.get('/api/performances/' + pid + '/queue/tokens/' + encodeURIComponent(token)).then(function (s) {
       showNote('');
       if (s.status === 'PROCESSING') return admit();
-      if (s.status === 'EXPIRED') return expired();
+      if (s.status === 'EXPIRED') {
+        if (!arrived) return expired();
+        bk.session.remove(tokenKey);
+        return enter();
+      }
       showWaiting(s.position, s.estimatedWaitSeconds);
-      later(function () { poll(token); }, POLL_MS);
+      later(function () { poll(token, false); }, POLL_MS);
     }, function (e) {
       // 다른 닉네임으로 받은 토큰 등 쓸 수 없는 토큰이면 버리고 새로 선다
       if (e.code === 'QUEUE_TOKEN_NOT_FOUND') {
         bk.session.remove(tokenKey);
         return enter();
       }
-      fail(e, function () { poll(token); });
+      fail(e, function () { poll(token, arrived); });
     });
   }
 
@@ -132,7 +137,7 @@
     bk.post('/api/performances/' + pid + '/queue/tokens').then(function (r) {
       bk.session.set(tokenKey, r.token);
       if (r.status === 'PROCESSING') return admit();
-      poll(r.token);
+      poll(r.token, false);
     }, function (e) {
       fail(e, enter);
     });
@@ -156,5 +161,5 @@
 
   loadHeader();
   var saved = bk.session.get(tokenKey);
-  if (saved) poll(saved); else enter();
+  if (saved) poll(saved, true); else enter();
 })();
