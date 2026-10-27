@@ -16,6 +16,6 @@ import org.springframework.context.annotation.Import;
         "spring.datasource.url=jdbc:mysql://localhost:3306/ticketing_booking_test"
                 + "?createDatabaseIfNotExist=true&serverTimezone=Asia/Seoul&characterEncoding=UTF-8"
 })
-@Import(BookingFixtures.class)
+@Import({BookingFixtures.class, RedisKeyCleaner.class})
 public @interface BookingIntegrationTest {
 }
