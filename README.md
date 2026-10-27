@@ -49,7 +49,9 @@ WaitingRoom (별도 모듈): Sorted Set 대기열 → DECR 선점 → 즉시 PEN
 ## 버전별 구현 핵심
 
 ### V1 — No Lock (기준선)
-`조회 → 검증 → 차감 → 저장`을 동기화 없이 수행 → **lost update**로 재고보다 적은 예약 생성. 기준 데이터 확보용.
+`조회 → 검증 → 차감 → 저장`을 동기화 없이 수행 → **lost update**로 재고 차감이 유실되어 재고보다 많은 예약 생성(오버부킹). 기준 데이터 확보용.
+
+> 주의: `Concert` 엔티티의 `@Version`을 모든 버전이 공유하므로, 현재 코드의 V1은 JPA 버전 체크 때문에 사실상 "재시도 없는 낙관적 락"으로 동작한다(충돌 요청은 실패, 오버부킹 없음). 아래 표의 V1 수치는 V1의 재고 차감만 버전 조건 없는 `UPDATE concert SET stock = ? WHERE id = ?`로 바꾼 일회성 빌드로 2026-09-29에 재측정한 값이다. V2~V6 수치는 2026-06-15 측정이다.
 
 ### V2 — DB 비관적 락
 `@Lock(PESSIMISTIC_WRITE)` → `SELECT ... FOR UPDATE`. 트랜잭션 종료까지 대기 → 정합성 100%, 대기 큐 증가.
@@ -125,7 +127,7 @@ GET /api/v6/reservations/{ticketToken}/status
 
 | 버전 | 방식 | P99 | Mean | TPS | 오버부킹 |
 |------|------|-----|------|-----|----------|
-| V1 | No Lock | 342ms | 226ms | 500 | 0 (lost update) |
+| V1 | No Lock | 252ms | 148ms | 500 | **400** (성공 예약 500, 최종 재고 49) |
 | V2 | Pessimistic | 293ms | 233ms | 500 | 0 ✅ |
 | V3 | Optimistic | 286ms | 211ms | 500 | 0 ✅ |
 | V4 | Spin Lock | **3,587ms** | 895ms | 100 | 0 ✅ |
@@ -138,7 +140,7 @@ GET /api/v6/reservations/{ticketToken}/status
 
 | 버전 | 방식 | P99 | req/s | 에러율 |
 |------|------|-----|-------|--------|
-| V1 | No Lock | 4,706ms | 267.4 | 6.85% |
+| V1 | No Lock | 10,182ms | 222.2 | 0% (예약 2,000건에 재고는 988만 감소, 1,012건 유실) |
 | V2 | Pessimistic | 9,934ms | 222.2 | 0% |
 | V3 | Optimistic | 12,458ms | 150.9 | 0% |
 | V4 | Spin Lock | **13,731ms** | 223.8 | 0% |
