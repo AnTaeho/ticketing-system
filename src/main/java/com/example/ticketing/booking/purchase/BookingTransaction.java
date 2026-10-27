@@ -13,7 +13,6 @@ import com.example.ticketing.booking.purchase.domain.BookingStatus;
 import com.example.ticketing.booking.purchase.dto.RefundStatus;
 import com.example.ticketing.booking.seat.SeatRepository;
 import com.example.ticketing.booking.show.PerformanceRepository;
-import jakarta.persistence.EntityManager;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -35,12 +34,10 @@ public class BookingTransaction {
     private final PerformanceRepository performanceRepository;
     private final OutboxWriter outboxWriter;
     private final JsonMapper jsonMapper;
-    private final EntityManager entityManager;
 
     // booking 락이 같은 예매의 취소를 줄 세운다. 뒤에 온 쪽은 CANCELLED를 보고 아무것도 바꾸지 않으므로 환불 작업은 하나다
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public Cancellation cancel(long userId, long bookingId) {
-        forgetEarlierEntities();
         Booking booking = bookingRepository.lockByIdAndUserId(bookingId, userId)
                 .orElseThrow(() -> new BookingException(BookingErrorCode.BOOKING_NOT_FOUND,
                         Map.of("bookingId", bookingId)));
@@ -63,11 +60,6 @@ public class BookingTransaction {
                 json("paymentId", payment.getId(), "orderId", payment.getOrderId()));
         return new Cancellation(bookingId, booking.getPerformanceId(), true, hold.getHoldToken(),
                 List.copyOf(seatIds), RefundStatus.REQUESTED);
-    }
-
-    // open-in-view면 앞 트랜잭션이 읽은 엔티티가 남아 락 뒤의 최신 행 대신 보일 수 있어 비우고 시작한다
-    private void forgetEarlierEntities() {
-        entityManager.clear();
     }
 
     private String json(Object... keyValues) {

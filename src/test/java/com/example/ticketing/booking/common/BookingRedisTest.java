@@ -41,8 +41,8 @@ class BookingRedisTest {
     }
 
     @Test
-    @DisplayName("예매 전용 연결은 빈으로 노출되지 않아 기본 Redis 빈이 하나씩 그대로 있다")
-    void defaultRedisBeansUnchanged() {
+    @DisplayName("예매 전용 연결은 빈으로 노출되지 않아 Redis 빈은 Boot 기본 연결 하나씩뿐이고 예매 연결과 다르다")
+    void bookingRedisNotExposedAsBean() {
         assertThat(context.getBeansOfType(StringRedisTemplate.class)).hasSize(1);
         assertThat(context.getBeansOfType(RedisConnectionFactory.class)).hasSize(1);
 

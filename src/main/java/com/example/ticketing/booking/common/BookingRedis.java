@@ -16,8 +16,8 @@ import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactor
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 
-// 기본 연결과 분리: 동결 코드(V4·V6·waitingroom)의 타임아웃을 바꾸지 않으려고.
-// 팩토리·템플릿을 빈으로 올리면 Boot가 기본 Redis 연결을 만들지 않으므로 이 안에만 둔다.
+// 짧은 명령 타임아웃과 빠른 재연결로 Redis 장애를 빨리 알아채려고 연결을 직접 만든다.
+// 팩토리·템플릿은 빈으로 올리지 않고 이 안에만 둔다. 예매 코드는 이 템플릿만 쓴다.
 @Component
 public class BookingRedis implements DisposableBean {
 

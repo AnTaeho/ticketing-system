@@ -1,5 +1,6 @@
 package com.example.ticketing.booking.common;
 
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -35,7 +36,7 @@ class BookingExceptionHandlerTest {
     }
 
     @Test
-    @DisplayName("사용자 정보가 없으면 예매 처리기가 401 LOGIN_REQUIRED로 응답하고 전역 처리기의 error 키는 없다")
+    @DisplayName("사용자 정보가 없으면 예매 처리기가 401 LOGIN_REQUIRED로 응답하고 error 키는 없다")
     void loginRequired() throws Exception {
         mockMvc.perform(get(PROBE + "/me"))
                 .andExpect(status().isUnauthorized())
@@ -103,20 +104,10 @@ class BookingExceptionHandlerTest {
     }
 
     @Test
-    @DisplayName("예매 처리기가 다루지 않는 예외는 기존 전역 처리기로 간다")
-    void unhandledFallsBackToGlobal() throws Exception {
-        mockMvc.perform(get(PROBE + "/boom").header("X-User-Id", "1"))
-                .andExpect(status().isInternalServerError())
-                .andExpect(jsonPath("$.error").value("boom"))
-                .andExpect(jsonPath("$.code").doesNotExist());
-    }
-
-    @Test
-    @DisplayName("기존 컨트롤러의 예외 응답 형식은 그대로다")
-    void existingControllerUnchanged() throws Exception {
-        mockMvc.perform(get("/api/concerts/" + Long.MAX_VALUE))
-                .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.error").exists())
-                .andExpect(jsonPath("$.code").doesNotExist());
+    @DisplayName("예매 처리기가 다루지 않는 예외는 잡지 않고 넘겨 Boot 기본 오류 처리에 맡긴다")
+    void unhandledIsNotCaught() {
+        assertThatThrownBy(() -> mockMvc.perform(get(PROBE + "/boom").header("X-User-Id", "1")))
+                .hasRootCauseInstanceOf(IllegalStateException.class)
+                .hasRootCauseMessage("boom");
     }
 }

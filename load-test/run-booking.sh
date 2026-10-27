@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 지정석 예매(V7) 부하 실행: 회차를 새로 만들고 시나리오 C를 돌린 뒤 MySQL·카운터 차이와 오버부킹을 기록한다.
 #
-# 앱은 직접 띄운다. 게이트 ON/OFF는 enabled 값만 바꿔 다시 띄운다(Kafka 불필요).
+# 앱은 직접 띄운다. 게이트 ON/OFF는 enabled 값만 바꿔 다시 띄운다.
 #   ./gradlew bootRun --args='--booking.gate.enabled=true --booking.queue.capacity=5000 --booking.fake-pg.delay-min-ms=50 --booking.fake-pg.delay-max-ms=150 --booking.fake-pg.decline-rate=0 --booking.fake-pg.slow-rate=0'
 #
 # 사용법: MYSQL_PWD=<비밀번호> load-test/run-booking.sh <on|off> <users> [runs]

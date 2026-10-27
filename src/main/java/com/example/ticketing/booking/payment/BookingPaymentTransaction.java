@@ -18,7 +18,6 @@ import com.example.ticketing.booking.purchase.BookingSeatRepository;
 import com.example.ticketing.booking.purchase.domain.Booking;
 import com.example.ticketing.booking.seat.SeatCatalog;
 import com.example.ticketing.booking.seat.SeatRepository;
-import jakarta.persistence.EntityManager;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -52,12 +51,10 @@ public class BookingPaymentTransaction {
     private final DbClock dbClock;
     private final BookingProperties properties;
     private final JsonMapper jsonMapper;
-    private final EntityManager entityManager;
 
     // hold 행 락이 같은 hold의 결제 시작을 줄 세운다. READ_COMMITTED라 기다린 동안 커밋된 결제가 3단계에서 보인다
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public StartResult start(long userId, long holdId, String idempotencyKey) {
-        forgetEarlierEntities();
         Optional<BookingPayment> sameKey = paymentRepository.findByUserIdAndIdempotencyKey(userId, idempotencyKey);
         if (sameKey.isPresent()) {
             return new Existing(current(sameKey.get()));
@@ -105,7 +102,6 @@ public class BookingPaymentTransaction {
     // 요청 스레드와 대사가 동시에 불러도 hold 락 뒤 PAYING 확인으로 한 번만 효과가 있다
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public PaymentSettlement confirm(long paymentId, String pgTxId) {
-        forgetEarlierEntities();
         Locked locked = lock(paymentId);
         SeatHold hold = locked.hold();
         BookingPayment payment = locked.payment();
@@ -145,21 +141,18 @@ public class BookingPaymentTransaction {
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public PaymentSettlement decline(long paymentId) {
-        forgetEarlierEntities();
         return releaseAfterPg(paymentId, BookingPaymentStatus.DECLINED);
     }
 
     // 망취소가 PG에서 확정된 뒤 대사가 부른다
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public PaymentSettlement cancelAndRelease(long paymentId) {
-        forgetEarlierEntities();
         return releaseAfterPg(paymentId, BookingPaymentStatus.CANCELLED);
     }
 
     // 결과를 모를 때는 hold·좌석을 그대로 두고 대사가 조회로 확정하게 한다
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public PaymentSettlement markUnknown(long paymentId, String detail) {
-        forgetEarlierEntities();
         long recheckMicros = properties.payment().unknownRecheckAfter().toNanos() / 1_000;
         paymentRepository.markUnknown(paymentId, abbreviate(detail), recheckMicros);
         BookingPayment payment = paymentRepository.findById(paymentId)
@@ -170,7 +163,6 @@ public class BookingPaymentTransaction {
     // PG 환불 확정 뒤 Outbox 워커가 부른다. 다시 불려도 조건부 전이라 두 번째는 바꾸는 행이 없다
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public boolean completeRefund(long paymentId) {
-        forgetEarlierEntities();
         long holdId = paymentRepository.findHoldIdById(paymentId).orElseThrow(() -> paymentNotFound(paymentId));
         seatHoldRepository.markReleasedFromRefunding(holdId);
         return paymentRepository.markRefunded(paymentId) == 1;
@@ -178,7 +170,6 @@ public class BookingPaymentTransaction {
 
     @Transactional(readOnly = true, isolation = Isolation.READ_COMMITTED)
     public PaymentSettlement view(long userId, long paymentId) {
-        forgetEarlierEntities();
         BookingPayment payment = paymentRepository.findByIdAndUserId(paymentId, userId)
                 .orElseThrow(() -> paymentNotFound(paymentId));
         return current(payment);
@@ -188,7 +179,6 @@ public class BookingPaymentTransaction {
     @Transactional(readOnly = true, isolation = Isolation.READ_COMMITTED)
     public Optional<StartResult> findAfterDuplicate(long userId, long holdId, String idempotencyKey,
                                                     boolean idempotencyViolated) {
-        forgetEarlierEntities();
         if (idempotencyViolated) {
             return paymentRepository.findByUserIdAndIdempotencyKey(userId, idempotencyKey)
                     .map(payment -> new Existing(current(payment)));
@@ -243,12 +233,6 @@ public class BookingPaymentTransaction {
                 .orElseThrow(() -> new IllegalStateException("결제 " + paymentId + "의 hold " + holdId + "가 없다"));
         BookingPayment payment = paymentRepository.findById(paymentId).orElseThrow(() -> paymentNotFound(paymentId));
         return new Locked(hold, payment);
-    }
-
-    // open-in-view면 한 요청의 트랜잭션들이 영속성 컨텍스트를 같이 써서 앞 트랜잭션이 읽은 엔티티가 남는다.
-    // 락 뒤에 최신 행을 읽도록 트랜잭션마다 비우고 시작한다
-    private void forgetEarlierEntities() {
-        entityManager.clear();
     }
 
     private static boolean isPaying(SeatHold hold, BookingPayment payment) {

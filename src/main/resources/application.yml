@@ -8,24 +8,13 @@ spring:
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
 
-  kafka:
-    consumer:
-      group-id: ticketing-group
-      auto-offset-reset: earliest
-      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
-      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
-    producer:
-      key-serializer: org.apache.kafka.common.serialization.StringSerializer
-      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+  jpa:
+    open-in-view: false
 
   task:
     scheduling:
       pool:
-        size: 8                # 기존 2 + 예매 6
-
-ticketing:
-  kafka:
-    topic: ticket-reservation
+        size: 6                # 예매 @Scheduled 6개
 
 management:
   endpoints:

@@ -14,7 +14,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.example.ticketing.booking.BookingProperties;
 import com.example.ticketing.booking.common.BookingExceptionHandler;
 import com.example.ticketing.booking.support.BookingIntegrationTest;
-import com.example.ticketing.global.exception.GlobalExceptionHandler;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -197,6 +196,13 @@ class BookingPageControllerTest {
     }
 
     @Test
+    @DisplayName("없는 화면 경로는 어떤 처리기에도 잡히지 않고 404로 끝난다")
+    void unknownPagePathIsNotFound() throws Exception {
+        mockMvc.perform(get("/booking/nope"))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
     @DisplayName("API 경로의 잘못된 번호는 지금처럼 예매 JSON 400으로 답한다")
     void badNumberInApiPathStaysJson() throws Exception {
         mockMvc.perform(get("/api/shows/abc"))
@@ -206,7 +212,7 @@ class BookingPageControllerTest {
     }
 
     @Test
-    @DisplayName("화면 컨트롤러의 다른 예외도 예매·전역 JSON 처리기보다 먼저 잡혀 500 오류 화면이 된다")
+    @DisplayName("화면 컨트롤러의 다른 예외도 예매 JSON 처리기보다 먼저 잡혀 500 오류 화면이 된다")
     void unexpectedPageFailureShowsErrorPage() throws Exception {
         ThymeleafViewResolver resolver = new ThymeleafViewResolver();
         resolver.setTemplateEngine(context.getBean(ISpringTemplateEngine.class));
@@ -219,8 +225,7 @@ class BookingPageControllerTest {
             }
         };
         MockMvc failingMvc = MockMvcBuilders.standaloneSetup(exploding)
-                .setControllerAdvice(new GlobalExceptionHandler(), new BookingExceptionHandler(),
-                        new BookingPageExceptionHandler())
+                .setControllerAdvice(new BookingExceptionHandler(), new BookingPageExceptionHandler())
                 .setViewResolvers(resolver)
                 .build();
 

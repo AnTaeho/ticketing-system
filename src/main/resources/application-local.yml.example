@@ -17,9 +17,6 @@ spring:
       host: localhost
       port: 6379
 
-  kafka:
-    bootstrap-servers: localhost:9092
-
 # 예매(V7) 로컬 조정용. 나머지 booking.* 기본값은 application.yml에 있다
 booking:
   gate:

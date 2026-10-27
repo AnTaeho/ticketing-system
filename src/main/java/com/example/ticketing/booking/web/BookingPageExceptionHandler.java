@@ -9,7 +9,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.servlet.ModelAndView;
 
-// 화면 경로의 오류는 JSON 대신 화면으로 답한다. 예매 API 처리기·전역 처리기보다 먼저 잡혀야 한다
+// 화면 경로의 오류는 JSON 대신 화면으로 답한다. basePackages가 화면 컨트롤러도 덮는 예매 API 처리기보다 먼저 잡혀야 한다
 @Slf4j
 @Order(Ordered.HIGHEST_PRECEDENCE)
 @ControllerAdvice(assignableTypes = {BookingPageController.class, OpsPageController.class})

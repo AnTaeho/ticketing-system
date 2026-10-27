@@ -13,7 +13,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
-// 전역 처리기의 Exception 처리기보다 먼저 잡혀야 예매 응답 형식이 유지된다. 화면 경로 처리기가 이보다 앞선다
+// 화면 경로 처리기가 이보다 앞서야 화면 오류가 JSON 대신 화면으로 나간다. 여기서 안 잡는 예외는 Boot 기본 오류 응답으로 간다
 @Order(Ordered.HIGHEST_PRECEDENCE + 1)
 @RestControllerAdvice(basePackages = "com.example.ticketing.booking")
 public class BookingExceptionHandler {
@@ -42,7 +42,7 @@ public class BookingExceptionHandler {
         return respond(BookingErrorCode.INVALID_REQUEST, Map.of("header", e.getHeaderName()));
     }
 
-    // 날짜 형식이 틀린 본문이나 숫자가 아닌 경로 변수를 전역 처리기의 500으로 보내지 않는다
+    // 날짜 형식이 틀린 본문이나 숫자가 아닌 경로 변수도 예매 형식의 400으로 답한다
     @ExceptionHandler(HttpMessageNotReadableException.class)
     public ResponseEntity<BookingErrorResponse> handleUnreadable(HttpMessageNotReadableException e) {
         return respond(BookingErrorCode.INVALID_REQUEST, Map.of("reason", "요청 본문을 읽지 못했다"));
