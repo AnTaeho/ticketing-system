@@ -21,7 +21,7 @@ public record BookingProperties(
     public record Seed(boolean enabled) {
     }
 
-    public record Redis(Duration commandTimeout, Duration connectTimeout) {
+    public record Redis(Duration commandTimeout, Duration connectTimeout, int database) {
     }
 
     public record Hold(
@@ -50,7 +50,8 @@ public record BookingProperties(
             int capacity,
             Duration processingTokenTtl,
             Duration waitingTokenTtl,
-            long promoteIntervalMs
+            long promoteIntervalMs,
+            boolean required
     ) {
     }
 

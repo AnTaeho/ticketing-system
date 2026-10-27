@@ -7,6 +7,8 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doAnswer;
 
+import com.example.ticketing.booking.common.BookingRedis;
+import com.example.ticketing.booking.queue.QueueKeys;
 import com.example.ticketing.booking.support.BookingFixtures;
 import com.example.ticketing.booking.support.BookingIntegrationTest;
 import com.example.ticketing.booking.support.RedisKeyCleaner;
@@ -33,6 +35,8 @@ class SeatHoldGateRollbackTest {
     private MeterRegistry meterRegistry;
     @Autowired
     private RedisKeyCleaner redisKeyCleaner;
+    @Autowired
+    private BookingRedis bookingRedis;
     @MockitoSpyBean
     private SeatHoldTransaction seatHoldTransaction;
 
@@ -53,13 +57,16 @@ class SeatHoldGateRollbackTest {
             double gateOkBefore = meterRegistry.counter("booking.hold.gate", "result", "ok").count();
             double releaseFailureBefore = meterRegistry.counter("booking.redis.reflect.failure", "op", "release").count();
 
-            assertThatThrownBy(() -> seatHoldService.hold(userId, pid, target, null))
+            String queueToken = fixtures.admit(pid, userId);
+            assertThatThrownBy(() -> seatHoldService.hold(userId, pid, target, queueToken))
                     .isInstanceOf(DataAccessResourceFailureException.class);
 
             assertThat(meterRegistry.counter("booking.hold.gate", "result", "ok").count() - gateOkBefore).isEqualTo(1);
             assertThat(meterRegistry.counter("booking.redis.reflect.failure", "op", "release").count())
                     .isEqualTo(releaseFailureBefore);
-            assertThat(redisKeyCleaner.keys(pid)).isEmpty();
+            assertThat(redisKeyCleaner.gateKeys(pid)).isEmpty();
+            // 서버 오류로 끝난 선점은 토큰을 소모하지 않는다
+            assertThat(bookingRedis.template().opsForZSet().score(QueueKeys.processing(pid), queueToken)).isNotNull();
             assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM seat_hold WHERE performance_id = ?",
                     Long.class, pid)).isZero();
             assertThat(jdbcTemplate.queryForList("SELECT DISTINCT status FROM seat WHERE performance_id = ?",

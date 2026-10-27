@@ -202,7 +202,7 @@ class BookingPaymentServiceTest {
         assertThat(db.holdStatus(f.holdId)).isEqualTo("RELEASED");
         f.seatIds.forEach(seatId -> assertThat(db.seat(seatId)).containsEntry("status", "AVAILABLE")
                 .containsEntry("hold_id", null).containsEntry("held_until", null));
-        assertThat(redisKeyCleaner.keys(f.pid)).isEmpty();
+        assertThat(redisKeyCleaner.gateKeys(f.pid)).isEmpty();
         assertThat(db.bookingCountOfHold(f.holdId)).isZero();
 
         BookingException again = catchBooking(() -> paymentService.pay(f.userId, f.holdId, key, Optional.empty()));
@@ -387,11 +387,13 @@ class BookingPaymentServiceTest {
         f.seatIds.forEach(seatId -> assertThat(db.seat(seatId)).containsEntry("held_until", payDeadline));
 
         long other = fixtures.newUser();
-        BookingException byGate = catchBooking(() -> seatHoldService.hold(other, f.pid, f.seatIds, null));
+        String queueToken = fixtures.admit(f.pid, other);
+        BookingException byGate = catchBooking(() -> seatHoldService.hold(other, f.pid, f.seatIds, queueToken));
         assertThat(byGate.getCode()).isEqualTo(BookingErrorCode.SEAT_TAKEN);
 
         redisKeyCleaner.clean(f.pid);
-        BookingException byDb = catchBooking(() -> seatHoldService.hold(other, f.pid, f.seatIds, null));
+        String retryToken = fixtures.admit(f.pid, other);
+        BookingException byDb = catchBooking(() -> seatHoldService.hold(other, f.pid, f.seatIds, retryToken));
         assertThat(byDb.getCode()).isEqualTo(BookingErrorCode.SEAT_STATE_CHANGED);
 
         assertThat(expiryTransaction.claimAndExpire(50))
@@ -411,7 +413,8 @@ class BookingPaymentServiceTest {
         long kept = f.seatIds.get(0);
         long lost = f.seatIds.get(1);
         long thief = fixtures.newUser();
-        HoldCreated thiefHold = seatHoldService.hold(thief, f.pid, List.of(db.seatIds(f.pid).get(2)), null);
+        HoldCreated thiefHold = seatHoldService.hold(thief, f.pid, List.of(db.seatIds(f.pid).get(2)),
+                fixtures.admit(f.pid, thief));
         stubPg.beforeApproveReturns(orderId ->
                 jdbcTemplate.update("UPDATE seat SET hold_id = ? WHERE id = ?", thiefHold.holdId(), lost));
         String key = key();
@@ -557,7 +560,7 @@ class BookingPaymentServiceTest {
         performances.add(pid);
         long userId = fixtures.newUser();
         List<Long> seatIds = db.seatIds(pid).subList(0, seatCount);
-        HoldCreated hold = seatHoldService.hold(userId, pid, seatIds, null);
+        HoldCreated hold = seatHoldService.hold(userId, pid, seatIds, fixtures.admit(pid, userId));
         return new Fixture(pid, userId, hold.holdId(), List.copyOf(seatIds), hold.totalAmount(),
                 db.holdToken(hold.holdId()));
     }

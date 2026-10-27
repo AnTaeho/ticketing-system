@@ -1,6 +1,14 @@
 package com.example.ticketing.booking.support;
 
+import static org.assertj.core.api.Assertions.assertThat;
+
+import com.example.ticketing.booking.BookingProperties;
+import com.example.ticketing.booking.common.BookingRedis;
 import com.example.ticketing.booking.common.DbClock;
+import com.example.ticketing.booking.queue.BookingQueueService;
+import com.example.ticketing.booking.queue.QueueKeys;
+import com.example.ticketing.booking.queue.QueueTokenStatus;
+import com.example.ticketing.booking.queue.dto.QueueEntered;
 import com.example.ticketing.booking.show.ShowAdminService;
 import com.example.ticketing.booking.show.dto.NewPerformance;
 import com.example.ticketing.booking.user.AppUser;
@@ -18,6 +26,9 @@ public class BookingFixtures {
     private final ShowAdminService showAdminService;
     private final AppUserRepository appUserRepository;
     private final DbClock dbClock;
+    private final BookingQueueService queueService;
+    private final BookingRedis bookingRedis;
+    private final BookingProperties properties;
 
     public LocalDateTime dbNow() {
         return dbClock.now();
@@ -41,6 +52,25 @@ public class BookingFixtures {
 
     public long newUser() {
         return appUserRepository.save(AppUser.create("fx-" + shortId())).getId();
+    }
+
+    // 운영과 같은 진입 경로로 처리열 토큰을 받는다. 바로 입장하지 못하면 테스트가 실패한다
+    public String admit(long performanceId, long userId) {
+        QueueEntered entered = queueService.enter(performanceId, userId);
+        assertThat(entered.status())
+                .as("회차 %d 사용자 %d가 처리열에 바로 들어가야 한다", performanceId, userId)
+                .isEqualTo(QueueTokenStatus.PROCESSING);
+        return entered.token();
+    }
+
+    // 정원을 넘겨 입장시킨다(동시성 테스트용). 부를 때마다 새 토큰을 처리열에 직접 넣는다
+    public String forceAdmit(long performanceId, long userId) {
+        String member = userId + "." + UUID.randomUUID();
+        long expireAt = System.currentTimeMillis() + properties.queue().processingTokenTtl().toMillis();
+        bookingRedis.template().opsForZSet().add(QueueKeys.processing(performanceId), member, expireAt);
+        bookingRedis.template().opsForValue().set(QueueKeys.user(performanceId, userId), member,
+                properties.queue().waitingTokenTtl());
+        return member;
     }
 
     private static String shortId() {

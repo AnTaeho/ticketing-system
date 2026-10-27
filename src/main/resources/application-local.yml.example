@@ -26,6 +26,7 @@ booking:
     enabled: true              # false면 Redis 게이트 없이 DB 판정만으로 선점(부하 테스트 비교용)
   queue:
     capacity: 200              # 좌석 화면에 동시에 들어갈 수 있는 인원
+    required: true             # false면 줄을 서지 않고 바로 선점(부하 테스트 비교용)
   fake-pg:
     delay-min-ms: 200          # 가짜 결제 응답 지연 최소
     delay-max-ms: 1200         # 가짜 결제 응답 지연 최대

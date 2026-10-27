@@ -200,7 +200,7 @@ class BookingApiControllerTest {
         long pid = fixtures.newPerformance(1, 1, 6);
         performances.add(pid);
         List<Long> seatIds = db.seatIds(pid).subList(0, seatCount);
-        HoldCreated hold = seatHoldService.hold(userId, pid, seatIds, null);
+        HoldCreated hold = seatHoldService.hold(userId, pid, seatIds, fixtures.admit(pid, userId));
         PaymentResponse paid = paymentService.pay(userId, hold.holdId(), UUID.randomUUID().toString(),
                 Optional.empty());
         assertThat(paid.status()).isEqualTo(PaymentResponse.Status.CONFIRMED);

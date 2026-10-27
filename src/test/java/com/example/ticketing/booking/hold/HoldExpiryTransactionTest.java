@@ -52,7 +52,7 @@ class HoldExpiryTransactionTest {
         Map<Long, List<Long>> seatsByHold = new HashMap<>();
         for (int i = 0; i < holdCount; i++) {
             List<Long> seats = List.of(ids.get(i * 2), ids.get(i * 2 + 1));
-            HoldCreated created = seatHoldService.hold(fixtures.newUser(), pid, seats, null);
+            HoldCreated created = holdAsNewUser(pid, seats);
             seatsByHold.put(created.holdId(), seats);
         }
         expirePerformance(pid);
@@ -113,7 +113,7 @@ class HoldExpiryTransactionTest {
     void payingIsNotExpired() {
         long pid = fixtures.newPerformance(1, 1, 4);
         List<Long> target = seatIds(pid).subList(0, 2);
-        HoldCreated hold = seatHoldService.hold(fixtures.newUser(), pid, target, null);
+        HoldCreated hold = holdAsNewUser(pid, target);
         jdbcTemplate.update("UPDATE seat_hold SET status = 'PAYING', expires_at = NOW(6) - INTERVAL 1 MINUTE "
                 + "WHERE id = ?", hold.holdId());
 
@@ -129,11 +129,11 @@ class HoldExpiryTransactionTest {
     void lateExpiryKeepsOthersSeats() {
         long pid = fixtures.newPerformance(1, 1, 4);
         List<Long> target = seatIds(pid).subList(0, 2);
-        HoldCreated holdA = seatHoldService.hold(fixtures.newUser(), pid, target, null);
+        HoldCreated holdA = holdAsNewUser(pid, target);
         expireHold(holdA.holdId());
         // 게이트 키는 선점과 같은 TTL이라 만료 시각이 지나면 함께 사라진다. DB 시각만 당겼으므로 키도 지운다
         redisKeyCleaner.clean(pid);
-        HoldCreated holdB = seatHoldService.hold(fixtures.newUser(), pid, target, null);
+        HoldCreated holdB = holdAsNewUser(pid, target);
 
         List<ExpiredHold> returned = drain();
 
@@ -152,7 +152,7 @@ class HoldExpiryTransactionTest {
     void notYetExpiredIsUntouched() {
         long pid = fixtures.newPerformance(1, 1, 4);
         List<Long> target = seatIds(pid).subList(0, 2);
-        HoldCreated hold = seatHoldService.hold(fixtures.newUser(), pid, target, null);
+        HoldCreated hold = holdAsNewUser(pid, target);
 
         List<ExpiredHold> returned = drain();
 
@@ -201,5 +201,10 @@ class HoldExpiryTransactionTest {
 
     private List<Long> seatIds(long pid) {
         return jdbcTemplate.queryForList("SELECT id FROM seat WHERE performance_id = ? ORDER BY id", Long.class, pid);
+    }
+
+    private HoldCreated holdAsNewUser(long pid, List<Long> seats) {
+        long userId = fixtures.newUser();
+        return seatHoldService.hold(userId, pid, seats, fixtures.admit(pid, userId));
     }
 }

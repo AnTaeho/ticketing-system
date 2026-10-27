@@ -12,7 +12,7 @@ final class QueueTestProps {
     static BookingProperties withCapacity(BookingProperties p, int capacity) {
         Queue q = p.queue();
         return new BookingProperties(p.seed(), p.redis(), p.hold(), p.payment(), p.gate(),
-                new Queue(capacity, q.processingTokenTtl(), q.waitingTokenTtl(), q.promoteIntervalMs()),
+                new Queue(capacity, q.processingTokenTtl(), q.waitingTokenTtl(), q.promoteIntervalMs(), q.required()),
                 p.seatmap(), p.outbox(), p.ops(), p.pg(), p.fakePg());
     }
 }

@@ -26,6 +26,11 @@ public class RedisKeyCleaner {
         return keys;
     }
 
+    // 대기열 키(bq:)를 뺀 게이트 키만. 처리열 토큰은 게이트 ON/OFF와 무관하게 남는다
+    public List<String> gateKeys(long performanceId) {
+        return keys(performanceId).stream().filter(key -> !key.startsWith("bq:")).toList();
+    }
+
     public void clean(long performanceId) {
         List<String> keys = keys(performanceId);
         if (!keys.isEmpty()) {

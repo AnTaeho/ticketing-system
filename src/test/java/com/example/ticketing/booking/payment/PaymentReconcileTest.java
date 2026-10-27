@@ -156,7 +156,7 @@ class PaymentReconcileTest {
     void requestedOrphanIsCancelledAfterWindow() {
         Fixture f = newHold(2);
         long paymentId = orphan(f);
-        assertThat(redisKeyCleaner.keys(f.pid)).isNotEmpty();
+        assertThat(redisKeyCleaner.gateKeys(f.pid)).isNotEmpty();
         double before = count("cancelled");
         db.ageCreatedAt(paymentId, 60);
         db.makeDue(paymentId);
@@ -167,7 +167,7 @@ class PaymentReconcileTest {
         assertThat(db.holdStatus(f.holdId)).isEqualTo("RELEASED");
         f.seatIds.forEach(seatId -> assertThat(db.seat(seatId)).containsEntry("status", "AVAILABLE")
                 .containsEntry("hold_id", null).containsEntry("held_until", null));
-        assertThat(redisKeyCleaner.keys(f.pid)).isEmpty();
+        assertThat(redisKeyCleaner.gateKeys(f.pid)).isEmpty();
         assertThat(stubPg.cancelCalls()).isEqualTo(1);
         assertThat(count("cancelled") - before).isEqualTo(1);
     }
@@ -204,7 +204,7 @@ class PaymentReconcileTest {
         jdbcTemplate.update("UPDATE seat SET held_until = NOW(6) - INTERVAL 1 SECOND WHERE id = ?", lost);
         redis.delete(BookingKeys.seat(f.pid, lost));
         long thief = fixtures.newUser();
-        HoldCreated thiefHold = seatHoldService.hold(thief, f.pid, List.of(lost), null);
+        HoldCreated thiefHold = seatHoldService.hold(thief, f.pid, List.of(lost), fixtures.admit(f.pid, thief));
         stubPg.queryWith(PgResult.of(PgStatus.APPROVED, "pg-lost-1"));
         double before = count("seat_lost");
         db.makeDue(paymentId);
@@ -352,7 +352,7 @@ class PaymentReconcileTest {
         assertThat(db.holdStatus(f.holdId)).isEqualTo("RELEASED");
         f.seatIds.forEach(seatId -> assertThat(db.seat(seatId)).containsEntry("status", "AVAILABLE")
                 .containsEntry("hold_id", null));
-        assertThat(redisKeyCleaner.keys(f.pid)).isEmpty();
+        assertThat(redisKeyCleaner.gateKeys(f.pid)).isEmpty();
         assertThat(count("declined") - before).isEqualTo(1);
     }
 
@@ -423,7 +423,7 @@ class PaymentReconcileTest {
         assertThat(db.holdStatus(f.holdId)).isEqualTo("RELEASED");
         f.seatIds.forEach(seatId -> assertThat(db.seat(seatId)).containsEntry("status", "AVAILABLE")
                 .containsEntry("hold_id", null));
-        assertThat(redisKeyCleaner.keys(f.pid)).isEmpty();
+        assertThat(redisKeyCleaner.gateKeys(f.pid)).isEmpty();
         assertThat(stubPg.cancelCalls()).isZero();
     }
 
@@ -448,7 +448,7 @@ class PaymentReconcileTest {
         performances.add(pid);
         long userId = fixtures.newUser();
         List<Long> seatIds = db.seatIds(pid).subList(0, seatCount);
-        HoldCreated hold = seatHoldService.hold(userId, pid, seatIds, null);
+        HoldCreated hold = seatHoldService.hold(userId, pid, seatIds, fixtures.admit(pid, userId));
         return new Fixture(pid, userId, hold.holdId(), List.copyOf(seatIds), db.holdToken(hold.holdId()));
     }
 

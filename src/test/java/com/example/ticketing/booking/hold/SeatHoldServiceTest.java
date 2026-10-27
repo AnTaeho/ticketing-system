@@ -37,7 +37,8 @@ class SeatHoldServiceTest {
         long userId = fixtures.newUser();
         LocalDateTime before = fixtures.dbNow();
 
-        HoldCreated created = seatHoldService.hold(userId, pid, List.of(ids.get(1), ids.get(0)), "ignored");
+        HoldCreated created = seatHoldService.hold(userId, pid, List.of(ids.get(1), ids.get(0)),
+                fixtures.admit(pid, userId));
 
         Map<String, Object> hold = jdbcTemplate.queryForMap("SELECT * FROM seat_hold WHERE id = ?", created.holdId());
         assertThat(hold.get("status")).isEqualTo("HELD");
@@ -59,9 +60,10 @@ class SeatHoldServiceTest {
         long pid = fixtures.newPerformance(1, 1, 4);
         List<Long> ids = seatIds(pid);
         long userId = fixtures.newUser();
-        seatHoldService.hold(userId, pid, List.of(ids.get(0)), null);
+        seatHoldService.hold(userId, pid, List.of(ids.get(0)), fixtures.admit(pid, userId));
 
-        assertThatThrownBy(() -> seatHoldService.hold(userId, pid, List.of(ids.get(1)), null))
+        String queueToken = fixtures.admit(pid, userId);
+        assertThatThrownBy(() -> seatHoldService.hold(userId, pid, List.of(ids.get(1)), queueToken))
                 .isInstanceOf(BookingException.class)
                 .extracting("code").isEqualTo(BookingErrorCode.USER_HAS_HOLD);
         assertThat(jdbcTemplate.queryForObject("SELECT status FROM seat WHERE id = ?", String.class, ids.get(1)))
@@ -75,7 +77,7 @@ class SeatHoldServiceTest {
         List<Long> target = seatIds(pid).subList(0, 2);
         long userA = fixtures.newUser();
         long userB = fixtures.newUser();
-        HoldCreated holdA = seatHoldService.hold(userA, pid, target, null);
+        HoldCreated holdA = seatHoldService.hold(userA, pid, target, fixtures.admit(pid, userA));
 
         seatHoldService.release(userA, holdA.holdId());
 
@@ -88,7 +90,7 @@ class SeatHoldServiceTest {
             assertThat(seat.get("held_until")).isNull();
         });
 
-        HoldCreated holdB = seatHoldService.hold(userB, pid, target, null);
+        HoldCreated holdB = seatHoldService.hold(userB, pid, target, fixtures.admit(pid, userB));
         assertThat(heldSeats(pid, holdB.holdId())).containsExactlyElementsOf(target);
 
         assertThatThrownBy(() -> seatHoldService.release(userA, holdA.holdId()))
@@ -105,17 +107,18 @@ class SeatHoldServiceTest {
         List<Long> target = seatIds(pid).subList(0, 2);
         long userA = fixtures.newUser();
         long userB = fixtures.newUser();
-        HoldCreated holdA = seatHoldService.hold(userA, pid, target, null);
+        HoldCreated holdA = seatHoldService.hold(userA, pid, target, fixtures.admit(pid, userA));
         long otherUser = fixtures.newUser();
 
-        assertThatThrownBy(() -> seatHoldService.hold(otherUser, pid, target, null))
+        String queueToken = fixtures.admit(pid, otherUser);
+        assertThatThrownBy(() -> seatHoldService.hold(otherUser, pid, target, queueToken))
                 .extracting("code").isEqualTo(BookingErrorCode.SEAT_TAKEN);
 
         // 게이트 키는 선점과 같은 TTL이라 held_until이 지나면 함께 사라진다. DB 시각만 당겼으므로 키도 지운다
         jdbcTemplate.update("UPDATE seat SET held_until = NOW(6) - INTERVAL 1 SECOND "
                 + "WHERE performance_id = ? AND hold_id = ?", pid, holdA.holdId());
         redisKeyCleaner.clean(pid);
-        HoldCreated holdB = seatHoldService.hold(userB, pid, target, null);
+        HoldCreated holdB = seatHoldService.hold(userB, pid, target, fixtures.admit(pid, userB));
 
         assertThat(heldSeats(pid, holdB.holdId())).containsExactlyElementsOf(target);
         assertThat(heldSeats(pid, holdA.holdId())).isEmpty();
@@ -130,6 +133,7 @@ class SeatHoldServiceTest {
         long pid = fixtures.newPerformance(fixtures.newShow(), now.plusMinutes(10), now.plusDays(1), 1, 1, 2);
         long userId = fixtures.newUser();
 
+        // 열리기 전에는 줄도 설 수 없다. 회차 검증이 처리열 확인보다 먼저라 토큰 없이도 NOT_OPEN이다
         assertThatThrownBy(() -> seatHoldService.hold(userId, pid, seatIds(pid), null))
                 .extracting("code").isEqualTo(BookingErrorCode.NOT_OPEN);
         assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM seat_hold WHERE performance_id = ?",
@@ -140,8 +144,9 @@ class SeatHoldServiceTest {
     @DisplayName("없는 사용자 ID로 선점하면 LOGIN_REQUIRED이고 hold를 만들지 않는다")
     void unknownUser() {
         long pid = fixtures.newPerformance(1, 1, 2);
+        String token = fixtures.admit(pid, Long.MAX_VALUE);
 
-        assertThatThrownBy(() -> seatHoldService.hold(Long.MAX_VALUE, pid, seatIds(pid), null))
+        assertThatThrownBy(() -> seatHoldService.hold(Long.MAX_VALUE, pid, seatIds(pid), token))
                 .extracting("code").isEqualTo(BookingErrorCode.LOGIN_REQUIRED);
         assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM seat_hold WHERE performance_id = ?",
                 Long.class, pid)).isZero();

@@ -11,6 +11,7 @@ import com.example.ticketing.booking.support.BookingIntegrationTest;
 import com.example.ticketing.booking.support.RedisKeyCleaner;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -59,9 +60,11 @@ class SeatHoldConcurrencyTest {
 
     private void sameSeatsFiveHundredUsers(long pid) throws InterruptedException {
         List<Long> target = seatIds(pid).subList(0, 2);
-        List<Long> users = new ArrayList<>(THREAD_COUNT);
+        // 정원(200)보다 많은 500명을 처리열에 직접 넣는다. 재려는 것은 좌석 경합이다
+        Map<Long, String> tokens = new LinkedHashMap<>();
         for (int i = 0; i < THREAD_COUNT; i++) {
-            users.add(fixtures.newUser());
+            long userId = fixtures.newUser();
+            tokens.put(userId, fixtures.forceAdmit(pid, userId));
         }
         double okBefore = dbCounter("ok");
         double changedBefore = dbCounter("state_changed");
@@ -78,12 +81,14 @@ class SeatHoldConcurrencyTest {
         Map<BookingErrorCode, AtomicInteger> rejected = new ConcurrentHashMap<>();
         List<Throwable> unexpected = new CopyOnWriteArrayList<>();
 
-        for (long userId : users) {
+        for (Map.Entry<Long, String> entry : tokens.entrySet()) {
+            long userId = entry.getKey();
+            String token = entry.getValue();
             executor.submit(() -> {
                 try {
                     ready.countDown();
                     start.await();
-                    seatHoldService.hold(userId, pid, target, null);
+                    seatHoldService.hold(userId, pid, target, token);
                     success.incrementAndGet();
                 } catch (BookingException e) {
                     rejected.computeIfAbsent(e.getCode(), c -> new AtomicInteger()).incrementAndGet();
@@ -133,7 +138,7 @@ class SeatHoldConcurrencyTest {
             assertThat(dbDelta).isEqualTo(THREAD_COUNT);
             assertThat(dbCounter("state_changed") - changedBefore).isEqualTo(THREAD_COUNT - 1);
             assertThat(gateCounter("skipped") - gateSkippedBefore).isEqualTo(THREAD_COUNT);
-            assertThat(redisKeyCleaner.keys(pid)).isEmpty();
+            assertThat(redisKeyCleaner.gateKeys(pid)).isEmpty();
         }
     }
 
@@ -168,14 +173,16 @@ class SeatHoldConcurrencyTest {
                 CountDownLatch done = new CountDownLatch(2);
                 List<HoldCreated> created = new CopyOnWriteArrayList<>();
                 AtomicInteger conflicted = new AtomicInteger();
+                // 진 쪽은 토큰이 남아 같은 토큰을 다시 받고, 이긴 쪽은 소모돼 새로 받는다
                 for (Object[] attempt : new Object[][]{{userA, forward}, {userB, reverse}}) {
                     long userId = (long) attempt[0];
                     @SuppressWarnings("unchecked")
                     List<Long> seats = (List<Long>) attempt[1];
+                    String token = fixtures.admit(pid, userId);
                     executor.submit(() -> {
                         try {
                             start.await();
-                            created.add(seatHoldService.hold(userId, pid, seats, null));
+                            created.add(seatHoldService.hold(userId, pid, seats, token));
                         } catch (BookingException e) {
                             if (e.getCode() == conflict) {
                                 conflicted.incrementAndGet();
@@ -219,7 +226,7 @@ class SeatHoldConcurrencyTest {
                 "SELECT COUNT(*) FROM seat_hold WHERE performance_id = ? AND status = 'RELEASED'",
                 Long.class, pid)).isEqualTo(CROSS_ROUNDS);
         // 매 회 취소가 게이트 키도 지운다. 게이트 OFF면 처음부터 키가 없다
-        assertThat(redisKeyCleaner.keys(pid)).isEmpty();
+        assertThat(redisKeyCleaner.gateKeys(pid)).isEmpty();
     }
 
     @Test
@@ -244,12 +251,18 @@ class SeatHoldConcurrencyTest {
         AtomicInteger success = new AtomicInteger();
         Map<BookingErrorCode, AtomicInteger> rejected = new ConcurrentHashMap<>();
         List<Throwable> unexpected = new CopyOnWriteArrayList<>();
+        // 시도마다 다른 토큰을 넣는다. 한 토큰이면 먼저 이긴 요청의 소모로 늦은 요청이 NOT_ADMITTED가 될 수 있다
+        List<String> tokens = new ArrayList<>(attempts);
+        for (int i = 0; i < attempts; i++) {
+            tokens.add(fixtures.forceAdmit(pid, userId));
+        }
         for (int i = 0; i < attempts; i++) {
             long seatId = ids.get(i);
+            String token = tokens.get(i);
             executor.submit(() -> {
                 try {
                     start.await();
-                    seatHoldService.hold(userId, pid, List.of(seatId), null);
+                    seatHoldService.hold(userId, pid, List.of(seatId), token);
                     success.incrementAndGet();
                 } catch (BookingException e) {
                     rejected.computeIfAbsent(e.getCode(), c -> new AtomicInteger()).incrementAndGet();
@@ -276,7 +289,7 @@ class SeatHoldConcurrencyTest {
                 "SELECT COUNT(*) FROM seat WHERE performance_id = ? AND status = 'HELD'",
                 Long.class, pid)).isEqualTo(1);
         if (!gateEnabled()) {
-            assertThat(redisKeyCleaner.keys(pid)).isEmpty();
+            assertThat(redisKeyCleaner.gateKeys(pid)).isEmpty();
         }
     }
 

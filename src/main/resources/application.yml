@@ -39,6 +39,7 @@ booking:
   redis:
     command-timeout: 300ms
     connect-timeout: 500ms
+    database: 0                # 예매 키만 쓰는 Redis DB 번호. 테스트는 1을 써서 로컬 앱 키와 섞이지 않게 한다
   hold:
     ttl: 5m
     max-seats: 4
@@ -60,6 +61,7 @@ booking:
     processing-token-ttl: 10m
     waiting-token-ttl: 60m
     promote-interval-ms: 1000
+    required: true             # false면 선점이 처리열 토큰을 확인·소모하지 않는다(부하 테스트의 Redis 없음 기준선용)
   seatmap:
     snapshot-interval-ms: 1000
     snapshot-ttl: 30s

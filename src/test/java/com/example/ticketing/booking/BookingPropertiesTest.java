@@ -20,10 +20,12 @@ class BookingPropertiesTest {
         assertThat(props.seed().enabled()).isFalse();
         assertThat(props.redis().commandTimeout()).isEqualTo(Duration.ofMillis(300));
         assertThat(props.redis().connectTimeout()).isEqualTo(Duration.ofMillis(500));
+        assertThat(props.redis().database()).isEqualTo(1);
         assertThat(props.hold().ttl()).isEqualTo(Duration.ofMinutes(5));
         assertThat(props.hold().maxSeats()).isEqualTo(4);
         assertThat(props.payment().payDeadline()).isEqualTo(Duration.ofMinutes(10));
         assertThat(props.queue().waitingTokenTtl()).isEqualTo(Duration.ofMinutes(60));
+        assertThat(props.queue().required()).isTrue();
         assertThat(props.seatmap().leaseTtl()).isEqualTo(Duration.ofSeconds(2));
         assertThat(props.outbox().lockDuration()).isEqualTo(Duration.ofSeconds(60));
         assertThat(props.ops().orphanScanMs()).isEqualTo(30000);

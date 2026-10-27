@@ -68,7 +68,7 @@ class SeatHoldGateTest {
         List<Long> target = ids.subList(0, 2);
         long userA = fixtures.newUser();
         long userB = fixtures.newUser();
-        HoldCreated holdA = seatHoldService.hold(userA, pid, target, null);
+        HoldCreated holdA = seatHoldService.hold(userA, pid, target, fixtures.admit(pid, userA));
         String tokenA = holdToken(holdA.holdId());
         assertThat(redis.opsForValue().get(BookingKeys.seat(pid, target.get(0)))).isEqualTo(tokenA);
 
@@ -76,7 +76,8 @@ class SeatHoldGateTest {
         double gateOkBefore = gateCounter("ok");
         double stateChangedBefore = dbCounter("state_changed");
 
-        assertThatThrownBy(() -> seatHoldService.hold(userB, pid, target, null))
+        String queueToken = fixtures.admit(pid, userB);
+        assertThatThrownBy(() -> seatHoldService.hold(userB, pid, target, queueToken))
                 .isInstanceOf(BookingException.class)
                 .extracting("code").isEqualTo(BookingErrorCode.SEAT_STATE_CHANGED);
 
@@ -99,11 +100,12 @@ class SeatHoldGateTest {
     @DisplayName("같은 사용자의 두 번째 선점은 게이트가 USER_HAS_HOLD로 막고 DB에 닿지 않는다")
     void userHasHoldStopsAtGate() {
         long userId = fixtures.newUser();
-        seatHoldService.hold(userId, pid, List.of(ids.get(0)), null);
+        seatHoldService.hold(userId, pid, List.of(ids.get(0)), fixtures.admit(pid, userId));
         double dbBefore = dbTotal();
         double gateBefore = gateCounter("user_has_hold");
 
-        assertThatThrownBy(() -> seatHoldService.hold(userId, pid, List.of(ids.get(1)), null))
+        String queueToken = fixtures.admit(pid, userId);
+        assertThatThrownBy(() -> seatHoldService.hold(userId, pid, List.of(ids.get(1)), queueToken))
                 .extracting("code").isEqualTo(BookingErrorCode.USER_HAS_HOLD);
 
         assertThat(dbTotal() - dbBefore).isZero();
@@ -118,7 +120,7 @@ class SeatHoldGateTest {
         long seat = ids.get(0);
         long userA = fixtures.newUser();
         long userB = fixtures.newUser();
-        HoldCreated holdA = seatHoldService.hold(userA, pid, List.of(seat), null);
+        HoldCreated holdA = seatHoldService.hold(userA, pid, List.of(seat), fixtures.admit(pid, userA));
         jdbcTemplate.update("UPDATE seat_hold SET expires_at = NOW(6) - INTERVAL 1 MINUTE WHERE id = ?", holdA.holdId());
         jdbcTemplate.update("UPDATE seat SET held_until = NOW(6) - INTERVAL 1 MINUTE WHERE hold_id = ?", holdA.holdId());
 
@@ -138,7 +140,8 @@ class SeatHoldGateTest {
                 .isLessThanOrEqualTo(properties.hold().reholdCooldown().toSeconds());
         double dbBefore = dbTotal();
 
-        assertThatThrownBy(() -> seatHoldService.hold(userA, pid, List.of(seat), null))
+        String queueToken = fixtures.admit(pid, userA);
+        assertThatThrownBy(() -> seatHoldService.hold(userA, pid, List.of(seat), queueToken))
                 .isInstanceOf(BookingException.class)
                 .satisfies(e -> {
                     BookingException be = (BookingException) e;
@@ -147,10 +150,10 @@ class SeatHoldGateTest {
                 });
         assertThat(dbTotal() - dbBefore).isZero();
 
-        HoldCreated holdB = seatHoldService.hold(userB, pid, List.of(seat), null);
+        HoldCreated holdB = seatHoldService.hold(userB, pid, List.of(seat), fixtures.admit(pid, userB));
         assertThat(heldSeats(holdB.holdId())).containsExactly(seat);
         // 쿨다운은 놓친 좌석에만 걸린다
-        HoldCreated holdA2 = seatHoldService.hold(userA, pid, List.of(ids.get(1)), null);
+        HoldCreated holdA2 = seatHoldService.hold(userA, pid, List.of(ids.get(1)), fixtures.admit(pid, userA));
         assertThat(heldSeats(holdA2.holdId())).containsExactly(ids.get(1));
     }
 
@@ -160,13 +163,13 @@ class SeatHoldGateTest {
         List<Long> target = ids.subList(0, 2);
         long userA = fixtures.newUser();
         long userB = fixtures.newUser();
-        HoldCreated holdA = seatHoldService.hold(userA, pid, target, null);
-        assertThat(redisKeyCleaner.keys(pid)).hasSize(3);
+        HoldCreated holdA = seatHoldService.hold(userA, pid, target, fixtures.admit(pid, userA));
+        assertThat(redisKeyCleaner.gateKeys(pid)).hasSize(3);
 
         seatHoldService.release(userA, holdA.holdId());
 
-        assertThat(redisKeyCleaner.keys(pid)).isEmpty();
-        HoldCreated holdB = seatHoldService.hold(userB, pid, target, null);
+        assertThat(redisKeyCleaner.gateKeys(pid)).isEmpty();
+        HoldCreated holdB = seatHoldService.hold(userB, pid, target, fixtures.admit(pid, userB));
         assertThat(heldSeats(holdB.holdId())).containsExactlyElementsOf(target);
         assertThat(redis.opsForValue().get(BookingKeys.seat(pid, target.get(0))))
                 .isEqualTo(holdToken(holdB.holdId()));

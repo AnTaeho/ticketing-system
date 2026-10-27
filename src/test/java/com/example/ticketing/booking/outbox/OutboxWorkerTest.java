@@ -404,7 +404,7 @@ class OutboxWorkerTest {
         long pid = newPerformance(1, 1, 6);
         long userId = fixtures.newUser();
         List<Long> seatIds = db.seatIds(pid).subList(0, seatCount);
-        HoldCreated hold = seatHoldService.hold(userId, pid, seatIds, null);
+        HoldCreated hold = seatHoldService.hold(userId, pid, seatIds, fixtures.admit(pid, userId));
         paymentService.pay(userId, hold.holdId(), key(), Optional.empty());
         long bookingId = jdbcTemplate.queryForObject("SELECT id FROM booking WHERE hold_id = ?", Long.class,
                 hold.holdId());
@@ -417,7 +417,7 @@ class OutboxWorkerTest {
         List<Long> bookingIds = new ArrayList<>();
         for (int i = 0; i < count; i++) {
             long userId = fixtures.newUser();
-            HoldCreated hold = seatHoldService.hold(userId, pid, List.of(seatIds.get(i)), null);
+            HoldCreated hold = seatHoldService.hold(userId, pid, List.of(seatIds.get(i)), fixtures.admit(pid, userId));
             paymentService.pay(userId, hold.holdId(), key(), Optional.empty());
             bookingIds.add(jdbcTemplate.queryForObject("SELECT id FROM booking WHERE hold_id = ?", Long.class,
                     hold.holdId()));
@@ -430,12 +430,13 @@ class OutboxWorkerTest {
         long pid = newPerformance(1, 1, 6);
         long userId = fixtures.newUser();
         List<Long> seatIds = db.seatIds(pid).subList(0, 2);
-        HoldCreated hold = seatHoldService.hold(userId, pid, seatIds, null);
+        HoldCreated hold = seatHoldService.hold(userId, pid, seatIds, fixtures.admit(pid, userId));
         long paymentId = ((Started) paymentTransaction.start(userId, hold.holdId(), key())).paymentId();
         long lost = seatIds.get(1);
         jdbcTemplate.update("UPDATE seat SET held_until = NOW(6) - INTERVAL 1 SECOND WHERE id = ?", lost);
         redisKeyCleaner.clean(pid);
-        seatHoldService.hold(fixtures.newUser(), pid, List.of(lost), null);
+        long thief = fixtures.newUser();
+        seatHoldService.hold(thief, pid, List.of(lost), fixtures.admit(pid, thief));
         paymentTransaction.confirm(paymentId, "pg-refund-" + paymentId);
         assertThat(db.holdStatus(hold.holdId())).isEqualTo("REFUNDING");
         assertThat(db.payment(paymentId)).containsEntry("status", "APPROVED");

@@ -147,7 +147,7 @@ class BookingCancelTest {
                 c.bookingId)).isEqualTo(2);
 
         long other = fixtures.newUser();
-        HoldCreated retaken = seatHoldService.hold(other, c.pid, c.seatIds, null);
+        HoldCreated retaken = seatHoldService.hold(other, c.pid, c.seatIds, fixtures.admit(c.pid, other));
 
         c.seatIds.forEach(seatId -> assertThat(db.seat(seatId)).containsEntry("status", "HELD")
                 .containsEntry("hold_id", retaken.holdId()));
@@ -161,7 +161,8 @@ class BookingCancelTest {
         Confirmed c = confirmed(1);
 
         CancelResponse first = bookingService.cancel(c.userId, c.bookingId);
-        HoldCreated retaken = seatHoldService.hold(fixtures.newUser(), c.pid, c.seatIds, null);
+        long other = fixtures.newUser();
+        HoldCreated retaken = seatHoldService.hold(other, c.pid, c.seatIds, fixtures.admit(c.pid, other));
         LocalDateTime cancelledAt = cancelledAt(c.bookingId);
         CancelResponse second = bookingService.cancel(c.userId, c.bookingId);
 
@@ -186,7 +187,7 @@ class BookingCancelTest {
         assertThat(db.outboxCount("REFUND_REQUESTED", c.paymentId)).isEqualTo(1);
         c.seatIds.forEach(seatId -> assertThat(db.seat(seatId)).containsEntry("status", "AVAILABLE")
                 .containsEntry("hold_id", null));
-        assertThat(redisKeyCleaner.keys(c.pid)).isEmpty();
+        assertThat(redisKeyCleaner.gateKeys(c.pid)).isEmpty();
     }
 
     @Test
@@ -296,7 +297,7 @@ class BookingCancelTest {
         performances.add(pid);
         long userId = fixtures.newUser();
         List<Long> seatIds = db.seatIds(pid).subList(0, seatCount);
-        HoldCreated hold = seatHoldService.hold(userId, pid, seatIds, null);
+        HoldCreated hold = seatHoldService.hold(userId, pid, seatIds, fixtures.admit(pid, userId));
         PaymentResponse paid = paymentService.pay(userId, hold.holdId(), UUID.randomUUID().toString(),
                 Optional.empty());
         assertThat(paid.status()).isEqualTo(PaymentResponse.Status.CONFIRMED);

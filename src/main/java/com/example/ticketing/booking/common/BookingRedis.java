@@ -31,7 +31,9 @@ public class BookingRedis implements DisposableBean {
                         .disconnectedBehavior(ClientOptions.DisconnectedBehavior.REJECT_COMMANDS)
                         .build())
                 .build();
-        factory = new LettuceConnectionFactory(new RedisStandaloneConfiguration(host, port), client);
+        RedisStandaloneConfiguration server = new RedisStandaloneConfiguration(host, port);
+        server.setDatabase(props.redis().database());
+        factory = new LettuceConnectionFactory(server, client);
         factory.afterPropertiesSet();
         factory.start();
         template = new StringRedisTemplate(factory);

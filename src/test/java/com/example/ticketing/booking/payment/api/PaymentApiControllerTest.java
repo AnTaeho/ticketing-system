@@ -257,7 +257,8 @@ class PaymentApiControllerTest {
         long pid = fixtures.newPerformance(1, 1, 4);
         performances.add(pid);
         long userId = fixtures.newUser();
-        HoldCreated hold = seatHoldService.hold(userId, pid, db.seatIds(pid).subList(0, 2), null);
+        HoldCreated hold = seatHoldService.hold(userId, pid, db.seatIds(pid).subList(0, 2),
+                fixtures.admit(pid, userId));
         return new Hold(userId, hold.holdId());
     }
 

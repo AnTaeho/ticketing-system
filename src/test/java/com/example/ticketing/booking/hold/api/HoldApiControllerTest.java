@@ -200,6 +200,27 @@ class HoldApiControllerTest {
     }
 
     @Test
+    @DisplayName("처리열 토큰이 없거나 남의 것이면 403 NOT_ADMITTED이고 본문에 code·message가 있다")
+    void notAdmitted() throws Exception {
+        long pid = fixtures.newPerformance(1, 1, 2);
+        long userId = fixtures.newUser();
+        long other = fixtures.newUser();
+        List<Long> target = List.of(seatIds(pid).get(0));
+
+        MvcResult missing = hold(userId, pid, target, null)
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("NOT_ADMITTED"))
+                .andExpect(jsonPath("$.message").value("입장 순서가 지났어요. 다시 줄을 서 주세요"))
+                .andReturn();
+        System.out.println("[S6.2] 토큰 없는 POST /holds 응답: " + body(missing));
+        hold(userId, pid, target, fixtures.admit(pid, other))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("NOT_ADMITTED"));
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM seat_hold WHERE performance_id = ?",
+                Long.class, pid)).isZero();
+    }
+
+    @Test
     @DisplayName("사용자 식별이 없으면 401 LOGIN_REQUIRED")
     void loginRequired() throws Exception {
         mockMvc.perform(post("/api/performances/{pid}/holds", 1L)
@@ -210,11 +231,19 @@ class HoldApiControllerTest {
     }
 
     private ResultActions hold(long userId, long pid, List<Long> seatIds) throws Exception {
+        return hold(userId, pid, seatIds, fixtures.admit(pid, userId));
+    }
+
+    // queueToken이 null이면 본문에서 뺀다
+    private ResultActions hold(long userId, long pid, List<Long> seatIds, String queueToken) throws Exception {
         String ids = seatIds.stream().map(String::valueOf).collect(Collectors.joining(","));
+        String body = queueToken == null
+                ? "{\"seatIds\":[%s]}".formatted(ids)
+                : "{\"seatIds\":[%s],\"queueToken\":\"%s\"}".formatted(ids, queueToken);
         return mockMvc.perform(post("/api/performances/{pid}/holds", pid)
                 .header(USER, userId)
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"seatIds\":[%s],\"queueToken\":\"unchecked\"}".formatted(ids)));
+                .content(body));
     }
 
     private double dbCounterTotal() {
