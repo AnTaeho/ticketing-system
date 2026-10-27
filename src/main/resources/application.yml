@@ -32,6 +32,17 @@ management:
     web:
       exposure:
         include: health,metrics
+  endpoint:
+    health:
+      status:
+        order: DOWN, OUT_OF_SERVICE, DEGRADED, UNKNOWN, UP
+        http-mapping:          # 하나라도 적으면 기본 매핑이 사라지므로 DOWN·OUT_OF_SERVICE도 적는다
+          DOWN: 503
+          OUT_OF_SERVICE: 503
+          DEGRADED: 200
+  health:
+    redis:
+      enabled: false           # 기본 연결은 타임아웃이 없어 장애 때 60초 붙잡는다. 예매 연결로 보는 bookingRedis가 대신한다
 
 booking:
   seed:
@@ -55,7 +66,7 @@ booking:
     reconcile-batch-size: 20
   gate:
     enabled: true              # 부하 테스트 비교 스위치
-    fallback-max-concurrency: 20
+    fallback-max-concurrency: 8      # Hikari 풀(10)보다 작게
   queue:
     capacity: 200
     processing-token-ttl: 10m

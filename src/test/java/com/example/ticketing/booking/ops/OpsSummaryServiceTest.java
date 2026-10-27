@@ -129,7 +129,7 @@ class OpsSummaryServiceTest {
         assertThat(summary.gateKeys().userHold()).isEqualTo(1L);
 
         assertThat(summary.counters()).containsOnlyKeys("booking.hold.gate", "booking.hold.db",
-                "booking.hold.expired", "booking.seatmap.rebuild", "booking.payment.reconcile",
+                "booking.hold.fallback", "booking.hold.expired", "booking.seatmap.rebuild", "booking.payment.reconcile",
                 "booking.outbox.task", "booking.redis.reflect.failure", "booking.gate.orphan.removed");
         assertThat(summary.counters().get("booking.hold.gate").values())
                 .containsKeys("ok", "seat_taken", "user_has_hold", "cooldown", "skipped");

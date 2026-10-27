@@ -3,6 +3,11 @@ package com.example.ticketing.booking.common;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.example.ticketing.booking.support.BookingIntegrationTest;
+import com.example.ticketing.booking.BookingProperties;
+import io.lettuce.core.resource.ClientResources;
+import io.lettuce.core.resource.Delay;
+import java.io.IOException;
+import java.net.ServerSocket;
 import java.time.Duration;
 import java.util.UUID;
 import org.junit.jupiter.api.DisplayName;
@@ -23,6 +28,9 @@ class BookingRedisTest {
 
     @Autowired
     private ApplicationContext context;
+
+    @Autowired
+    private BookingProperties props;
 
     @Test
     @DisplayName("예매 전용 연결로 PING이 된다")
@@ -54,6 +62,29 @@ class BookingRedisTest {
     }
 
     @Test
+    @DisplayName("예매 연결의 재연결 간격은 지수로 늘다가 2초에서 멈춘다")
+    void reconnectDelayCappedAtTwoSeconds() {
+        Delay delay = resources(bookingRedis).reconnectDelay();
+
+        assertThat(delay.createDelay(1)).isLessThan(Duration.ofMillis(10));
+        for (long attempt = 1; attempt <= 64; attempt++) {
+            assertThat(delay.createDelay(attempt)).isLessThanOrEqualTo(Duration.ofSeconds(2));
+        }
+        assertThat(delay.createDelay(30)).isEqualTo(Duration.ofSeconds(2));
+    }
+
+    @Test
+    @DisplayName("destroy는 연결을 닫은 뒤 직접 만든 ClientResources도 내린다")
+    void destroyShutsDownResources() throws IOException {
+        BookingRedis dead = TestBookingRedis.connectTo("localhost", closedPort(), props);
+        ClientResources resources = resources(dead);
+
+        dead.destroy();
+
+        assertThat(resources.eventExecutorGroup().isShutdown()).isTrue();
+    }
+
+    @Test
     @DisplayName("테스트의 예매 연결은 Redis DB 1을 쓰고 기본 연결(DB 0)에서는 그 키가 보이지 않는다")
     void testsUseDatabaseOne() {
         LettuceConnectionFactory factory =
@@ -68,6 +99,17 @@ class BookingRedisTest {
             assertThat(defaultTemplate.hasKey(key)).isFalse();
         } finally {
             bookingRedis.template().delete(key);
+        }
+    }
+
+    private static ClientResources resources(BookingRedis redis) {
+        LettuceConnectionFactory factory = (LettuceConnectionFactory) redis.template().getConnectionFactory();
+        return factory.getClientConfiguration().getClientResources().orElseThrow();
+    }
+
+    private static int closedPort() throws IOException {
+        try (ServerSocket socket = new ServerSocket(0)) {
+            return socket.getLocalPort();
         }
     }
 }

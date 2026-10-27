@@ -4,6 +4,7 @@ import com.example.ticketing.booking.BookingProperties;
 import com.example.ticketing.booking.common.BookingErrorCode;
 import com.example.ticketing.booking.common.BookingException;
 import com.example.ticketing.booking.common.DbClock;
+import com.example.ticketing.booking.common.ThrottledWarn;
 import com.example.ticketing.booking.queue.BookingQueueRepository.Entered;
 import com.example.ticketing.booking.queue.dto.QueueEntered;
 import com.example.ticketing.booking.queue.dto.QueuePosition;
@@ -30,6 +31,7 @@ public class BookingQueueService {
     private final int capacity;
     private final long processingTtlMs;
     private final long waitingTtlMs;
+    private final ThrottledWarn unavailableWarn = new ThrottledWarn(log);
 
     public BookingQueueService(BookingQueueRepository repository, SeatCatalog seatCatalog, DbClock dbClock,
                                BookingProperties properties) {
@@ -118,8 +120,8 @@ public class BookingQueueService {
         return dot > 0 && token.substring(0, dot).equals(String.valueOf(userId));
     }
 
-    private static BookingException unavailable(String op, long performanceId, RuntimeException e) {
-        log.warn("[booking queue] Redis 실패로 대기열을 막는다 op={}, performanceId={}: {}", op, performanceId, e.toString());
+    private BookingException unavailable(String op, long performanceId, RuntimeException e) {
+        unavailableWarn.warn("[booking queue] Redis 실패로 대기열을 막는다 op={}, performanceId={}: {}", op, performanceId, e.toString());
         return new BookingException(BookingErrorCode.QUEUE_UNAVAILABLE);
     }
 }

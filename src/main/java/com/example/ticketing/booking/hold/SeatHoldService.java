@@ -4,6 +4,7 @@ import com.example.ticketing.booking.BookingProperties;
 import com.example.ticketing.booking.common.BookingErrorCode;
 import com.example.ticketing.booking.common.BookingException;
 import com.example.ticketing.booking.common.DbClock;
+import com.example.ticketing.booking.common.ThrottledWarn;
 import com.example.ticketing.booking.hold.SeatHoldTransaction.PersistedHold;
 import com.example.ticketing.booking.hold.SeatHoldTransaction.ReleasedHold;
 import com.example.ticketing.booking.hold.domain.SeatHold;
@@ -28,7 +29,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.Semaphore;
-import java.util.concurrent.atomic.AtomicLong;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Service;
@@ -42,7 +42,6 @@ public class SeatHoldService {
     private static final String GATE_COUNTER = "booking.hold.gate";
     private static final String FALLBACK_COUNTER = "booking.hold.fallback";
     private static final String REFLECT_FAILURE = "booking.redis.reflect.failure";
-    private static final long REDIS_WARN_INTERVAL_NANOS = Duration.ofSeconds(10).toNanos();
 
     private final SeatCatalog seatCatalog;
     private final SeatHoldTransaction seatHoldTransaction;
@@ -68,8 +67,7 @@ public class SeatHoldService {
     private final Counter fallbackRejected;
     private final Counter queueConsumeFailure;
     private final Semaphore fallbackPermits;
-    private final AtomicLong lastRedisWarnNanos = new AtomicLong(System.nanoTime() - REDIS_WARN_INTERVAL_NANOS);
-    private final AtomicLong suppressedRedisWarns = new AtomicLong();
+    private final ThrottledWarn redisWarn = new ThrottledWarn(log);
 
     public SeatHoldService(SeatCatalog seatCatalog, SeatHoldTransaction seatHoldTransaction,
                            SeatHoldRepository seatHoldRepository, SeatRepository seatRepository,
@@ -254,17 +252,8 @@ public class SeatHoldService {
                 selection.seats().stream().map(HoldSeatView::of).toList(), selection.totalAmount());
     }
 
-    // 장애 중 요청마다 warn을 남기면 로그가 넘친다. 10초에 한 번만 warn으로 남기고 그사이는 debug로 센다
     private void warnRedisFailure(String op, long performanceId, RuntimeException e) {
-        long now = System.nanoTime();
-        long last = lastRedisWarnNanos.get();
-        if (now - last >= REDIS_WARN_INTERVAL_NANOS && lastRedisWarnNanos.compareAndSet(last, now)) {
-            log.warn("[booking hold] Redis 실패 op={}, performanceId={}, 앞서 생략 {}건: {}",
-                    op, performanceId, suppressedRedisWarns.getAndSet(0), e.toString());
-        } else {
-            suppressedRedisWarns.incrementAndGet();
-            log.debug("[booking hold] Redis 실패 op={}, performanceId={}: {}", op, performanceId, e.toString());
-        }
+        redisWarn.warn("[booking hold] Redis 실패 op={}, performanceId={}: {}", op, performanceId, e.toString());
     }
 
     private PersistedHold decideInDb(long userId, SeatSelection selection, String holdToken) {

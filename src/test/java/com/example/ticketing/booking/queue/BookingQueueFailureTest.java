@@ -1,5 +1,6 @@
 package com.example.ticketing.booking.queue;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.example.ticketing.booking.BookingProperties;
@@ -11,6 +12,7 @@ import com.example.ticketing.booking.common.TestBookingRedis;
 import com.example.ticketing.booking.seat.SeatCatalog;
 import com.example.ticketing.booking.support.BookingFixtures;
 import com.example.ticketing.booking.support.BookingIntegrationTest;
+import com.example.ticketing.booking.support.CapturedLogs;
 import java.io.IOException;
 import java.net.ServerSocket;
 import org.junit.jupiter.api.AfterEach;
@@ -62,6 +64,24 @@ class BookingQueueFailureTest {
                 .isInstanceOf(BookingException.class)
                 .extracting(e -> ((BookingException) e).getCode())
                 .isEqualTo(BookingErrorCode.QUEUE_UNAVAILABLE);
+    }
+
+    @Test
+    @DisplayName("장애 중 503이 여러 번 나도 10초 안에는 warn이 한 줄이다")
+    void unavailableWarnThrottled() {
+        long pid = fixtures.newPerformance(1, 1, 1);
+
+        try (CapturedLogs logs = CapturedLogs.of(BookingQueueService.class)) {
+            for (int i = 0; i < 5; i++) {
+                assertThatThrownBy(() -> deadService.enter(pid, USER))
+                        .isInstanceOf(BookingException.class)
+                        .extracting(e -> ((BookingException) e).getCode())
+                        .isEqualTo(BookingErrorCode.QUEUE_UNAVAILABLE);
+            }
+
+            assertThat(logs.warnings()).hasSize(1);
+            assertThat(logs.warnings().get(0)).contains("op=enter").contains("앞서 생략 0건");
+        }
     }
 
     @Test

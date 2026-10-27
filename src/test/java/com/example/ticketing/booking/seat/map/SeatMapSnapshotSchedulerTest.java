@@ -4,11 +4,15 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.example.ticketing.booking.BookingProperties;
 import com.example.ticketing.booking.common.BookingRedis;
+import com.example.ticketing.booking.common.TestBookingRedis;
+import com.example.ticketing.booking.support.CapturedLogs;
 import com.example.ticketing.booking.seat.SeatCatalog;
 import com.example.ticketing.booking.support.BookingFixtures;
 import com.example.ticketing.booking.support.BookingIntegrationTest;
 import com.example.ticketing.booking.support.RedisKeyCleaner;
 import io.micrometer.core.instrument.MeterRegistry;
+import java.io.IOException;
+import java.net.ServerSocket;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -125,6 +129,24 @@ class SeatMapSnapshotSchedulerTest {
     }
 
     @Test
+    @DisplayName("Redis 장애로 여러 회차가 여러 주기 실패해도 10초 안에는 warn이 한 줄이다")
+    void failureWarnThrottled() throws IOException {
+        BookingRedis dead = TestBookingRedis.connectTo("localhost", closedPort(), props);
+        SeatMapSnapshotScheduler scheduler = new SeatMapSnapshotScheduler(catalogOf(List.of(1L, 2L, 3L)), builder,
+                new SeatMapStore(dead), "instance-a", props, meterRegistry);
+        try (CapturedLogs logs = CapturedLogs.of(SeatMapSnapshotScheduler.class)) {
+            for (int cycle = 0; cycle < 3; cycle++) {
+                scheduler.snapshot();
+            }
+
+            assertThat(logs.warnings()).hasSize(1);
+            assertThat(logs.warnings().get(0)).contains("회차 1 스냅샷 실패").contains("앞서 생략 0건");
+        } finally {
+            dead.destroy();
+        }
+    }
+
+    @Test
     @DisplayName("releaseLease는 값이 소유자와 같을 때만 지운다")
     void releaseLeaseComparesOwner() {
         long pid = openPerformance();
@@ -167,5 +189,11 @@ class SeatMapSnapshotSchedulerTest {
 
     private StringRedisTemplate redis() {
         return bookingRedis.template();
+    }
+
+    private static int closedPort() throws IOException {
+        try (ServerSocket socket = new ServerSocket(0)) {
+            return socket.getLocalPort();
+        }
     }
 }

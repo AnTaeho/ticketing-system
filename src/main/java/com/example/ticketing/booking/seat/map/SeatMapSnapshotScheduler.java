@@ -2,6 +2,7 @@ package com.example.ticketing.booking.seat.map;
 
 import com.example.ticketing.booking.BookingProperties;
 import com.example.ticketing.booking.common.SchedulerLease;
+import com.example.ticketing.booking.common.ThrottledWarn;
 import com.example.ticketing.booking.seat.SeatCatalog;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -27,6 +28,7 @@ public class SeatMapSnapshotScheduler {
     private final Duration leaseTtl;
     private final Duration snapshotTtl;
     private final Counter rebuilds;
+    private final ThrottledWarn failureWarn = new ThrottledWarn(log);
 
     @Autowired
     public SeatMapSnapshotScheduler(SeatCatalog seatCatalog, SeatMapBuilder builder, SeatMapStore store,
@@ -52,7 +54,7 @@ public class SeatMapSnapshotScheduler {
             try {
                 snapshotOne(performanceId);
             } catch (RuntimeException e) {
-                log.warn("[booking seatmap] 회차 {} 스냅샷 실패, 다음 회차로 넘어간다: {}", performanceId, e.toString());
+                failureWarn.warn("[booking seatmap] 회차 {} 스냅샷 실패, 다음 회차로 넘어간다: {}", performanceId, e.toString());
             }
         }
     }

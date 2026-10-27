@@ -209,6 +209,7 @@ public class OpsSummaryService {
         Map<String, List<String>> counters = new LinkedHashMap<>();
         counters.put("booking.hold.gate", List.of("result"));
         counters.put("booking.hold.db", List.of("result"));
+        counters.put("booking.hold.fallback", List.of("result"));
         counters.put("booking.hold.expired", List.of());
         counters.put("booking.seatmap.rebuild", List.of("source"));
         counters.put("booking.payment.reconcile", List.of("result"));
