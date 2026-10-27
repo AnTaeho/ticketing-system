@@ -36,4 +36,10 @@ public interface SeatRepository extends JpaRepository<Seat, Long> {
             UPDATE seat SET status = 'AVAILABLE', hold_id = NULL, held_until = NULL
              WHERE hold_id = :holdId AND status = 'HELD'""", nativeQuery = true)
     int releaseHeldSeats(@Param("holdId") long holdId);
+
+    @Modifying
+    @Query(value = """
+            UPDATE seat SET status = 'AVAILABLE', hold_id = NULL, held_until = NULL
+             WHERE hold_id IN (:holdIds) AND status = 'HELD'""", nativeQuery = true)
+    int releaseHeldSeatsOf(@Param("holdIds") Collection<Long> holdIds);
 }

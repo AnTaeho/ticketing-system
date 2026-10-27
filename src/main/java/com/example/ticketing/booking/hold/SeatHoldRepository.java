@@ -1,6 +1,7 @@
 package com.example.ticketing.booking.hold;
 
 import com.example.ticketing.booking.hold.domain.SeatHold;
+import java.util.Collection;
 import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
@@ -25,4 +26,11 @@ public interface SeatHoldRepository extends JpaRepository<SeatHold, Long> {
             UPDATE seat_hold SET status = 'RELEASED', updated_at = NOW(6)
              WHERE id = :id AND status = 'HELD'""", nativeQuery = true)
     int markReleased(@Param("id") long id);
+
+    // 결제 중(PAYING)은 대상이 아니다. 결제 대사가 결론을 낸다
+    @Modifying
+    @Query(value = """
+            UPDATE seat_hold SET status = 'EXPIRED', updated_at = NOW(6)
+             WHERE id IN (:ids) AND status = 'HELD'""", nativeQuery = true)
+    int markExpired(@Param("ids") Collection<Long> ids);
 }
