@@ -99,10 +99,13 @@ class SchedulerLeaseTest {
         SchedulerLease a = new SchedulerLease(bookingRedis, "a");
         SchedulerLease b = new SchedulerLease(bookingRedis, "b");
         AtomicBoolean bRan = new AtomicBoolean();
+        Duration ttl = Duration.ofSeconds(30);
 
-        boolean aRan = a.runIfLeader(name, Duration.ofMillis(100), () -> {
+        // 만료는 PTTL로 확인하고, 만료된 뒤의 인계는 키를 지워 흉내 낸다. 실제 시간이 지나기를 기다리지 않는다
+        boolean aRan = a.runIfLeader(name, ttl, () -> {
+            assertThat(redis().getExpire(key, TimeUnit.MILLISECONDS)).isPositive().isLessThanOrEqualTo(ttl.toMillis());
             assertThat(b.runIfLeader(name, Duration.ofSeconds(5), () -> { })).isFalse();
-            sleep(250);
+            redis().delete(key);
             assertThat(b.runIfLeader(name, Duration.ofSeconds(5), () -> bRan.set(true))).isTrue();
             redis().opsForValue().set(key, "c", Duration.ofSeconds(5));
         });
