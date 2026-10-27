@@ -18,6 +18,67 @@ spring:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.apache.kafka.common.serialization.StringSerializer
 
+  task:
+    scheduling:
+      pool:
+        size: 8                # 기존 2 + 예매 6
+
 ticketing:
   kafka:
     topic: ticket-reservation
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,metrics
+
+booking:
+  seed:
+    enabled: true              # @Profile("local")에서만 의미. 예매 테스트는 false
+  redis:
+    command-timeout: 300ms
+    connect-timeout: 500ms
+  hold:
+    ttl: 5m
+    max-seats: 4
+    expiry-scan-ms: 1000
+    expiry-batch-size: 50
+    rehold-cooldown: 10m
+  payment:
+    pay-deadline: 10m
+    requested-recheck-after: 30s
+    unknown-recheck-after: 10s
+    not-found-cancel-after: 30s
+    reconcile-scan-ms: 2000
+    reconcile-batch-size: 20
+  gate:
+    enabled: true              # 부하 테스트 비교 스위치
+    fallback-max-concurrency: 20
+  queue:
+    capacity: 200
+    processing-token-ttl: 10m
+    waiting-token-ttl: 60m
+    promote-interval-ms: 1000
+  seatmap:
+    snapshot-interval-ms: 1000
+    snapshot-ttl: 30s
+    local-cache-ms: 1000
+    lease-ttl: 2s
+  outbox:
+    poll-interval-ms: 500
+    batch-size: 50
+    lock-duration: 60s
+    max-attempts: 5
+  ops:
+    orphan-scan-ms: 30000
+  pg:
+    base-url: ""               # 비우면 http://localhost:${local.server.port}/fake-pg
+    connect-timeout: 500ms
+    read-timeout: 3s
+  fake-pg:
+    delay-min-ms: 200
+    delay-max-ms: 1200
+    decline-rate: 0.1
+    slow-rate: 0.05
+    slow-delay-ms: 5000
