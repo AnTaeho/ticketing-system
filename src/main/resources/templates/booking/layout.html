@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="ko" xmlns:th="http://www.thymeleaf.org">
+<head>
+<th:block th:fragment="assets(title)">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title th:text="${title} + ' · 티켓 예매'">티켓 예매</title>
+  <link rel="stylesheet" th:href="@{/booking/css/booking.css}">
+  <script th:src="@{/booking/js/api.js}" defer></script>
+</th:block>
+</head>
+<body>
+<header class="top" th:fragment="top(title, sub, back)">
+  <div class="top-in">
+    <a class="back" id="page-back" th:if="${back != null}" th:href="${back}" aria-label="뒤로">
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.5 4 6.5 10l6 6"/></svg>
+    </a>
+    <div class="show">
+      <h1 id="page-title" th:text="${title}">티켓 예매</h1>
+      <p id="page-sub" th:text="${sub}" th:hidden="${sub == null or sub == ''}"></p>
+    </div>
+  </div>
+</header>
+</body>
+</html>

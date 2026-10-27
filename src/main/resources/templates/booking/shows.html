@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="ko" xmlns:th="http://www.thymeleaf.org">
+<head>
+  <th:block th:replace="~{booking/layout :: assets('공연 목록')}"></th:block>
+  <script th:src="@{/booking/js/shows.js}" defer></script>
+</head>
+<body class="narrow">
+<header th:replace="~{booking/layout :: top('공연 고르기', '보고 싶은 공연을 눌러 날짜를 골라 주세요', null)}"></header>
+<main class="wrap">
+  <p class="empty" id="shows-loading">공연을 불러오고 있어요</p>
+  <p class="alert" id="shows-error" role="alert" hidden></p>
+  <div class="cards" id="shows"></div>
+</main>
+</body>
+</html>

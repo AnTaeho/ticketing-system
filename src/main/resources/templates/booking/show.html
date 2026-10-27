@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="ko" xmlns:th="http://www.thymeleaf.org">
+<head>
+  <th:block th:replace="~{booking/layout :: assets('공연 정보')}"></th:block>
+  <script th:src="@{/booking/js/show.js}" defer></script>
+</head>
+<body class="narrow" th:data-show-id="${showId}">
+<header th:replace="~{booking/layout :: top('공연 정보', null, @{/booking/shows})}"></header>
+<main class="wrap">
+  <p class="empty" id="show-loading">공연 정보를 불러오고 있어요</p>
+  <p class="alert" id="show-error" role="alert" hidden></p>
+  <div id="show-body" hidden>
+    <p class="panel about" id="show-about" hidden></p>
+    <h2 class="sec-title">날짜 고르기</h2>
+    <div class="perfs" id="perfs"></div>
+  </div>
+</main>
+</body>
+</html>
