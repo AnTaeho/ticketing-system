@@ -167,6 +167,15 @@ public class BookingPaymentTransaction {
         return current(payment);
     }
 
+    // PG 환불 확정 뒤 Outbox 워커가 부른다. 다시 불려도 조건부 전이라 두 번째는 바꾸는 행이 없다
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    public boolean completeRefund(long paymentId) {
+        forgetEarlierEntities();
+        long holdId = paymentRepository.findHoldIdById(paymentId).orElseThrow(() -> paymentNotFound(paymentId));
+        seatHoldRepository.markReleasedFromRefunding(holdId);
+        return paymentRepository.markRefunded(paymentId) == 1;
+    }
+
     @Transactional(readOnly = true, isolation = Isolation.READ_COMMITTED)
     public PaymentSettlement view(long userId, long paymentId) {
         forgetEarlierEntities();

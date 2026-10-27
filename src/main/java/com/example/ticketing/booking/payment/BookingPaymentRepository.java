@@ -43,6 +43,13 @@ public interface BookingPaymentRepository extends JpaRepository<BookingPayment, 
              WHERE id = :id AND status IN ('REQUESTED', 'UNKNOWN')""", nativeQuery = true)
     int markCancelled(@Param("id") long id);
 
+    // 승인된 결제의 환불이 PG에서 확정됐을 때만 부른다
+    @Modifying
+    @Query(value = """
+            UPDATE booking_payment SET status = 'CANCELLED', updated_at = NOW(6)
+             WHERE id = :id AND status = 'APPROVED'""", nativeQuery = true)
+    int markRefunded(@Param("id") long id);
+
     // 대사가 다음 확인 시각을 정한다. 넘긴 오류가 없으면 이전 last_error를 둔다
     @Modifying
     @Query(value = """

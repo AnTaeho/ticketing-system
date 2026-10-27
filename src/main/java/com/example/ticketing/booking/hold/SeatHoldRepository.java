@@ -56,6 +56,13 @@ public interface SeatHoldRepository extends JpaRepository<SeatHold, Long> {
              WHERE id = :id AND status = 'PAYING'""", nativeQuery = true)
     int markReleasedFromPaying(@Param("id") long id);
 
+    // 좌석 상실로 환불하던 hold를 환불 확정 뒤 닫는다. 예매 취소의 환불은 hold가 CONFIRMED라 대상이 아니다
+    @Modifying
+    @Query(value = """
+            UPDATE seat_hold SET status = 'RELEASED', updated_at = NOW(6)
+             WHERE id = :id AND status = 'REFUNDING'""", nativeQuery = true)
+    int markReleasedFromRefunding(@Param("id") long id);
+
     // 결제 중(PAYING)은 대상이 아니다. 결제 대사가 결론을 낸다
     @Modifying
     @Query(value = """
