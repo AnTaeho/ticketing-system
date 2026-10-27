@@ -12,6 +12,7 @@ import com.example.ticketing.booking.hold.dto.HoldDetail;
 import com.example.ticketing.booking.hold.dto.HoldSeatView;
 import com.example.ticketing.booking.hold.gate.GateResult;
 import com.example.ticketing.booking.hold.gate.RedisSeatGate;
+import com.example.ticketing.booking.payment.BookingPaymentRepository;
 import com.example.ticketing.booking.seat.SeatCatalog;
 import com.example.ticketing.booking.seat.SeatCatalog.PerformanceInfo;
 import com.example.ticketing.booking.seat.SeatCatalog.SeatSelection;
@@ -37,6 +38,7 @@ public class SeatHoldService {
     private final SeatHoldTransaction seatHoldTransaction;
     private final SeatHoldRepository seatHoldRepository;
     private final SeatRepository seatRepository;
+    private final BookingPaymentRepository paymentRepository;
     private final DbClock dbClock;
     private final RedisSeatGate gate;
     private final boolean gateEnabled;
@@ -52,12 +54,13 @@ public class SeatHoldService {
 
     public SeatHoldService(SeatCatalog seatCatalog, SeatHoldTransaction seatHoldTransaction,
                            SeatHoldRepository seatHoldRepository, SeatRepository seatRepository,
-                           DbClock dbClock, RedisSeatGate gate, BookingProperties properties,
-                           MeterRegistry meterRegistry) {
+                           BookingPaymentRepository paymentRepository, DbClock dbClock, RedisSeatGate gate,
+                           BookingProperties properties, MeterRegistry meterRegistry) {
         this.seatCatalog = seatCatalog;
         this.seatHoldTransaction = seatHoldTransaction;
         this.seatHoldRepository = seatHoldRepository;
         this.seatRepository = seatRepository;
+        this.paymentRepository = paymentRepository;
         this.dbClock = dbClock;
         this.gate = gate;
         this.gateEnabled = properties.gate().enabled();
@@ -97,8 +100,9 @@ public class SeatHoldService {
         List<HoldSeatView> seats = seatRepository.findByPerformanceIdAndHoldIdOrderByIdAsc(hold.getPerformanceId(), holdId).stream()
                 .map(HoldSeatView::of)
                 .toList();
+        Long paymentId = paymentRepository.findIdByHoldId(holdId).orElse(null);
         return new HoldDetail(hold.getId(), hold.getStatus(), hold.getExpiresAt(), hold.getPayDeadline(),
-                dbClock.now(), seats, hold.getTotalAmount(), null);
+                dbClock.now(), seats, hold.getTotalAmount(), paymentId);
     }
 
     // 커밋이 끝난 뒤 게이트 키를 지운다
