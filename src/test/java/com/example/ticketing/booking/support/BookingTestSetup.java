@@ -16,6 +16,7 @@ import org.springframework.test.context.TestPropertySource;
         "booking.payment.reconcile-enabled=false",
         "booking.outbox.worker-enabled=false",
         "booking.queue.promote-enabled=false",
+        "booking.seatmap.snapshot-enabled=false",
         "booking.redis.database=1",
         "spring.datasource.url=jdbc:mysql://localhost:3306/ticketing_booking_test"
                 + "?createDatabaseIfNotExist=true&serverTimezone=Asia/Seoul&characterEncoding=UTF-8"
