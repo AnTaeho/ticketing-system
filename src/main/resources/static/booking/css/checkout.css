@@ -1,0 +1,83 @@
+/* 결제 화면. 공통 모양은 booking.css에 있다 */
+.checkout-page{--col:912px;padding-bottom:calc(var(--bar-h,104px) + 16px)}
+.checkout-page.is-narrow{--col:592px;padding-bottom:32px}
+
+/* 위쪽 고정 띠: 남은 시간 */
+.clock{position:sticky;top:0;z-index:11;background:var(--accent-soft);color:#1b2f6b;border-bottom:1px solid #d5def8}
+.clock-in{max-width:var(--col);margin:0 auto;padding:10px 16px;display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:2px 12px}
+.clock strong{font-size:15px;font-weight:700}
+.clock strong b{font-size:17px;font-weight:800}
+.clock span{font-size:13px;color:#3b4f8a}
+.clock.urgent{background:var(--warn-soft);color:var(--warn);border-bottom-color:#f6d5c2}
+.clock.urgent span{color:#9a3a12}
+
+/* 본문 배치 */
+.co{display:grid;gap:12px;grid-template-areas:"seats" "amount" "method" "demo"}
+.co>section{padding:16px}
+.a-seats{grid-area:seats}.a-amount{grid-area:amount}.a-method{grid-area:method}.a-demo{grid-area:demo}
+.a-demo{padding:0!important}
+
+.row{display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:6px 0}
+.row .k{color:var(--muted)}
+.seat-line{display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;padding:10px 0;border-top:1px solid var(--line)}
+.seat-line:first-child{border-top:0;padding-top:0}
+.seat-line:last-child{padding-bottom:0}
+.seat-line strong{font-weight:600}
+.seat-line span{color:var(--muted);font-size:14px;white-space:nowrap}
+.total{display:flex;justify-content:space-between;align-items:baseline;border-top:1px solid var(--line);margin-top:8px;padding-top:12px}
+.total .k{font-weight:700}
+.total .v{font-size:22px;font-weight:800}
+
+.methods{display:grid;gap:8px}
+.method{display:flex;align-items:center;gap:10px;padding:13px 14px;border:1px solid var(--line-strong);border-radius:var(--radius);cursor:pointer}
+.method input{width:18px;height:18px;accent-color:var(--accent);margin:0;flex:none}
+.method:has(input:checked){border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
+.method strong{font-weight:600}
+.a-method .note{margin-top:10px}
+
+/* 단추 띠: 휴대폰에서는 아래에 붙고 넓은 화면에서는 금액 상자 안에 놓인다 */
+.pay-bar{position:fixed;left:0;right:0;bottom:0;background:var(--surface);border-top:1px solid var(--line);padding:12px 16px calc(12px + env(safe-area-inset-bottom));z-index:10}
+.actions{display:grid;grid-template-columns:1fr 2fr;gap:8px}
+.co-note{margin-bottom:10px;white-space:pre-line}
+.btn-primary.is-off:disabled{opacity:1;background:#ecece7;border-color:#ecece7;color:var(--muted)}
+.ask-title{font-size:16px;font-weight:800}
+.ask-text{font-size:14px;color:var(--muted);margin-bottom:10px}
+.ask .actions{grid-template-columns:1fr 1fr}
+
+@media (min-width:860px){
+  .checkout-page{padding-bottom:32px}
+  .co{grid-template-columns:1fr 340px;grid-template-areas:"seats amount" "method amount" "demo amount";grid-template-rows:auto auto 1fr;align-items:start;gap:16px}
+  .a-amount{position:sticky;top:64px}
+  .pay-bar{position:static;padding:0;border:0;margin-top:16px;background:none}
+  .actions{grid-template-columns:1fr}
+  .actions .pay{order:-1}
+  .ask .actions{grid-template-columns:1fr}
+  .ask .actions #ask-yes{order:-1}
+}
+
+/* 결제 확인 중 */
+.pend{padding:28px 20px 20px;margin-top:24px}
+.track{height:3px;background:#e7e7e2;border-radius:2px;overflow:hidden;margin-bottom:24px}
+.track i{display:block;height:100%;width:30%;background:var(--accent);border-radius:2px;animation:slide 2.4s ease-in-out infinite}
+@keyframes slide{0%{transform:translateX(-100%)}100%{transform:translateX(340%)}}
+.pend-note{margin-bottom:16px}
+.pend h2{font-size:21px;font-weight:700;line-height:1.4}
+.pend .lead{margin-top:8px;color:var(--muted);font-size:15px}
+.facts{margin-top:22px;border-top:1px solid var(--line)}
+.facts:empty{display:none}
+.facts div{display:flex;justify-content:space-between;gap:16px;padding:11px 0;border-bottom:1px solid var(--line);font-size:14px}
+.facts dt{color:var(--muted);flex:none}
+.facts dd{text-align:right;font-weight:600}
+.facts dd small{display:block;font-weight:400;color:var(--muted)}
+.after{margin-top:16px;display:grid;gap:10px}
+.after p{font-size:13px;color:var(--muted);text-align:center}
+
+/* 결과 */
+.result{padding:28px 20px 20px;margin-top:24px}
+.result-title{font-size:21px;font-weight:800;line-height:1.4}
+.result-text{margin-top:8px;color:var(--muted);font-size:15px}
+.result-text:empty{display:none}
+.ticket{margin-top:20px;padding:14px 16px;border-radius:var(--radius);background:var(--accent-soft);display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:4px 12px}
+.ticket span{font-size:14px;color:#3b4f8a}
+.ticket strong{font-size:20px;font-weight:800;color:#1b2f6b;letter-spacing:.02em}
+.result-actions{margin-top:22px;display:grid;gap:10px}

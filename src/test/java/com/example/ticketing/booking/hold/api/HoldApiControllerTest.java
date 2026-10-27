@@ -83,6 +83,7 @@ class HoldApiControllerTest {
         JsonNode detail = body(mockMvc.perform(get("/api/holds/{holdId}", holdId).header(USER, userId))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.holdId").value(holdId))
+                .andExpect(jsonPath("$.performanceId").value(pid))
                 .andExpect(jsonPath("$.status").value("HELD"))
                 .andExpect(jsonPath("$.expiresAt").value(body.get("expiresAt").asString()))
                 .andExpect(jsonPath("$.payDeadline").isEmpty())

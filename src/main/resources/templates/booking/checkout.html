@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="ko" xmlns:th="http://www.thymeleaf.org">
+<head>
+  <th:block th:replace="~{booking/layout :: assets('결제')}"></th:block>
+  <link rel="stylesheet" th:href="@{/booking/css/checkout.css}">
+  <script th:src="@{/booking/js/checkout.js}" defer></script>
+</head>
+<body class="checkout-page" th:data-hold-id="${holdId}" th:data-demo-pg="${demoPg}">
+<header th:replace="~{booking/layout :: top('결제', null, @{/booking/shows})}"></header>
+<div class="clock" id="clock" role="timer" aria-live="off" hidden>
+  <div class="clock-in">
+    <strong id="clock-main"><b class="num" id="clock-left">0:00</b> 안에 결제해 주세요</strong>
+    <span id="clock-sub">지나면 자리가 풀려요</span>
+  </div>
+</div>
+<main class="wrap">
+  <p class="empty" id="co-loading" role="status">결제 정보를 불러오고 있어요</p>
+
+  <div class="co" id="co" hidden>
+    <section class="panel a-seats">
+      <h2 class="sec-title">고른 자리</h2>
+      <div id="seat-lines"></div>
+    </section>
+
+    <section class="panel a-amount">
+      <h2 class="sec-title">결제 금액</h2>
+      <div id="amount-rows"></div>
+      <div class="total"><span class="k">합계</span><span class="v num" id="total"></span></div>
+      <div class="pay-bar" id="pay-bar">
+        <p class="alert co-note" id="co-note" role="status" hidden></p>
+        <div class="ask" id="ask" hidden>
+          <p class="ask-title">자리를 놓을까요?</p>
+          <p class="ask-text">놓으면 다른 분이 바로 고를 수 있어요.</p>
+          <div class="actions">
+            <button class="btn btn-ghost" id="ask-no" type="button">아니요</button>
+            <button class="btn btn-primary" id="ask-yes" type="button">예, 놓을게요</button>
+          </div>
+        </div>
+        <div class="actions" id="actions">
+          <button class="btn btn-ghost" id="release" type="button">자리 놓기</button>
+          <button class="btn btn-primary pay" id="pay" type="button">결제하기</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel a-method">
+      <h2 class="sec-title">결제 수단</h2>
+      <div class="methods" role="radiogroup" aria-label="결제 수단">
+        <label class="method"><input type="radio" name="method" value="CARD" checked><strong>신용·체크카드</strong></label>
+        <label class="method"><input type="radio" name="method" value="EASY_PAY"><strong>간편결제</strong></label>
+      </div>
+      <p class="note">데모라서 실제로 돈이 나가지 않아요.</p>
+    </section>
+
+    <section class="a-demo" th:if="${demoPg}">
+      <div class="demo" id="demo">
+        <div class="demo-head"><span class="demo-tag">시연용</span><span>결제 결과를 미리 골라 둘 수 있어요</span></div>
+        <div class="seg" role="radiogroup" aria-label="결제 상황">
+          <label><input type="radio" name="scenario" value="SUCCESS" checked>정상 승인</label>
+          <label><input type="radio" name="scenario" value="DECLINE">거절</label>
+          <label><input type="radio" name="scenario" value="SLOW_SUCCESS">응답 지연</label>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <section class="panel pend" id="pend" aria-live="polite" hidden>
+    <div class="track" role="progressbar" aria-label="결제 결과 확인 중"><i></i></div>
+    <p class="alert pend-note" id="pend-note" hidden></p>
+    <h2>결제 결과를 확인하고 있어요</h2>
+    <p class="lead" id="pend-lead">이 화면을 닫아도 결과는 내 예매에 나와요.</p>
+    <dl class="facts" id="pend-facts"></dl>
+  </section>
+  <div class="after" id="pend-after" hidden>
+    <a class="btn btn-ghost" href="/booking/bookings">내 예매 보기</a>
+    <p>결과가 나오면 이 화면도 바로 바뀌어요.</p>
+  </div>
+
+  <section class="panel result" id="result" aria-live="polite" hidden>
+    <h2 class="result-title" id="result-title"></h2>
+    <p class="result-text" id="result-text"></p>
+    <div class="ticket" id="result-ticket" hidden>
+      <span>예매번호</span>
+      <strong class="num" id="result-number"></strong>
+    </div>
+    <dl class="facts" id="result-facts"></dl>
+    <div class="result-actions">
+      <a class="btn btn-primary" id="result-main" href="#"></a>
+      <a class="btn btn-ghost" id="result-sub" href="#" hidden></a>
+    </div>
+  </section>
+</main>
+</body>
+</html>

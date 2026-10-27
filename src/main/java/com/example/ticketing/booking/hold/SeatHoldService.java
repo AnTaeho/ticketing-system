@@ -117,7 +117,7 @@ public class SeatHoldService {
                 .map(HoldSeatView::of)
                 .toList();
         Long paymentId = paymentRepository.findIdByHoldId(holdId).orElse(null);
-        return new HoldDetail(hold.getId(), hold.getStatus(), hold.getExpiresAt(), hold.getPayDeadline(),
+        return new HoldDetail(hold.getId(), hold.getPerformanceId(), hold.getStatus(), hold.getExpiresAt(), hold.getPayDeadline(),
                 dbClock.now(), seats, hold.getTotalAmount(), paymentId);
     }
 

@@ -2,6 +2,7 @@ package com.example.ticketing.booking.web;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.not;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.model;
@@ -9,6 +10,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.view;
 
+import com.example.ticketing.booking.BookingProperties;
 import com.example.ticketing.booking.support.BookingIntegrationTest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -16,9 +18,12 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.mock.env.MockEnvironment;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
+import org.thymeleaf.spring6.ISpringTemplateEngine;
+import org.thymeleaf.spring6.view.ThymeleafViewResolver;
 
 @BookingIntegrationTest
 class BookingPageControllerTest {
@@ -39,7 +44,8 @@ class BookingPageControllerTest {
             "/booking/shows, booking/shows, /booking/js/shows.js",
             "/booking/shows/7, booking/show, /booking/js/show.js",
             "/booking/performances/9/queue, booking/queue, /booking/js/queue.js",
-            "/booking/performances/9/seats, booking/seats, /booking/js/seats.js"
+            "/booking/performances/9/seats, booking/seats, /booking/js/seats.js",
+            "/booking/holds/5/checkout, booking/checkout, /booking/js/checkout.js"
     })
     @DisplayName("각 화면 경로는 200과 해당 뷰를 돌려주고, 레이아웃의 공통 머리·스타일·스크립트가 함께 렌더링된다")
     void rendersPage(String path, String viewName, String pageScript) throws Exception {
@@ -89,6 +95,46 @@ class BookingPageControllerTest {
     }
 
     @Test
+    @DisplayName("결제 화면은 선점 번호를 넘기고, prod가 아니면 결제 상황을 고르는 시연 상자를 그린다")
+    void checkoutPassesHoldIdAndDemoBox() throws Exception {
+        String html = mockMvc.perform(get("/booking/holds/5/checkout").param("show", "3"))
+                .andExpect(status().isOk())
+                .andExpect(model().attribute("holdId", 5L))
+                .andExpect(model().attribute("demoPg", true))
+                .andExpect(content().string(containsString("data-hold-id=\"5\"")))
+                .andExpect(content().string(containsString("data-demo-pg=\"true\"")))
+                .andExpect(content().string(containsString("id=\"clock\"")))
+                .andExpect(content().string(containsString("id=\"pay\"")))
+                .andExpect(content().string(containsString("id=\"release\"")))
+                .andExpect(content().string(containsString("name=\"scenario\" value=\"SLOW_SUCCESS\"")))
+                .andReturn().getResponse().getContentAsString();
+        assertThat(html.indexOf("href=\"/booking/css/checkout.css\""))
+                .isGreaterThan(html.indexOf("href=\"/booking/css/booking.css\""));
+        assertThat(html).doesNotContain("수수료");
+    }
+
+    @Test
+    @DisplayName("prod에서는 결제 화면에 시연 상자를 그리지 않는다")
+    void checkoutHidesDemoBoxInProd() throws Exception {
+        MockEnvironment prod = new MockEnvironment();
+        prod.setActiveProfiles("prod");
+        ThymeleafViewResolver resolver = new ThymeleafViewResolver();
+        resolver.setTemplateEngine(context.getBean(ISpringTemplateEngine.class));
+        resolver.setCharacterEncoding("UTF-8");
+        MockMvc prodMvc = MockMvcBuilders
+                .standaloneSetup(new BookingPageController(context.getBean(BookingProperties.class), prod))
+                .setViewResolvers(resolver)
+                .build();
+
+        prodMvc.perform(get("/booking/holds/5/checkout"))
+                .andExpect(status().isOk())
+                .andExpect(model().attribute("demoPg", false))
+                .andExpect(content().string(containsString("data-demo-pg=\"false\"")))
+                .andExpect(content().string(containsString("id=\"pay\"")))
+                .andExpect(content().string(not(containsString("name=\"scenario\""))));
+    }
+
+    @Test
     @DisplayName("/booking은 공연 목록으로 보낸다")
     void homeRedirectsToShows() throws Exception {
         mockMvc.perform(get("/booking"))
@@ -105,7 +151,9 @@ class BookingPageControllerTest {
             "/booking/js/show.js",
             "/booking/js/queue.js",
             "/booking/js/seats.js",
-            "/booking/css/seats.css"
+            "/booking/css/seats.css",
+            "/booking/js/checkout.js",
+            "/booking/css/checkout.css"
     })
     @DisplayName("화면이 쓰는 정적 파일이 제공된다")
     void servesStaticFiles(String path) throws Exception {

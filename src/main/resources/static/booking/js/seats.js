@@ -475,7 +475,7 @@
   // ---- 선점 ----
 
   function checkoutHref(holdId) {
-    return '/booking/holds/' + encodeURIComponent(holdId) + '/checkout';
+    return '/booking/holds/' + encodeURIComponent(holdId) + '/checkout' + (showId ? '?show=' + showId : '');
   }
 
   function moveTo(id) {

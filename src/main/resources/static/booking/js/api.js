@@ -48,16 +48,27 @@
     return '/booking/login?next=' + encodeURIComponent(next || (location.pathname + location.search));
   }
 
-  function request(method, path, body) {
+  // options.headers는 더할 머리글, options.timeoutMs가 지나면 TIMEOUT으로 끝낸다
+  function request(method, path, body, options) {
+    var opts = options || {};
     var init = { method: method, credentials: 'same-origin', headers: { 'Accept': 'application/json' } };
     if (body !== undefined) {
       init.headers['Content-Type'] = 'application/json';
       init.body = JSON.stringify(body);
     }
+    Object.keys(opts.headers || {}).forEach(function (name) { init.headers[name] = opts.headers[name]; });
+    var timer = null;
+    var timedOut = false;
+    if (opts.timeoutMs && typeof AbortController === 'function') {
+      var controller = new AbortController();
+      init.signal = controller.signal;
+      timer = setTimeout(function () { timedOut = true; controller.abort(); }, opts.timeoutMs);
+    }
     var sentAt = Date.now();
     return fetch(path, init).then(function (res) {
       noteServerTime(res, sentAt);
       return readJson(res).then(function (data) {
+        clearTimeout(timer);
         if (res.ok) return data;
         var code = (data && data.code) || ('HTTP_' + res.status);
         if (res.status === 401 && code === 'LOGIN_REQUIRED') {
@@ -68,7 +79,8 @@
         throw new ApiError(res.status, code, (data && data.message) || FALLBACK_MESSAGE, data && data.detail);
       });
     }, function () {
-      throw new ApiError(0, 'NETWORK', NETWORK_MESSAGE, {});
+      clearTimeout(timer);
+      throw new ApiError(0, timedOut ? 'TIMEOUT' : 'NETWORK', NETWORK_MESSAGE, {});
     });
   }
 
@@ -187,7 +199,7 @@
     ApiError: ApiError,
     NETWORK_MESSAGE: NETWORK_MESSAGE,
     get: function (path) { return request('GET', path); },
-    post: function (path, body) { return request('POST', path, body); },
+    post: function (path, body, options) { return request('POST', path, body, options); },
     del: function (path) { return request('DELETE', path); },
     serverNow: serverNow,
     dateTime: dateTime,
