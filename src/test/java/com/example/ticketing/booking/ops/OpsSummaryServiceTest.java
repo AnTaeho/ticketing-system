@@ -130,7 +130,7 @@ class OpsSummaryServiceTest {
 
         assertThat(summary.counters()).containsOnlyKeys("booking.hold.gate", "booking.hold.db",
                 "booking.hold.expired", "booking.seatmap.rebuild", "booking.payment.reconcile",
-                "booking.outbox.task", "booking.redis.reflect.failure");
+                "booking.outbox.task", "booking.redis.reflect.failure", "booking.gate.orphan.removed");
         assertThat(summary.counters().get("booking.hold.gate").values())
                 .containsKeys("ok", "seat_taken", "user_has_hold", "cooldown", "skipped");
         assertThat(summary.counters().get("booking.outbox.task").tags()).containsExactly("type", "result");

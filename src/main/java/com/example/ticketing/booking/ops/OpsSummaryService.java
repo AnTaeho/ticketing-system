@@ -214,6 +214,7 @@ public class OpsSummaryService {
         counters.put("booking.payment.reconcile", List.of("result"));
         counters.put("booking.outbox.task", List.of("type", "result"));
         counters.put("booking.redis.reflect.failure", List.of("op"));
+        counters.put("booking.gate.orphan.removed", List.of("kind"));
         return counters;
     }
 
