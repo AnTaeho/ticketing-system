@@ -13,7 +13,8 @@ import com.example.ticketing.outbox.domain.OutboxTaskType;
 import com.example.ticketing.outbox.dto.ClaimedOutboxTask;
 import com.example.ticketing.payment.client.PgResult;
 import com.example.ticketing.payment.client.PgStatus;
-import com.example.ticketing.payment.dto.StartResult.Started;
+import com.example.ticketing.payment.dto.PayCommand;
+import com.example.ticketing.payment.dto.PaymentStart.Started;
 import com.example.ticketing.payment.service.PaymentService;
 import com.example.ticketing.payment.service.PaymentTransaction;
 import com.example.ticketing.support.Fixtures;
@@ -409,7 +410,7 @@ class OutboxWorkerTest {
         List<Long> seatIds = db.seatIds(pid).subList(0, seatCount);
         CreateHoldResult hold = seatHoldService.hold(
                 new CreateHoldCommand(userId, pid, seatIds, fixtures.admit(pid, userId)));
-        paymentService.pay(userId, hold.holdId(), key(), Optional.empty());
+        paymentService.pay(new PayCommand(userId, hold.holdId(), key(), Optional.empty()));
         long bookingId = jdbcTemplate.queryForObject("SELECT id FROM booking WHERE hold_id = ?", Long.class,
                 hold.holdId());
         return new Confirmed(userId, bookingId);
@@ -423,7 +424,7 @@ class OutboxWorkerTest {
             long userId = fixtures.newUser();
             CreateHoldResult hold = seatHoldService.hold(
                     new CreateHoldCommand(userId, pid, List.of(seatIds.get(i)), fixtures.admit(pid, userId)));
-            paymentService.pay(userId, hold.holdId(), key(), Optional.empty());
+            paymentService.pay(new PayCommand(userId, hold.holdId(), key(), Optional.empty()));
             bookingIds.add(jdbcTemplate.queryForObject("SELECT id FROM booking WHERE hold_id = ?", Long.class,
                     hold.holdId()));
         }

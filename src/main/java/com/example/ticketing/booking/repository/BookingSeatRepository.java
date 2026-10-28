@@ -10,7 +10,7 @@ import org.springframework.data.repository.query.Param;
 public interface BookingSeatRepository extends JpaRepository<BookingSeat, BookingSeatId> {
 
     // 확정 직후 이 hold의 SOLD 좌석을 그대로 옮겨 적는다
-    @Modifying
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query(value = """
             INSERT INTO booking_seat (booking_id, seat_id, section, row_no, seat_no, grade, price)
             SELECT :bookingId, id, section, row_no, seat_no, grade, price

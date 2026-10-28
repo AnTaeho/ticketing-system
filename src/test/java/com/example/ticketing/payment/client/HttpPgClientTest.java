@@ -3,6 +3,7 @@ package com.example.ticketing.payment.client;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.example.ticketing.common.config.TicketingProperties;
+import com.example.ticketing.payment.dto.PgScenario;
 import com.example.ticketing.support.HttpIntegrationTest;
 import java.io.IOException;
 import java.net.ServerSocket;
@@ -43,7 +44,7 @@ class HttpPgClientTest {
         assertThat(properties.pg().baseUrl()).isEmpty();
         String orderId = newOrderId();
 
-        PgResult approved = pgClient.approve(orderId, AMOUNT, Optional.of(PgScenario.SUCCESS));
+        PgResult approved = pgClient.approve(orderId, AMOUNT, Optional.of(PgScenario.SUCCESS.name()));
 
         assertThat(approved.status()).isEqualTo(PgStatus.APPROVED);
         assertThat(approved.pgTxId()).isNotBlank();
@@ -54,7 +55,7 @@ class HttpPgClientTest {
     @Test
     @DisplayName("DECLINE → DECLINED, pgTxId 없음")
     void approveDecline() {
-        PgResult declined = pgClient.approve(newOrderId(), AMOUNT, Optional.of(PgScenario.DECLINE));
+        PgResult declined = pgClient.approve(newOrderId(), AMOUNT, Optional.of(PgScenario.DECLINE.name()));
 
         assertThat(declined).isEqualTo(PgResult.of(PgStatus.DECLINED, null));
     }
@@ -63,13 +64,13 @@ class HttpPgClientTest {
     @DisplayName("같은 orderId로 다시 승인하면 같은 결과를 돌려준다")
     void repeatedApproveReturnsSameResult() {
         String approvedOrder = newOrderId();
-        PgResult first = pgClient.approve(approvedOrder, AMOUNT, Optional.of(PgScenario.SUCCESS));
-        assertThat(pgClient.approve(approvedOrder, AMOUNT, Optional.of(PgScenario.SUCCESS))).isEqualTo(first);
+        PgResult first = pgClient.approve(approvedOrder, AMOUNT, Optional.of(PgScenario.SUCCESS.name()));
+        assertThat(pgClient.approve(approvedOrder, AMOUNT, Optional.of(PgScenario.SUCCESS.name()))).isEqualTo(first);
         assertThat(pgClient.approve(approvedOrder, AMOUNT, Optional.empty())).isEqualTo(first);
 
         String declinedOrder = newOrderId();
-        PgResult declined = pgClient.approve(declinedOrder, AMOUNT, Optional.of(PgScenario.DECLINE));
-        assertThat(pgClient.approve(declinedOrder, AMOUNT, Optional.of(PgScenario.SUCCESS))).isEqualTo(declined);
+        PgResult declined = pgClient.approve(declinedOrder, AMOUNT, Optional.of(PgScenario.DECLINE.name()));
+        assertThat(pgClient.approve(declinedOrder, AMOUNT, Optional.of(PgScenario.SUCCESS.name()))).isEqualTo(declined);
     }
 
     @Test
@@ -78,7 +79,7 @@ class HttpPgClientTest {
         String orderId = newOrderId();
 
         long started = System.nanoTime();
-        PgResult result = pgClient.approve(orderId, AMOUNT, Optional.of(PgScenario.SLOW_SUCCESS));
+        PgResult result = pgClient.approve(orderId, AMOUNT, Optional.of(PgScenario.SLOW_SUCCESS.name()));
         long elapsedMs = elapsedMs(started);
         System.out.println("[HttpPgClientTest] SLOW_SUCCESS approve elapsedMs=" + elapsedMs + " detail=" + result.detail());
 
@@ -103,7 +104,7 @@ class HttpPgClientTest {
 
         assertThat(pgClient.cancel(orderId)).isEqualTo(PgResult.of(PgStatus.CANCELLED, null));
         assertThat(pgClient.query(orderId).status()).isEqualTo(PgStatus.CANCELLED);
-        assertThat(pgClient.approve(orderId, AMOUNT, Optional.of(PgScenario.SUCCESS)).status())
+        assertThat(pgClient.approve(orderId, AMOUNT, Optional.of(PgScenario.SUCCESS.name())).status())
                 .isEqualTo(PgStatus.DECLINED);
     }
 
@@ -111,7 +112,7 @@ class HttpPgClientTest {
     @DisplayName("취소: 승인된 주문 → CANCELLED, pgTxId 유지")
     void cancelApproved() {
         String orderId = newOrderId();
-        PgResult approved = pgClient.approve(orderId, AMOUNT, Optional.of(PgScenario.SUCCESS));
+        PgResult approved = pgClient.approve(orderId, AMOUNT, Optional.of(PgScenario.SUCCESS.name()));
 
         assertThat(pgClient.cancel(orderId)).isEqualTo(PgResult.of(PgStatus.CANCELLED, approved.pgTxId()));
     }
@@ -121,7 +122,7 @@ class HttpPgClientTest {
     void cancelWhileProcessingConflicts() throws Exception {
         String orderId = newOrderId();
         CompletableFuture<PgResult> slowApprove = CompletableFuture.supplyAsync(
-                () -> pgClient.approve(orderId, AMOUNT, Optional.of(PgScenario.SLOW_SUCCESS)));
+                () -> pgClient.approve(orderId, AMOUNT, Optional.of(PgScenario.SLOW_SUCCESS.name())));
         try {
             assertThat(awaitStatus(() -> pgClient.query(orderId), PgStatus.PROCESSING).status())
                     .isEqualTo(PgStatus.PROCESSING);
@@ -143,7 +144,7 @@ class HttpPgClientTest {
         PgClient client = clientFor("http://127.0.0.1:" + closedPort + "/fake-pg");
 
         long started = System.nanoTime();
-        PgResult approve = client.approve(newOrderId(), AMOUNT, Optional.of(PgScenario.SUCCESS));
+        PgResult approve = client.approve(newOrderId(), AMOUNT, Optional.of(PgScenario.SUCCESS.name()));
         long elapsedMs = elapsedMs(started);
 
         assertThat(approve.status()).isEqualTo(PgStatus.UNKNOWN);

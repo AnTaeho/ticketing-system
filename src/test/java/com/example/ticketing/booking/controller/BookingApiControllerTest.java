@@ -11,7 +11,9 @@ import com.example.ticketing.hold.dto.CreateHoldResult;
 import com.example.ticketing.hold.service.SeatHoldService;
 import com.example.ticketing.outbox.dto.ClaimedOutboxTask;
 import com.example.ticketing.outbox.service.TicketIssuedHandler;
-import com.example.ticketing.payment.dto.PaymentResponse;
+import com.example.ticketing.payment.dto.PayCommand;
+import com.example.ticketing.payment.dto.PaymentOutcome;
+import com.example.ticketing.payment.dto.PaymentResult;
 import com.example.ticketing.payment.service.PaymentService;
 import com.example.ticketing.support.Fixtures;
 import com.example.ticketing.support.IntegrationTest;
@@ -203,9 +205,9 @@ class BookingApiControllerTest {
         List<Long> seatIds = db.seatIds(pid).subList(0, seatCount);
         CreateHoldResult hold = seatHoldService.hold(
                 new CreateHoldCommand(userId, pid, seatIds, fixtures.admit(pid, userId)));
-        PaymentResponse paid = paymentService.pay(userId, hold.holdId(), UUID.randomUUID().toString(),
-                Optional.empty());
-        assertThat(paid.status()).isEqualTo(PaymentResponse.Status.CONFIRMED);
+        PaymentResult paid = paymentService.pay(new PayCommand(userId, hold.holdId(), UUID.randomUUID().toString(),
+                Optional.empty()));
+        assertThat(paid.outcome()).isEqualTo(PaymentOutcome.CONFIRMED);
         return new Booked(pid, paid.paymentId(), paid.bookingId(), List.copyOf(seatIds), hold.totalAmount());
     }
 

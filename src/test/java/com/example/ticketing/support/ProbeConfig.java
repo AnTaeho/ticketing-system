@@ -33,8 +33,8 @@ public class ProbeConfig {
             throw new ApiException(ErrorCode.SEAT_TAKEN, Map.of("seatIds", List.of(7L, 8L)));
         }
 
-        @PostMapping("/pay")
-        void pay(@CurrentUser Long userId, @RequestHeader("Idempotency-Key") String idempotencyKey) {
+        @PostMapping("/required-header")
+        void requiredHeader(@CurrentUser Long userId, @RequestHeader("X-Probe") String probe) {
         }
 
         @PostMapping("/validate")

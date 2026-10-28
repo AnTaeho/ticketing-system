@@ -8,8 +8,8 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 
 import com.example.ticketing.booking.domain.BookingStatus;
-import com.example.ticketing.booking.dto.BookingView;
-import com.example.ticketing.booking.dto.CancelResponse;
+import com.example.ticketing.booking.dto.BookingResult;
+import com.example.ticketing.booking.dto.CancelResult;
 import com.example.ticketing.booking.dto.RefundStatus;
 import com.example.ticketing.common.config.TicketingProperties;
 import com.example.ticketing.common.error.ApiException;
@@ -28,7 +28,9 @@ import com.example.ticketing.outbox.service.RefundRequestedHandler;
 import com.example.ticketing.outbox.service.TicketIssuedHandler;
 import com.example.ticketing.payment.client.PgResult;
 import com.example.ticketing.payment.client.PgStatus;
-import com.example.ticketing.payment.dto.PaymentResponse;
+import com.example.ticketing.payment.dto.PayCommand;
+import com.example.ticketing.payment.dto.PaymentOutcome;
+import com.example.ticketing.payment.dto.PaymentResult;
 import com.example.ticketing.payment.service.PaymentService;
 import com.example.ticketing.seat.service.SeatCatalog;
 import com.example.ticketing.support.Fixtures;
@@ -70,7 +72,7 @@ class BookingCancelTest {
     @Autowired
     private BookingTransaction bookingTransaction;
     @Autowired
-    private BookingViewReader viewReader;
+    private BookingReader viewReader;
     @Autowired
     private PaymentService paymentService;
     @Autowired
@@ -126,9 +128,9 @@ class BookingCancelTest {
         c.seatIds.forEach(seatId -> assertThat(redis.opsForValue().get(RedisKeys.seat(c.pid, seatId)))
                 .isEqualTo(c.holdToken));
 
-        CancelResponse response = bookingService.cancel(c.userId, c.bookingId);
+        CancelResult response = bookingService.cancel(c.userId, c.bookingId);
 
-        assertThat(response).isEqualTo(new CancelResponse(c.bookingId, BookingStatus.CANCELLED, RefundStatus.REQUESTED));
+        assertThat(response).isEqualTo(new CancelResult(c.bookingId, BookingStatus.CANCELLED, RefundStatus.REQUESTED));
         Map<String, Object> booking = jdbcTemplate.queryForMap(
                 "SELECT status, cancelled_at FROM booking WHERE id = ?", c.bookingId);
         assertThat(booking).containsEntry("status", "CANCELLED");
@@ -162,12 +164,12 @@ class BookingCancelTest {
     void cancelTwiceSequentially() {
         Confirmed c = confirmed(1);
 
-        CancelResponse first = bookingService.cancel(c.userId, c.bookingId);
+        CancelResult first = bookingService.cancel(c.userId, c.bookingId);
         long other = fixtures.newUser();
         CreateHoldResult retaken = seatHoldService.hold(
                 new CreateHoldCommand(other, c.pid, c.seatIds, fixtures.admit(c.pid, other)));
         LocalDateTime cancelledAt = cancelledAt(c.bookingId);
-        CancelResponse second = bookingService.cancel(c.userId, c.bookingId);
+        CancelResult second = bookingService.cancel(c.userId, c.bookingId);
 
         assertThat(second).isEqualTo(first);
         assertThat(db.outboxCount("REFUND_REQUESTED", c.paymentId)).isEqualTo(1);
@@ -183,10 +185,10 @@ class BookingCancelTest {
     void cancelConcurrently() throws Exception {
         Confirmed c = confirmed(2);
 
-        List<CancelResponse> responses = runTogether(2, () -> bookingService.cancel(c.userId, c.bookingId));
+        List<CancelResult> responses = runTogether(2, () -> bookingService.cancel(c.userId, c.bookingId));
 
         assertThat(responses).hasSize(2).containsOnly(
-                new CancelResponse(c.bookingId, BookingStatus.CANCELLED, RefundStatus.REQUESTED));
+                new CancelResult(c.bookingId, BookingStatus.CANCELLED, RefundStatus.REQUESTED));
         assertThat(db.outboxCount("REFUND_REQUESTED", c.paymentId)).isEqualTo(1);
         c.seatIds.forEach(seatId -> assertThat(db.seat(seatId)).containsEntry("status", "AVAILABLE")
                 .containsEntry("hold_id", null));
@@ -217,7 +219,7 @@ class BookingCancelTest {
     @DisplayName("이미 취소한 예매는 회차가 시작된 뒤에 다시 보내도 409가 아니라 현재 상태(200)를 돌려준다")
     void cancelledBookingStaysIdempotentAfterStart() {
         Confirmed c = confirmed(1);
-        CancelResponse first = bookingService.cancel(c.userId, c.bookingId);
+        CancelResult first = bookingService.cancel(c.userId, c.bookingId);
         startPerformance(c.pid);
 
         assertThat(bookingService.cancel(c.userId, c.bookingId)).isEqualTo(first);
@@ -261,7 +263,7 @@ class BookingCancelTest {
         assertThat(db.payment(c.paymentId)).containsEntry("status", "CANCELLED");
         assertThat(db.outbox("REFUND_REQUESTED", c.paymentId)).containsEntry("status", "DONE");
         assertThat(db.holdStatus(c.holdId)).isEqualTo("CONFIRMED");
-        BookingView detail = bookingService.detail(c.userId, c.bookingId);
+        BookingResult detail = bookingService.detail(c.userId, c.bookingId);
         assertThat(detail.status()).isEqualTo(BookingStatus.CANCELLED);
         assertThat(detail.refund()).isEqualTo(RefundStatus.DONE);
         assertThat(detail.cancellable()).isFalse();
@@ -269,7 +271,7 @@ class BookingCancelTest {
 
         // 환불이 끝난 뒤 다시 취소를 보내도 바뀌는 것 없이 DONE을 돌려준다
         assertThat(bookingService.cancel(c.userId, c.bookingId))
-                .isEqualTo(new CancelResponse(c.bookingId, BookingStatus.CANCELLED, RefundStatus.DONE));
+                .isEqualTo(new CancelResult(c.bookingId, BookingStatus.CANCELLED, RefundStatus.DONE));
         assertThat(db.outboxCount("REFUND_REQUESTED", c.paymentId)).isEqualTo(1);
     }
 
@@ -302,9 +304,9 @@ class BookingCancelTest {
         List<Long> seatIds = db.seatIds(pid).subList(0, seatCount);
         CreateHoldResult hold = seatHoldService.hold(
                 new CreateHoldCommand(userId, pid, seatIds, fixtures.admit(pid, userId)));
-        PaymentResponse paid = paymentService.pay(userId, hold.holdId(), UUID.randomUUID().toString(),
-                Optional.empty());
-        assertThat(paid.status()).isEqualTo(PaymentResponse.Status.CONFIRMED);
+        PaymentResult paid = paymentService.pay(new PayCommand(userId, hold.holdId(), UUID.randomUUID().toString(),
+                Optional.empty()));
+        assertThat(paid.outcome()).isEqualTo(PaymentOutcome.CONFIRMED);
         return new Confirmed(pid, userId, hold.holdId(), paid.paymentId(), paid.bookingId(), List.copyOf(seatIds),
                 db.holdToken(hold.holdId()));
     }

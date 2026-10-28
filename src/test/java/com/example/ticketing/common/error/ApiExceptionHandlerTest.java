@@ -103,11 +103,12 @@ class ApiExceptionHandlerTest {
     }
 
     @Test
-    @DisplayName("Idempotency-Key 헤더가 없으면 400 IDEMPOTENCY_KEY_REQUIRED")
-    void missingIdempotencyKey() throws Exception {
-        mockMvc.perform(post(PROBE + "/pay").header("X-User-Id", "1"))
+    @DisplayName("필수 헤더가 없으면 400 INVALID_REQUEST와 헤더 이름으로 응답한다")
+    void missingRequiredHeader() throws Exception {
+        mockMvc.perform(post(PROBE + "/required-header").header("X-User-Id", "1"))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value("IDEMPOTENCY_KEY_REQUIRED"))
+                .andExpect(jsonPath("$.code").value("INVALID_REQUEST"))
+                .andExpect(jsonPath("$.detail.header").value("X-Probe"))
                 .andExpect(jsonPath("$.error").doesNotExist());
     }
 

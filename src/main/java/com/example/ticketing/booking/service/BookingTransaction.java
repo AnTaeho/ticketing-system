@@ -1,21 +1,22 @@
 package com.example.ticketing.booking.service;
 
 import com.example.ticketing.booking.domain.Booking;
+import com.example.ticketing.booking.domain.BookingPayment;
 import com.example.ticketing.booking.domain.BookingStatus;
+import com.example.ticketing.booking.dto.BookingCancellation;
 import com.example.ticketing.booking.dto.RefundStatus;
+import com.example.ticketing.booking.repository.BookingJdbcRepository;
 import com.example.ticketing.booking.repository.BookingRepository;
 import com.example.ticketing.common.error.ApiException;
 import com.example.ticketing.common.error.ErrorCode;
 import com.example.ticketing.common.jdbc.RowCounts;
+import com.example.ticketing.hold.domain.GateHold;
 import com.example.ticketing.hold.domain.SeatHold;
 import com.example.ticketing.hold.repository.SeatHoldRepository;
 import com.example.ticketing.outbox.domain.OutboxTaskType;
 import com.example.ticketing.outbox.service.OutboxWriter;
-import com.example.ticketing.payment.domain.Payment;
-import com.example.ticketing.payment.repository.PaymentRepository;
 import com.example.ticketing.seat.repository.SeatRepository;
 import com.example.ticketing.show.repository.PerformanceRepository;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import lombok.RequiredArgsConstructor;
@@ -30,7 +31,7 @@ import tools.jackson.databind.json.JsonMapper;
 public class BookingTransaction {
 
     private final BookingRepository bookingRepository;
-    private final PaymentRepository paymentRepository;
+    private final BookingJdbcRepository bookingJdbcRepository;
     private final SeatHoldRepository seatHoldRepository;
     private final SeatRepository seatRepository;
     private final PerformanceRepository performanceRepository;
@@ -39,14 +40,15 @@ public class BookingTransaction {
 
     // booking 락이 같은 예매의 취소를 줄 세운다. 뒤에 온 쪽은 CANCELLED를 보고 아무것도 바꾸지 않으므로 환불 작업은 하나다
     @Transactional(isolation = Isolation.READ_COMMITTED)
-    public Cancellation cancel(long userId, long bookingId) {
+    public BookingCancellation cancel(long userId, long bookingId) {
         Booking booking = bookingRepository.lockByIdAndUserId(bookingId, userId)
                 .orElseThrow(() -> new ApiException(ErrorCode.BOOKING_NOT_FOUND,
                         Map.of("bookingId", bookingId)));
-        Payment payment = paymentRepository.findById(booking.getPaymentId())
+        BookingPayment payment = bookingJdbcRepository.findPayment(booking.getPaymentId())
                 .orElseThrow(() -> new IllegalStateException("예매 " + bookingId + "의 결제가 없다"));
         if (booking.getStatus() == BookingStatus.CANCELLED) {
-            return Cancellation.unchanged(booking, RefundStatus.of(BookingStatus.CANCELLED, payment.getStatus()));
+            return BookingCancellation.alreadyCancelled(bookingId,
+                    RefundStatus.of(BookingStatus.CANCELLED, payment.refunded()));
         }
         if (performanceRepository.countStarted(booking.getPerformanceId()) > 0) {
             throw new ApiException(ErrorCode.CANCEL_NOT_ALLOWED, Map.of("bookingId", bookingId));
@@ -58,26 +60,15 @@ public class BookingTransaction {
         // 게이트 키를 지울 좌석 ID는 hold_id를 비우기 전에 읽어 둔다
         List<Long> seatIds = seatRepository.lockSoldSeatIds(hold.getId());
         RowCounts.requireExactly(seatRepository.releaseSoldSeats(hold.getId()), seatIds.size(), "seat AVAILABLE");
-        outboxWriter.write(OutboxTaskType.REFUND_REQUESTED, payment.getId(),
-                json("paymentId", payment.getId(), "orderId", payment.getOrderId()));
-        return new Cancellation(bookingId, booking.getPerformanceId(), true, hold.getHoldToken(),
-                List.copyOf(seatIds), RefundStatus.REQUESTED);
+        outboxWriter.write(OutboxTaskType.REFUND_REQUESTED, payment.paymentId(), refundPayload(payment));
+        return BookingCancellation.cancelled(bookingId,
+                new GateHold(booking.getUserId(), booking.getPerformanceId(), hold.getHoldToken(), seatIds));
     }
 
-    private String json(Object... keyValues) {
-        Map<String, Object> payload = new LinkedHashMap<>();
-        for (int i = 0; i < keyValues.length; i += 2) {
-            payload.put((String) keyValues[i], keyValues[i + 1]);
-        }
-        return jsonMapper.writeValueAsString(payload);
-    }
-
-    // applied가 true일 때만 게이트에 반영할 좌석과 토큰이 있다
-    public record Cancellation(long bookingId, long performanceId, boolean applied, String holdToken,
-                               List<Long> seatIds, RefundStatus refund) {
-
-        static Cancellation unchanged(Booking booking, RefundStatus refund) {
-            return new Cancellation(booking.getId(), booking.getPerformanceId(), false, null, List.of(), refund);
-        }
+    // 결제 쪽 좌석 상실 환불과 같은 모양이다. 키 순서까지 맞춘다
+    private String refundPayload(BookingPayment payment) {
+        return jsonMapper.writeValueAsString(jsonMapper.createObjectNode()
+                .put("paymentId", payment.paymentId())
+                .put("orderId", payment.orderId()));
     }
 }

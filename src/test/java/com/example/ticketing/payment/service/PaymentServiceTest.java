@@ -10,6 +10,7 @@ import com.example.ticketing.common.error.ErrorCode;
 import com.example.ticketing.common.jdbc.ConstraintViolations;
 import com.example.ticketing.common.redis.RedisKeys;
 import com.example.ticketing.common.redis.TicketingRedis;
+import com.example.ticketing.hold.domain.GateHold;
 import com.example.ticketing.hold.dto.CreateHoldCommand;
 import com.example.ticketing.hold.dto.CreateHoldResult;
 import com.example.ticketing.hold.repository.SeatGateRedisStore;
@@ -19,10 +20,12 @@ import com.example.ticketing.hold.service.SeatHoldService;
 import com.example.ticketing.payment.client.PgResult;
 import com.example.ticketing.payment.client.PgStatus;
 import com.example.ticketing.payment.domain.Payment;
+import com.example.ticketing.payment.dto.PayCommand;
 import com.example.ticketing.payment.dto.PaymentOutcome;
 import com.example.ticketing.payment.dto.PaymentResponse;
+import com.example.ticketing.payment.dto.PaymentResult;
 import com.example.ticketing.payment.dto.PaymentSettlement;
-import com.example.ticketing.payment.dto.StartResult.Started;
+import com.example.ticketing.payment.dto.PaymentStart.Started;
 import com.example.ticketing.payment.repository.PaymentRepository;
 import com.example.ticketing.support.Fixtures;
 import com.example.ticketing.support.IntegrationTest;
@@ -62,6 +65,8 @@ class PaymentServiceTest {
     private PaymentService paymentService;
     @Autowired
     private PaymentTransaction paymentTransaction;
+    @Autowired
+    private PaymentReader paymentReader;
     @Autowired
     private PaymentRepository paymentRepository;
     @Autowired
@@ -106,9 +111,9 @@ class PaymentServiceTest {
     void confirm() {
         Fixture f = newHold(2);
 
-        PaymentResponse response = paymentService.pay(f.userId, f.holdId, key(), Optional.empty());
+        PaymentResult response = paymentService.pay(new PayCommand(f.userId, f.holdId, key(), Optional.empty()));
 
-        assertThat(response.status()).isEqualTo(PaymentResponse.Status.CONFIRMED);
+        assertThat(response.outcome()).isEqualTo(PaymentOutcome.CONFIRMED);
         long paymentId = response.paymentId();
         long bookingId = response.bookingId();
         LocalDateTime now = db.dbNow();
@@ -184,12 +189,12 @@ class PaymentServiceTest {
     void existingConfirmed() {
         Fixture f = newHold(1);
         String key = key();
-        PaymentResponse first = paymentService.pay(f.userId, f.holdId, key, Optional.empty());
+        PaymentResult first = paymentService.pay(new PayCommand(f.userId, f.holdId, key, Optional.empty()));
 
-        PaymentResponse again = paymentService.pay(f.userId, f.holdId, key, Optional.empty());
+        PaymentResult again = paymentService.pay(new PayCommand(f.userId, f.holdId, key, Optional.empty()));
 
         assertThat(again).isEqualTo(first);
-        assertThat(again.status()).isEqualTo(PaymentResponse.Status.CONFIRMED);
+        assertThat(again.outcome()).isEqualTo(PaymentOutcome.CONFIRMED);
         assertThat(stubPg.approveCalls()).isEqualTo(1);
         assertThat(db.bookingCountOfHold(f.holdId)).isEqualTo(1);
     }
@@ -202,7 +207,8 @@ class PaymentServiceTest {
         stubPg.approveWith(PgResult.of(PgStatus.DECLINED, null));
         String key = key();
 
-        ApiException declined = catchBooking(() -> paymentService.pay(f.userId, f.holdId, key, Optional.empty()));
+        ApiException declined = catchBooking(() -> paymentService.pay(new PayCommand(f.userId, f.holdId, key,
+                Optional.empty())));
 
         assertThat(declined.getCode()).isEqualTo(ErrorCode.PAYMENT_DECLINED);
         long paymentId = ((Number) declined.getDetail().get("paymentId")).longValue();
@@ -214,7 +220,8 @@ class PaymentServiceTest {
         assertThat(redisKeyCleaner.gateKeys(f.pid)).isEmpty();
         assertThat(db.bookingCountOfHold(f.holdId)).isZero();
 
-        ApiException again = catchBooking(() -> paymentService.pay(f.userId, f.holdId, key, Optional.empty()));
+        ApiException again = catchBooking(() -> paymentService.pay(new PayCommand(f.userId, f.holdId, key,
+                Optional.empty())));
         assertThat(again.getCode()).isEqualTo(ErrorCode.PAYMENT_DECLINED);
         assertThat(again.getDetail()).containsEntry("paymentId", paymentId);
         assertThat(stubPg.approveCalls()).isEqualTo(1);
@@ -227,9 +234,9 @@ class PaymentServiceTest {
         Fixture f = newHold(2);
         stubPg.approveWith(PgResult.unknown("read timeout 3s"));
 
-        PaymentResponse response = paymentService.pay(f.userId, f.holdId, key(), Optional.empty());
+        PaymentResult response = paymentService.pay(new PayCommand(f.userId, f.holdId, key(), Optional.empty()));
 
-        assertThat(response.status()).isEqualTo(PaymentResponse.Status.UNKNOWN);
+        assertThat(response.outcome()).isEqualTo(PaymentOutcome.UNKNOWN);
         assertThat(response.bookingId()).isNull();
         Map<String, Object> payment = db.payment(response.paymentId());
         assertThat(payment).containsEntry("status", "UNKNOWN").containsEntry("last_error", "read timeout 3s")
@@ -259,11 +266,12 @@ class PaymentServiceTest {
         Fixture f = newHold(1);
         stubPg.approveWith(PgResult.unknown("timeout"));
         String key = key();
-        PaymentResponse first = paymentService.pay(f.userId, f.holdId, key, Optional.empty());
+        PaymentResult first = paymentService.pay(new PayCommand(f.userId, f.holdId, key, Optional.empty()));
 
-        PaymentResponse again = paymentService.pay(f.userId, f.holdId, key, Optional.empty());
+        PaymentResult again = paymentService.pay(new PayCommand(f.userId, f.holdId, key, Optional.empty()));
 
-        assertThat(again).isEqualTo(PaymentResponse.pending(first.paymentId(), PaymentResponse.Status.UNKNOWN));
+        assertThat(PaymentResponse.from(again))
+                .isEqualTo(new PaymentResponse(first.paymentId(), PaymentOutcome.UNKNOWN, null, null));
         assertThat(stubPg.approveCalls()).isEqualTo(1);
     }
 
@@ -274,9 +282,10 @@ class PaymentServiceTest {
         String key = key();
         Started started = (Started) paymentTransaction.start(f.userId, f.holdId, key);
 
-        PaymentResponse again = paymentService.pay(f.userId, f.holdId, key, Optional.empty());
+        PaymentResult again = paymentService.pay(new PayCommand(f.userId, f.holdId, key, Optional.empty()));
 
-        assertThat(again).isEqualTo(PaymentResponse.pending(started.paymentId(), PaymentResponse.Status.PROCESSING));
+        assertThat(PaymentResponse.from(again))
+                .isEqualTo(new PaymentResponse(started.paymentId(), PaymentOutcome.PROCESSING, null, null));
         assertThat(stubPg.approveCalls()).isZero();
         assertThat(db.payment(started.paymentId())).containsEntry("status", "REQUESTED");
         long recheckMs = jdbcTemplate.queryForObject(
@@ -289,9 +298,10 @@ class PaymentServiceTest {
     @DisplayName("다른 키로 이미 결제가 있는 hold는 409 ALREADY_PAYING")
     void otherKeyIsAlreadyPaying() {
         Fixture f = newHold(1);
-        paymentService.pay(f.userId, f.holdId, key(), Optional.empty());
+        paymentService.pay(new PayCommand(f.userId, f.holdId, key(), Optional.empty()));
 
-        ApiException e = catchBooking(() -> paymentService.pay(f.userId, f.holdId, key(), Optional.empty()));
+        ApiException e = catchBooking(() -> paymentService.pay(new PayCommand(f.userId, f.holdId, key(),
+                Optional.empty())));
 
         assertThat(e.getCode()).isEqualTo(ErrorCode.ALREADY_PAYING);
         assertThat(db.paymentCountOfHold(f.holdId)).isEqualTo(1);
@@ -304,7 +314,8 @@ class PaymentServiceTest {
         Fixture f = newHold(2);
         db.expireHold(f.holdId);
 
-        ApiException e = catchBooking(() -> paymentService.pay(f.userId, f.holdId, key(), Optional.empty()));
+        ApiException e = catchBooking(() -> paymentService.pay(new PayCommand(f.userId, f.holdId, key(),
+                Optional.empty())));
 
         assertThat(e.getCode()).isEqualTo(ErrorCode.HOLD_EXPIRED);
         assertThat(db.holdStatus(f.holdId)).isEqualTo("HELD");
@@ -319,13 +330,15 @@ class PaymentServiceTest {
         Fixture f = newHold(1);
         seatHoldService.release(f.userId, f.holdId);
 
-        ApiException released = catchBooking(() -> paymentService.pay(f.userId, f.holdId, key(), Optional.empty()));
+        ApiException released = catchBooking(() -> paymentService.pay(new PayCommand(f.userId, f.holdId, key(),
+                Optional.empty())));
         assertThat(released.getCode()).isEqualTo(ErrorCode.HOLD_NOT_PAYABLE);
         assertThat(released.getDetail()).containsEntry("status", "RELEASED");
 
         Fixture other = newHold(1);
         long stranger = fixtures.newUser();
-        ApiException notFound = catchBooking(() -> paymentService.pay(stranger, other.holdId, key(), Optional.empty()));
+        ApiException notFound = catchBooking(() -> paymentService.pay(new PayCommand(stranger, other.holdId, key(),
+                Optional.empty())));
         assertThat(notFound.getCode()).isEqualTo(ErrorCode.HOLD_NOT_FOUND);
         assertThat(db.holdStatus(other.holdId)).isEqualTo("HELD");
         assertThat(stubPg.approveCalls()).isZero();
@@ -337,15 +350,18 @@ class PaymentServiceTest {
     void finishedPaymentOnHoldIsNotPayable() {
         Fixture declined = newHold(1);
         stubPg.approveWith(PgResult.of(PgStatus.DECLINED, null));
-        catchBooking(() -> paymentService.pay(declined.userId, declined.holdId, key(), Optional.empty()));
+        catchBooking(() -> paymentService.pay(new PayCommand(declined.userId, declined.holdId, key(),
+                Optional.empty())));
         Fixture cancelled = newHold(1);
         stubPg.approveWith(PgResult.unknown("timeout"));
-        long cancelledPayment = paymentService.pay(cancelled.userId, cancelled.holdId, key(), Optional.empty())
+        long cancelledPayment = paymentService.pay(new PayCommand(cancelled.userId, cancelled.holdId, key(),
+                Optional.empty()))
                 .paymentId();
         paymentTransaction.cancelAndRelease(cancelledPayment);
 
         for (Fixture f : List.of(declined, cancelled)) {
-            ApiException e = catchBooking(() -> paymentService.pay(f.userId, f.holdId, key(), Optional.empty()));
+            ApiException e = catchBooking(() -> paymentService.pay(new PayCommand(f.userId, f.holdId, key(),
+                    Optional.empty())));
             assertThat(e.getCode()).isEqualTo(ErrorCode.HOLD_NOT_PAYABLE);
             assertThat(e.getDetail()).containsEntry("status", "RELEASED").containsEntry("holdId", f.holdId);
             assertThat(db.paymentCountOfHold(f.holdId)).isEqualTo(1);
@@ -363,23 +379,12 @@ class PaymentServiceTest {
         }
         assertThat(db.holdStatus(f.holdId)).isEqualTo("EXPIRED");
 
-        ApiException e = catchBooking(() -> paymentService.pay(f.userId, f.holdId, key(), Optional.empty()));
+        ApiException e = catchBooking(() -> paymentService.pay(new PayCommand(f.userId, f.holdId, key(),
+                Optional.empty())));
 
         assertThat(e.getCode()).isEqualTo(ErrorCode.HOLD_EXPIRED);
         assertThat(db.paymentCountOfHold(f.holdId)).isZero();
         assertThat(stubPg.approveCalls()).isZero();
-    }
-
-    @Test
-    @DisplayName("빈 멱등키는 400 IDEMPOTENCY_KEY_REQUIRED, 64자 초과는 400 INVALID_REQUEST")
-    void idempotencyKeyValidation() {
-        Fixture f = newHold(1);
-
-        assertThat(catchBooking(() -> paymentService.pay(f.userId, f.holdId, "  ", Optional.empty())).getCode())
-                .isEqualTo(ErrorCode.IDEMPOTENCY_KEY_REQUIRED);
-        assertThat(catchBooking(() -> paymentService.pay(f.userId, f.holdId, "k".repeat(65), Optional.empty()))
-                .getCode()).isEqualTo(ErrorCode.INVALID_REQUEST);
-        assertThat(db.paymentCountOfHold(f.holdId)).isZero();
     }
 
     @Test
@@ -388,7 +393,7 @@ class PaymentServiceTest {
     void payingSeatsAreProtected() {
         Fixture f = newHold(2);
         stubPg.approveWith(PgResult.unknown("timeout"));
-        paymentService.pay(f.userId, f.holdId, key(), Optional.empty());
+        paymentService.pay(new PayCommand(f.userId, f.holdId, key(), Optional.empty()));
         db.expireHold(f.holdId);
 
         LocalDateTime payDeadline = db.payDeadline(f.holdId);
@@ -431,7 +436,8 @@ class PaymentServiceTest {
                 jdbcTemplate.update("UPDATE seat SET hold_id = ? WHERE id = ?", thiefHold.holdId(), lost));
         String key = key();
 
-        ApiException e = catchBooking(() -> paymentService.pay(f.userId, f.holdId, key, Optional.empty()));
+        ApiException e = catchBooking(() -> paymentService.pay(new PayCommand(f.userId, f.holdId, key,
+                Optional.empty())));
 
         assertThat(e.getCode()).isEqualTo(ErrorCode.SEAT_LOST_REFUNDING);
         long paymentId = ((Number) e.getDetail().get("paymentId")).longValue();
@@ -453,7 +459,8 @@ class PaymentServiceTest {
         assertThat(redis.opsForValue().get(RedisKeys.seat(f.pid, db.seatIds(f.pid).get(2))))
                 .isEqualTo(db.holdToken(thiefHold.holdId()));
 
-        ApiException again = catchBooking(() -> paymentService.pay(f.userId, f.holdId, key, Optional.empty()));
+        ApiException again = catchBooking(() -> paymentService.pay(new PayCommand(f.userId, f.holdId, key,
+                Optional.empty())));
         assertThat(again.getCode()).isEqualTo(ErrorCode.SEAT_LOST_REFUNDING);
         assertThat(stubPg.approveCalls()).isEqualTo(1);
     }
@@ -465,23 +472,25 @@ class PaymentServiceTest {
         Fixture f = newHold(2);
         stubPg.approveWith(PgResult.unknown("timeout"));
         String key = key();
-        long paymentId = paymentService.pay(f.userId, f.holdId, key, Optional.empty()).paymentId();
+        long paymentId = paymentService.pay(new PayCommand(f.userId, f.holdId, key, Optional.empty())).paymentId();
 
         PaymentSettlement first = paymentTransaction.cancelAndRelease(paymentId);
         PaymentSettlement second = paymentTransaction.cancelAndRelease(paymentId);
 
-        assertThat(first.applied()).isTrue();
-        assertThat(first.outcome()).isEqualTo(PaymentOutcome.CANCELLED);
-        assertThat(first.seatIds()).containsExactlyElementsOf(f.seatIds);
-        assertThat(first.holdToken()).isEqualTo(f.holdToken);
-        assertThat(second.applied()).isFalse();
-        assertThat(second.outcome()).isEqualTo(PaymentOutcome.CANCELLED);
+        assertThat(first.changedSeats()).isTrue();
+        assertThat(first.result().outcome()).isEqualTo(PaymentOutcome.CANCELLED);
+        GateHold released = first.gateReflection().orElseThrow().gate();
+        assertThat(released.seatIds()).containsExactlyElementsOf(f.seatIds);
+        assertThat(released.holdToken()).isEqualTo(f.holdToken);
+        assertThat(second.changedSeats()).isFalse();
+        assertThat(second.result().outcome()).isEqualTo(PaymentOutcome.CANCELLED);
         assertThat(db.payment(paymentId)).containsEntry("status", "CANCELLED").containsEntry("next_check_at", null);
         assertThat(db.holdStatus(f.holdId)).isEqualTo("RELEASED");
         f.seatIds.forEach(seatId -> assertThat(db.seat(seatId)).containsEntry("status", "AVAILABLE")
                 .containsEntry("hold_id", null));
 
-        ApiException again = catchBooking(() -> paymentService.pay(f.userId, f.holdId, key, Optional.empty()));
+        ApiException again = catchBooking(() -> paymentService.pay(new PayCommand(f.userId, f.holdId, key,
+                Optional.empty())));
         assertThat(again.getCode()).isEqualTo(ErrorCode.PAYMENT_CANCELLED);
         assertThat(again.getDetail()).containsEntry("paymentId", paymentId);
         assertThat(stubPg.approveCalls()).isEqualTo(1);
@@ -491,7 +500,7 @@ class PaymentServiceTest {
     @DisplayName("이미 끝난 결제에 confirm·decline·markUnknown을 다시 불러도 아무것도 바꾸지 않고 현재 결과를 돌려준다")
     void settledPaymentIsNotChangedAgain() {
         Fixture f = newHold(1);
-        PaymentResponse confirmed = paymentService.pay(f.userId, f.holdId, key(), Optional.empty());
+        PaymentResult confirmed = paymentService.pay(new PayCommand(f.userId, f.holdId, key(), Optional.empty()));
         long paymentId = confirmed.paymentId();
 
         PaymentSettlement decline = paymentTransaction.decline(paymentId);
@@ -499,10 +508,10 @@ class PaymentServiceTest {
         PaymentSettlement unknown = paymentTransaction.markUnknown(paymentId, "late timeout");
 
         assertThat(List.of(decline, confirmAgain, unknown)).allSatisfy(s -> {
-            assertThat(s.applied()).isFalse();
-            assertThat(s.outcome()).isEqualTo(PaymentOutcome.CONFIRMED);
-            assertThat(s.bookingId()).isEqualTo(confirmed.bookingId());
-            assertThat(s.bookingNumber()).isEqualTo(confirmed.bookingNumber());
+            assertThat(s.changedSeats()).isFalse();
+            assertThat(s.result().outcome()).isEqualTo(PaymentOutcome.CONFIRMED);
+            assertThat(s.result().bookingId()).isEqualTo(confirmed.bookingId());
+            assertThat(s.result().bookingNumber()).isEqualTo(confirmed.bookingNumber());
         });
         assertThat(db.payment(paymentId)).containsEntry("status", "APPROVED").containsEntry("last_error", null)
                 .containsEntry("pg_tx_id", "stub-tx-" + db.payment(paymentId).get("order_id"));
@@ -544,19 +553,20 @@ class PaymentServiceTest {
                 properties.queue(), properties.seatmap(), properties.outbox(), properties.ops(), properties.pg(),
                 properties.fakePg());
         SeatGateReflector reflector = new SeatGateReflector(gate, gateOff, new SimpleMeterRegistry(), System::nanoTime);
-        PaymentService service = new PaymentService(paymentTransaction, stubPg, reflector, gateOff);
+        PaymentService service = new PaymentService(paymentTransaction, paymentReader, stubPg, reflector, gateOff);
         Fixture confirmed = newHold(1);
         Fixture declined = newHold(1);
         Fixture unknown = newHold(1);
 
-        assertThat(service.pay(confirmed.userId, confirmed.holdId, key(), Optional.empty()).status())
-                .isEqualTo(PaymentResponse.Status.CONFIRMED);
+        assertThat(service.pay(new PayCommand(confirmed.userId, confirmed.holdId, key(), Optional.empty())).outcome())
+                .isEqualTo(PaymentOutcome.CONFIRMED);
         stubPg.approveWith(PgResult.of(PgStatus.DECLINED, null));
-        assertThat(catchBooking(() -> service.pay(declined.userId, declined.holdId, key(), Optional.empty())).getCode())
+        assertThat(catchBooking(() -> service.pay(new PayCommand(declined.userId, declined.holdId, key(),
+                Optional.empty()))).getCode())
                 .isEqualTo(ErrorCode.PAYMENT_DECLINED);
         stubPg.approveWith(PgResult.unknown("timeout"));
-        assertThat(service.pay(unknown.userId, unknown.holdId, key(), Optional.empty()).status())
-                .isEqualTo(PaymentResponse.Status.UNKNOWN);
+        assertThat(service.pay(new PayCommand(unknown.userId, unknown.holdId, key(), Optional.empty())).outcome())
+                .isEqualTo(PaymentOutcome.UNKNOWN);
 
         verifyNoInteractions(gate);
         assertThat(db.holdStatus(confirmed.holdId)).isEqualTo("CONFIRMED");

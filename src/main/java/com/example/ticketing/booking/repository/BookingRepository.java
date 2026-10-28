@@ -14,7 +14,7 @@ public interface BookingRepository extends JpaRepository<Booking, Long> {
     @Query(value = "SELECT * FROM booking WHERE id = :id AND user_id = :userId FOR UPDATE", nativeQuery = true)
     Optional<Booking> lockByIdAndUserId(@Param("id") long id, @Param("userId") long userId);
 
-    @Modifying
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query(value = """
             UPDATE booking SET status = 'CANCELLED', cancelled_at = NOW(6)
              WHERE id = :id AND status = 'CONFIRMED'""", nativeQuery = true)

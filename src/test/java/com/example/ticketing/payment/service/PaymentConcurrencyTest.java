@@ -8,8 +8,9 @@ import com.example.ticketing.hold.dto.CreateHoldCommand;
 import com.example.ticketing.hold.dto.CreateHoldResult;
 import com.example.ticketing.hold.service.SeatHoldService;
 import com.example.ticketing.payment.client.PgResult;
+import com.example.ticketing.payment.dto.PayCommand;
 import com.example.ticketing.payment.dto.PaymentOutcome;
-import com.example.ticketing.payment.dto.PaymentResponse;
+import com.example.ticketing.payment.dto.PaymentResult;
 import com.example.ticketing.payment.dto.PaymentSettlement;
 import com.example.ticketing.support.Fixtures;
 import com.example.ticketing.support.IntegrationTest;
@@ -86,10 +87,10 @@ class PaymentConcurrencyTest {
         String key = UUID.randomUUID().toString();
 
         List<Outcome> outcomes = runConcurrently(10,
-                i -> () -> paymentService.pay(userId, hold.holdId(), key, Optional.empty()));
+                i -> () -> paymentService.pay(new PayCommand(userId, hold.holdId(), key, Optional.empty())));
 
-        long processing = outcomes.stream().filter(o -> o.is(PaymentResponse.Status.PROCESSING)).count();
-        long confirmed = outcomes.stream().filter(o -> o.is(PaymentResponse.Status.CONFIRMED)).count();
+        long processing = outcomes.stream().filter(o -> o.is(PaymentOutcome.PROCESSING)).count();
+        long confirmed = outcomes.stream().filter(o -> o.is(PaymentOutcome.CONFIRMED)).count();
         System.out.printf("[S4.3] 같은 키 10스레드: 202 PROCESSING %d, 200 CONFIRMED %d, 기타 %s, PG 승인 호출 %d%n",
                 processing, confirmed,
                 outcomes.stream().filter(o -> o.response() == null).map(Outcome::describe).toList(),
@@ -101,10 +102,10 @@ class PaymentConcurrencyTest {
         assertThat(outcomes.stream().map(o -> o.response().paymentId()).distinct()).hasSize(1);
         assertThat(stubPg.approveCalls()).isEqualTo(1);
 
-        PaymentResponse after = paymentService.pay(userId, hold.holdId(), key, Optional.empty());
-        PaymentResponse winner = outcomes.stream().filter(o -> o.is(PaymentResponse.Status.CONFIRMED))
+        PaymentResult after = paymentService.pay(new PayCommand(userId, hold.holdId(), key, Optional.empty()));
+        PaymentResult winner = outcomes.stream().filter(o -> o.is(PaymentOutcome.CONFIRMED))
                 .findFirst().orElseThrow().response();
-        assertThat(after.status()).isEqualTo(PaymentResponse.Status.CONFIRMED);
+        assertThat(after.outcome()).isEqualTo(PaymentOutcome.CONFIRMED);
         assertThat(after.bookingNumber()).isEqualTo(winner.bookingNumber());
         assertThat(after.paymentId()).isEqualTo(winner.paymentId());
         assertThat(db.bookingCountOfHold(hold.holdId())).isEqualTo(1);
@@ -122,11 +123,12 @@ class PaymentConcurrencyTest {
         stubPg.approveDelayMs(300);
 
         List<Outcome> outcomes = runConcurrently(2,
-                i -> () -> paymentService.pay(userId, hold.holdId(), UUID.randomUUID().toString(), Optional.empty()));
+                i -> () -> paymentService.pay(new PayCommand(userId, hold.holdId(), UUID.randomUUID().toString(),
+                        Optional.empty())));
         System.out.println("[S4.3] 다른 키 2스레드: " + outcomes.stream().map(Outcome::describe).toList());
 
         assertThat(outcomes).filteredOn(o -> o.response() != null).singleElement()
-                .satisfies(o -> assertThat(o.response().status()).isEqualTo(PaymentResponse.Status.CONFIRMED));
+                .satisfies(o -> assertThat(o.response().outcome()).isEqualTo(PaymentOutcome.CONFIRMED));
         assertThat(outcomes).filteredOn(o -> o.error() != null).singleElement()
                 .satisfies(o -> assertThat(o.error()).isInstanceOfSatisfying(ApiException.class,
                         e -> assertThat(e.getCode()).isEqualTo(ErrorCode.ALREADY_PAYING)));
@@ -144,8 +146,8 @@ class PaymentConcurrencyTest {
         CreateHoldResult hold = seatHoldService.hold(
                 new CreateHoldCommand(userId, pid, seats, fixtures.admit(pid, userId)));
         stubPg.approveWith(PgResult.unknown("timeout"));
-        long paymentId = paymentService.pay(userId, hold.holdId(), UUID.randomUUID().toString(), Optional.empty())
-                .paymentId();
+        long paymentId = paymentService.pay(new PayCommand(userId, hold.holdId(), UUID.randomUUID().toString(),
+                Optional.empty())).paymentId();
 
         List<PaymentSettlement> settlements = new CopyOnWriteArrayList<>();
         List<Outcome> concurrent = runConcurrently(2, i -> () -> {
@@ -153,14 +155,15 @@ class PaymentConcurrencyTest {
             return null;
         });
         settlements.add(paymentTransaction.confirm(paymentId, "pg-tx-" + paymentId));
-        System.out.println("[S4.3] confirm 3회 applied: " + settlements.stream().map(PaymentSettlement::applied).toList());
+        System.out.println("[S4.3] confirm 3회 좌석 변경: "
+                + settlements.stream().map(PaymentSettlement::changedSeats).toList());
 
         assertThat(concurrent).allSatisfy(o -> assertThat(o.error()).isNull());
         assertThat(settlements).hasSize(3)
-                .allSatisfy(s -> assertThat(s.outcome()).isEqualTo(PaymentOutcome.CONFIRMED));
-        assertThat(settlements).filteredOn(PaymentSettlement::applied).hasSize(1);
-        assertThat(settlements.stream().map(PaymentSettlement::bookingId).distinct()).hasSize(1);
-        long bookingId = settlements.get(0).bookingId();
+                .allSatisfy(s -> assertThat(s.result().outcome()).isEqualTo(PaymentOutcome.CONFIRMED));
+        assertThat(settlements).filteredOn(PaymentSettlement::changedSeats).hasSize(1);
+        assertThat(settlements.stream().map(s -> s.result().bookingId()).distinct()).hasSize(1);
+        long bookingId = settlements.get(0).result().bookingId();
         assertThat(db.bookingCountOfHold(hold.holdId())).isEqualTo(1);
         assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM booking_seat WHERE booking_id = ?",
                 Long.class, bookingId)).isEqualTo(3);
@@ -203,9 +206,9 @@ class PaymentConcurrencyTest {
 
         ExecutorService payers = Executors.newFixedThreadPool(2);
         Future<Outcome> payA = payers.submit(() -> attempt(
-                () -> paymentService.pay(userId, holdA.holdId(), key, Optional.empty())));
+                () -> paymentService.pay(new PayCommand(userId, holdA.holdId(), key, Optional.empty()))));
         Future<Outcome> payB = payers.submit(() -> attempt(
-                () -> paymentService.pay(userId, holdB.holdId(), key, Optional.empty())));
+                () -> paymentService.pay(new PayCommand(userId, holdB.holdId(), key, Optional.empty()))));
         boolean bothWaiting = awaitHoldLockWaits(holdA.holdId(), holdB.holdId());
         release.countDown();
         blocking.get(30, TimeUnit.SECONDS);
@@ -251,7 +254,7 @@ class PaymentConcurrencyTest {
         return false;
     }
 
-    private List<Outcome> runConcurrently(int threads, java.util.function.IntFunction<Callable<PaymentResponse>> task)
+    private List<Outcome> runConcurrently(int threads, java.util.function.IntFunction<Callable<PaymentResult>> task)
             throws InterruptedException {
         ExecutorService executor = Executors.newFixedThreadPool(threads);
         CountDownLatch ready = new CountDownLatch(threads);
@@ -259,7 +262,7 @@ class PaymentConcurrencyTest {
         CountDownLatch done = new CountDownLatch(threads);
         List<Outcome> outcomes = new CopyOnWriteArrayList<>();
         for (int i = 0; i < threads; i++) {
-            Callable<PaymentResponse> callable = task.apply(i);
+            Callable<PaymentResult> callable = task.apply(i);
             executor.submit(() -> {
                 try {
                     ready.countDown();
@@ -280,7 +283,7 @@ class PaymentConcurrencyTest {
         return outcomes;
     }
 
-    private static Outcome attempt(Callable<PaymentResponse> callable) {
+    private static Outcome attempt(Callable<PaymentResult> callable) {
         try {
             return new Outcome(callable.call(), null);
         } catch (Throwable e) {
@@ -294,15 +297,15 @@ class PaymentConcurrencyTest {
         return pid;
     }
 
-    private record Outcome(PaymentResponse response, Throwable error) {
+    private record Outcome(PaymentResult response, Throwable error) {
 
-        boolean is(PaymentResponse.Status status) {
-            return response != null && response.status() == status;
+        boolean is(PaymentOutcome outcome) {
+            return response != null && response.outcome() == outcome;
         }
 
         String describe() {
             if (response != null) {
-                return response.status() + "#" + response.paymentId();
+                return response.outcome() + "#" + response.paymentId();
             }
             return error instanceof ApiException be ? be.getCode().name() : String.valueOf(error);
         }

@@ -9,6 +9,8 @@ import org.springframework.data.repository.query.Param;
 
 public interface PaymentRepository extends JpaRepository<Payment, Long> {
 
+    // 조건부 UPDATE는 모두 flush·clear한다. 같은 트랜잭션에서 뒤이어 읽는 엔티티가 바뀌기 전 값으로 남지 않게
+
     Optional<Payment> findByUserIdAndIdempotencyKey(Long userId, String idempotencyKey);
 
     Optional<Payment> findByHoldId(Long holdId);
@@ -22,21 +24,21 @@ public interface PaymentRepository extends JpaRepository<Payment, Long> {
     @Query(value = "SELECT id FROM booking_payment WHERE hold_id = :holdId", nativeQuery = true)
     Optional<Long> findIdByHoldId(@Param("holdId") long holdId);
 
-    @Modifying
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query(value = """
             UPDATE booking_payment
                SET status = 'APPROVED', pg_tx_id = :pgTxId, next_check_at = NULL, updated_at = NOW(6)
              WHERE id = :id AND status IN ('REQUESTED', 'UNKNOWN')""", nativeQuery = true)
     int markApproved(@Param("id") long id, @Param("pgTxId") String pgTxId);
 
-    @Modifying
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query(value = """
             UPDATE booking_payment
                SET status = 'DECLINED', next_check_at = NULL, updated_at = NOW(6)
              WHERE id = :id AND status IN ('REQUESTED', 'UNKNOWN')""", nativeQuery = true)
     int markDeclined(@Param("id") long id);
 
-    @Modifying
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query(value = """
             UPDATE booking_payment
                SET status = 'CANCELLED', next_check_at = NULL, updated_at = NOW(6)
@@ -44,14 +46,14 @@ public interface PaymentRepository extends JpaRepository<Payment, Long> {
     int markCancelled(@Param("id") long id);
 
     // 승인된 결제의 환불이 PG에서 확정됐을 때만 부른다
-    @Modifying
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query(value = """
             UPDATE booking_payment SET status = 'CANCELLED', updated_at = NOW(6)
              WHERE id = :id AND status = 'APPROVED'""", nativeQuery = true)
     int markRefunded(@Param("id") long id);
 
     // 대사가 다음 확인 시각을 정한다. 넘긴 오류가 없으면 이전 last_error를 둔다
-    @Modifying
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query(value = """
             UPDATE booking_payment
                SET next_check_at = DATE_ADD(NOW(6), INTERVAL :delayMicros MICROSECOND),
@@ -61,7 +63,7 @@ public interface PaymentRepository extends JpaRepository<Payment, Long> {
                    @Param("lastError") String lastError);
 
     // 이미 확정된 결제는 건드리지 않는다
-    @Modifying
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query(value = """
             UPDATE booking_payment
                SET status = 'UNKNOWN', last_error = :lastError,

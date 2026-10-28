@@ -12,6 +12,8 @@ import java.util.function.Function;
 import java.util.function.LongSupplier;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.env.Environment;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
@@ -53,14 +55,14 @@ public class HttpPgClient implements PgClient {
     }
 
     @Override
-    public PgResult approve(String orderId, int amount, Optional<PgScenario> scenario) {
+    public PgResult approve(String orderId, int amount, Optional<String> scenario) {
         return call(Operation.APPROVE, orderId, baseUrl -> {
             RestClient.RequestBodySpec spec = restClient.post()
                     .uri(baseUrl + "/payments")
                     .contentType(MediaType.APPLICATION_JSON)
                     .accept(MediaType.APPLICATION_JSON)
                     .body(jsonMapper.writeValueAsString(Map.of("orderId", orderId, "amount", amount)));
-            scenario.ifPresent(s -> spec.header(HttpNames.PG_SCENARIO_HEADER, s.name()));
+            scenario.ifPresent(s -> spec.header(HttpNames.PG_SCENARIO_HEADER, s));
             return spec;
         });
     }
@@ -89,8 +91,7 @@ public class HttpPgClient implements PgClient {
                 result = PgResult.unknown("PG 주소를 정할 수 없다: ticketing.pg.base-url과 local.server.port가 모두 없다");
             } else {
                 result = request.apply(baseUrl).exchangeForRequiredValue((req, res) -> map(operation,
-                        res.getStatusCode().value(),
-                        StreamUtils.copyToString(res.getBody(), StandardCharsets.UTF_8)));
+                        res.getStatusCode(), StreamUtils.copyToString(res.getBody(), StandardCharsets.UTF_8)));
             }
         } catch (RuntimeException e) {
             result = PgResult.unknown(describe(e));
@@ -118,30 +119,30 @@ public class HttpPgClient implements PgClient {
         return resolved;
     }
 
-    private PgResult map(Operation operation, int httpStatus, String body) {
-        if (operation == Operation.CANCEL && httpStatus == 409) {
+    private PgResult map(Operation operation, HttpStatusCode httpStatus, String body) {
+        if (operation == Operation.CANCEL && httpStatus.isSameCodeAs(HttpStatus.CONFLICT)) {
             return PgResult.of(PgStatus.CONFLICT, null);
         }
-        boolean success = httpStatus >= 200 && httpStatus < 300;
-        boolean notFound = operation == Operation.QUERY && httpStatus == 404;
-        if (!success && !notFound) {
-            return PgResult.unknown("HTTP " + httpStatus + " " + abbreviate(body));
+        boolean notFound = operation == Operation.QUERY && httpStatus.isSameCodeAs(HttpStatus.NOT_FOUND);
+        int code = httpStatus.value();
+        if (!httpStatus.is2xxSuccessful() && !notFound) {
+            return PgResult.unknown("HTTP " + code + " " + abbreviate(body));
         }
         JsonNode json;
         try {
             json = jsonMapper.readTree(body);
         } catch (RuntimeException e) {
-            return PgResult.unknown("HTTP " + httpStatus + " 본문 파싱 실패: " + abbreviate(body));
+            return PgResult.unknown("HTTP " + code + " 본문 파싱 실패: " + abbreviate(body));
         }
         String status = json == null ? null : json.path("status").stringValue(null);
         if (notFound) {
             return PgStatus.NOT_FOUND.name().equals(status)
                     ? PgResult.of(PgStatus.NOT_FOUND, null)
-                    : PgResult.unknown("HTTP 404 " + abbreviate(body));
+                    : PgResult.unknown("HTTP " + code + " " + abbreviate(body));
         }
         PgStatus parsed = parseStatus(status);
         if (parsed == null || !BODY_STATUSES.contains(parsed)) {
-            return PgResult.unknown("HTTP " + httpStatus + " 모르는 status: " + abbreviate(body));
+            return PgResult.unknown("HTTP " + code + " 모르는 status: " + abbreviate(body));
         }
         return PgResult.of(parsed, json.path("pgTxId").stringValue(null));
     }

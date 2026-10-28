@@ -4,19 +4,18 @@ import com.example.ticketing.common.config.TicketingProperties;
 import com.example.ticketing.common.error.ApiException;
 import com.example.ticketing.common.error.ErrorCode;
 import com.example.ticketing.common.jdbc.ConstraintViolations;
-import com.example.ticketing.common.web.HttpNames;
-import com.example.ticketing.hold.domain.GateHold;
 import com.example.ticketing.hold.service.SeatGateReflector;
 import com.example.ticketing.payment.client.PgClient;
 import com.example.ticketing.payment.client.PgResult;
-import com.example.ticketing.payment.client.PgScenario;
 import com.example.ticketing.payment.domain.Payment;
-import com.example.ticketing.payment.dto.PaymentResponse;
+import com.example.ticketing.payment.domain.PaymentStatus;
+import com.example.ticketing.payment.dto.PayCommand;
+import com.example.ticketing.payment.dto.PaymentResult;
 import com.example.ticketing.payment.dto.PaymentSettlement;
-import com.example.ticketing.payment.dto.PaymentStatusView;
-import com.example.ticketing.payment.dto.StartResult;
-import com.example.ticketing.payment.dto.StartResult.Existing;
-import com.example.ticketing.payment.dto.StartResult.Started;
+import com.example.ticketing.payment.dto.PaymentStart;
+import com.example.ticketing.payment.dto.PaymentStart.Existing;
+import com.example.ticketing.payment.dto.PaymentStart.OtherKey;
+import com.example.ticketing.payment.dto.PaymentStart.Started;
 import java.time.Duration;
 import java.util.Map;
 import java.util.Optional;
@@ -29,92 +28,95 @@ import org.springframework.stereotype.Service;
 @Service
 public class PaymentService {
 
-    static final int MAX_IDEMPOTENCY_KEY_LENGTH = 64;
-
     private final PaymentTransaction paymentTransaction;
+    private final PaymentReader paymentReader;
     private final PgClient pgClient;
     private final SeatGateReflector gate;
-    private final Duration gateKeyMargin;
     private final PaymentGateReflector reflector;
+    private final Duration gateKeyMargin;
 
-    public PaymentService(PaymentTransaction paymentTransaction, PgClient pgClient,
+    public PaymentService(PaymentTransaction paymentTransaction, PaymentReader paymentReader, PgClient pgClient,
                           SeatGateReflector gate, TicketingProperties properties) {
         this.paymentTransaction = paymentTransaction;
+        this.paymentReader = paymentReader;
         this.pgClient = pgClient;
         this.gate = gate;
-        this.gateKeyMargin = properties.payment().gateKeyMargin();
         this.reflector = new PaymentGateReflector(gate);
+        this.gateKeyMargin = properties.payment().gateKeyMargin();
     }
 
-    public PaymentResponse pay(long userId, long holdId, String idempotencyKey, Optional<PgScenario> scenario) {
-        String key = checkIdempotencyKey(idempotencyKey);
-        StartResult start = startOrRecover(userId, holdId, key);
+    public PaymentResult pay(PayCommand command) {
+        PaymentStart start = startOrRecover(command);
         if (start instanceof Existing existing) {
-            return respond(existing.settlement());
+            return successOrThrow(existing.result());
+        }
+        if (start instanceof OtherKey otherKey) {
+            throw otherPaymentOnHold(command.holdId(), otherKey.other());
         }
         Started started = (Started) start;
 
         // 게이트 키가 결제 중에 풀리지 않게 결제 마감 뒤까지 늘린다
-        Duration ttl = Duration.between(started.dbNow(), started.payDeadline()).plus(gateKeyMargin);
-        gate.extend(new GateHold(userId, started.performanceId(), started.holdToken(), started.seatIds()), ttl);
+        gate.extend(started.gate(), Duration.between(started.dbNow(), started.payDeadline()).plus(gateKeyMargin));
 
-        PgResult pg = pgClient.approve(started.orderId(), started.amount(), scenario);
+        PgResult pg = pgClient.approve(started.orderId(), started.amount(), command.pgScenario().map(Enum::name));
         PaymentSettlement settlement = switch (pg.status()) {
             case APPROVED -> paymentTransaction.confirm(started.paymentId(), pg.pgTxId());
             case DECLINED -> paymentTransaction.decline(started.paymentId());
-            default -> paymentTransaction.markUnknown(started.paymentId(), unknownDetail(pg));
+            default -> paymentTransaction.markUnknown(started.paymentId(), unknownCause(pg));
         };
-        reflector.reflect(settlement, started.seatIds());
-        return respond(settlement);
+        // 승인 중 남이 가져간 좌석의 키도 이 요청이 늘려 두었으므로, 트랜잭션이 본 좌석 대신 늘린 좌석 전부에 반영한다
+        reflector.reflect(settlement.withGate(started.gate()));
+        return successOrThrow(settlement.result());
     }
 
-    public PaymentStatusView getPayment(long userId, long paymentId) {
-        PaymentSettlement settlement = paymentTransaction.view(userId, paymentId);
-        return new PaymentStatusView(settlement.paymentId(), settlement.paymentStatus(), settlement.holdStatus(),
-                settlement.bookingId(), settlement.bookingNumber());
+    public PaymentResult getPayment(long userId, long paymentId) {
+        return paymentReader.find(userId, paymentId);
     }
 
-    private PaymentResponse respond(PaymentSettlement settlement) {
-        long paymentId = settlement.paymentId();
-        return switch (settlement.outcome()) {
-            case PROCESSING -> PaymentResponse.pending(paymentId, PaymentResponse.Status.PROCESSING);
-            case UNKNOWN -> PaymentResponse.pending(paymentId, PaymentResponse.Status.UNKNOWN);
-            case CONFIRMED -> PaymentResponse.confirmed(paymentId, settlement.bookingId(), settlement.bookingNumber());
+    // 조회·락으로 막지 못한 경합이 유니크 제약에 걸리면 새 트랜잭션으로 다시 읽어 같은 결과를 돌려준다
+    private PaymentStart startOrRecover(PayCommand command) {
+        long userId = command.userId();
+        long holdId = command.holdId();
+        String key = command.idempotencyKey();
+        try {
+            return paymentTransaction.start(userId, holdId, key);
+        } catch (DataIntegrityViolationException e) {
+            boolean sameKey = ConstraintViolations.matches(e, Payment.UK_IDEMPOTENCY);
+            if (!sameKey && !ConstraintViolations.matches(e, Payment.UK_HOLD)) {
+                throw e;
+            }
+            log.info("[booking payment] 결제 시작 유니크 위반 constraint={}, holdId={}",
+                    sameKey ? Payment.UK_IDEMPOTENCY : Payment.UK_HOLD, holdId);
+            Optional<PaymentStart> found = sameKey
+                    ? paymentReader.findSameKeyAfterDuplicate(userId, key)
+                    : paymentReader.findSameHoldAfterDuplicate(userId, holdId, key);
+            return found.orElseThrow(() -> e);
+        }
+    }
+
+    // 결과를 아직 모르면 202로, 실패로 끝났으면 402·409 예외로 답한다
+    private static PaymentResult successOrThrow(PaymentResult result) {
+        long paymentId = result.paymentId();
+        return switch (result.outcome()) {
+            case PROCESSING, UNKNOWN, CONFIRMED -> result;
             case SEAT_LOST -> throw failure(ErrorCode.SEAT_LOST_REFUNDING, paymentId);
             case DECLINED -> throw failure(ErrorCode.PAYMENT_DECLINED, paymentId);
             case CANCELLED -> throw failure(ErrorCode.PAYMENT_CANCELLED, paymentId);
         };
     }
 
-    // 조회·락으로 막지 못한 경합이 유니크 제약에 걸리면 새 트랜잭션으로 다시 읽어 같은 결과를 돌려준다
-    private StartResult startOrRecover(long userId, long holdId, String key) {
-        try {
-            return paymentTransaction.start(userId, holdId, key);
-        } catch (DataIntegrityViolationException e) {
-            boolean idempotency = ConstraintViolations.matches(e, Payment.UK_IDEMPOTENCY);
-            if (!idempotency && !ConstraintViolations.matches(e, Payment.UK_HOLD)) {
-                throw e;
-            }
-            log.info("[booking payment] 결제 시작 유니크 위반 constraint={}, holdId={}",
-                    idempotency ? Payment.UK_IDEMPOTENCY : Payment.UK_HOLD, holdId);
-            return paymentTransaction.findAfterDuplicate(userId, holdId, key, idempotency).orElseThrow(() -> e);
+    // 다른 키의 결제가 이미 끝나 자리가 풀렸으면 다시 고르게 하고, 아직 진행 중이면 다른 화면에서 결제 중이라고 알린다
+    private static ApiException otherPaymentOnHold(long holdId, PaymentResult other) {
+        if (other.paymentStatus() == PaymentStatus.DECLINED || other.paymentStatus() == PaymentStatus.CANCELLED) {
+            return new ApiException(ErrorCode.HOLD_NOT_PAYABLE,
+                    Map.of("holdId", holdId, "status", other.holdStatus().name()));
         }
+        return new ApiException(ErrorCode.ALREADY_PAYING, Map.of("holdId", holdId));
     }
 
-    private static String checkIdempotencyKey(String key) {
-        if (key == null || key.isBlank()) {
-            throw new ApiException(ErrorCode.IDEMPOTENCY_KEY_REQUIRED);
-        }
-        String trimmed = key.trim();
-        if (trimmed.length() > MAX_IDEMPOTENCY_KEY_LENGTH) {
-            throw new ApiException(ErrorCode.INVALID_REQUEST,
-                    Map.of("header", HttpNames.IDEMPOTENCY_KEY_HEADER, "maxLength", MAX_IDEMPOTENCY_KEY_LENGTH));
-        }
-        return trimmed;
-    }
-
-    private static String unknownDetail(PgResult pg) {
-        return pg.detail() != null ? pg.detail() : "PG 승인 응답 " + pg.status();
+    // 승인 결과를 모를 때는 원인만 남긴다. 원인이 없으면 받은 상태를 적는다
+    private static String unknownCause(PgResult pg) {
+        return pg.detail() != null ? pg.detail() : pg.describe("PG 승인 응답");
     }
 
     private static ApiException failure(ErrorCode code, long paymentId) {

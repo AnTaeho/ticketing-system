@@ -1,14 +1,15 @@
 package com.example.ticketing.payment.service;
 
-import com.example.ticketing.booking.domain.Booking;
-import com.example.ticketing.booking.repository.BookingRepository;
-import com.example.ticketing.booking.repository.BookingSeatRepository;
+import com.example.ticketing.booking.dto.IssueBookingCommand;
+import com.example.ticketing.booking.dto.IssuedBooking;
+import com.example.ticketing.booking.service.BookingIssuer;
 import com.example.ticketing.common.config.TicketingProperties;
 import com.example.ticketing.common.error.ApiException;
 import com.example.ticketing.common.error.ErrorCode;
 import com.example.ticketing.common.jdbc.RowCounts;
 import com.example.ticketing.common.text.Texts;
 import com.example.ticketing.common.time.DbClock;
+import com.example.ticketing.hold.domain.GateHold;
 import com.example.ticketing.hold.domain.HoldStatus;
 import com.example.ticketing.hold.domain.SeatHold;
 import com.example.ticketing.hold.repository.SeatHoldRepository;
@@ -17,10 +18,11 @@ import com.example.ticketing.outbox.service.OutboxWriter;
 import com.example.ticketing.payment.domain.Payment;
 import com.example.ticketing.payment.domain.PaymentStatus;
 import com.example.ticketing.payment.dto.PaymentOutcome;
+import com.example.ticketing.payment.dto.PaymentResult;
 import com.example.ticketing.payment.dto.PaymentSettlement;
-import com.example.ticketing.payment.dto.StartResult;
-import com.example.ticketing.payment.dto.StartResult.Existing;
-import com.example.ticketing.payment.dto.StartResult.Started;
+import com.example.ticketing.payment.dto.PaymentStart;
+import com.example.ticketing.payment.dto.PaymentStart.Existing;
+import com.example.ticketing.payment.dto.PaymentStart.Started;
 import com.example.ticketing.payment.repository.PaymentRepository;
 import com.example.ticketing.seat.repository.SeatRepository;
 import com.example.ticketing.seat.service.SeatCatalog;
@@ -28,13 +30,10 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
-import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
@@ -42,29 +41,47 @@ import tools.jackson.databind.json.JsonMapper;
 
 // 락 순서: seat_hold → seat. 이 안에서는 PG·Redis를 부르지 않는다
 @Component
-@RequiredArgsConstructor
 public class PaymentTransaction {
 
-    private static final DateTimeFormatter BOOKING_DATE = DateTimeFormatter.ofPattern("yyyyMMdd");
-
     private final PaymentRepository paymentRepository;
+    private final PaymentReader paymentReader;
     private final SeatHoldRepository seatHoldRepository;
     private final SeatRepository seatRepository;
-    private final BookingRepository bookingRepository;
-    private final BookingSeatRepository bookingSeatRepository;
-    private final OutboxWriter outboxWriter;
     private final SeatCatalog seatCatalog;
+    private final BookingIssuer bookingIssuer;
+    private final OutboxWriter outboxWriter;
     private final DbClock dbClock;
     private final Clock clock;
-    private final TicketingProperties properties;
     private final JsonMapper jsonMapper;
+    private final Duration payDeadline;
+    private final Duration requestedRecheckAfter;
+    private final long unknownRecheckMicros;
+
+    public PaymentTransaction(PaymentRepository paymentRepository, PaymentReader paymentReader,
+                              SeatHoldRepository seatHoldRepository, SeatRepository seatRepository,
+                              SeatCatalog seatCatalog, BookingIssuer bookingIssuer, OutboxWriter outboxWriter,
+                              DbClock dbClock, Clock clock, JsonMapper jsonMapper, TicketingProperties properties) {
+        this.paymentRepository = paymentRepository;
+        this.paymentReader = paymentReader;
+        this.seatHoldRepository = seatHoldRepository;
+        this.seatRepository = seatRepository;
+        this.seatCatalog = seatCatalog;
+        this.bookingIssuer = bookingIssuer;
+        this.outboxWriter = outboxWriter;
+        this.dbClock = dbClock;
+        this.clock = clock;
+        this.jsonMapper = jsonMapper;
+        this.payDeadline = properties.payment().payDeadline();
+        this.requestedRecheckAfter = properties.payment().requestedRecheckAfter();
+        this.unknownRecheckMicros = properties.payment().unknownRecheckAfter().toNanos() / 1_000;
+    }
 
     // hold 행 락이 같은 hold의 결제 시작을 줄 세운다. READ_COMMITTED라 기다린 동안 커밋된 결제가 3단계에서 보인다
     @Transactional(isolation = Isolation.READ_COMMITTED)
-    public StartResult start(long userId, long holdId, String idempotencyKey) {
+    public PaymentStart start(long userId, long holdId, String idempotencyKey) {
         Optional<Payment> sameKey = paymentRepository.findByUserIdAndIdempotencyKey(userId, idempotencyKey);
         if (sameKey.isPresent()) {
-            return new Existing(current(sameKey.get()));
+            return new Existing(paymentReader.resultOf(sameKey.get()));
         }
 
         SeatHold hold = seatHoldRepository.lockByIdAndUserId(holdId, userId)
@@ -72,98 +89,68 @@ public class PaymentTransaction {
 
         Optional<Payment> sameHold = paymentRepository.findByHoldId(holdId);
         if (sameHold.isPresent()) {
-            if (sameHold.get().getIdempotencyKey().equals(idempotencyKey)) {
-                return new Existing(current(sameHold.get(), hold));
-            }
-            throw otherPaymentOnHold(sameHold.get(), hold);
+            return PaymentStart.onSameHold(sameHold.get().getIdempotencyKey().equals(idempotencyKey),
+                    paymentReader.resultOf(sameHold.get(), hold));
         }
 
-        if (hold.getStatus() == HoldStatus.EXPIRED) {
-            throw new ApiException(ErrorCode.HOLD_EXPIRED, Map.of("holdId", holdId));
-        }
-        if (hold.getStatus() != HoldStatus.HELD) {
-            throw new ApiException(ErrorCode.HOLD_NOT_PAYABLE,
-                    Map.of("holdId", holdId, "status", hold.getStatus().name()));
-        }
         LocalDateTime now = dbClock.now();
-        if (!hold.getExpiresAt().isAfter(now)) {
-            throw new ApiException(ErrorCode.HOLD_EXPIRED, Map.of("holdId", holdId));
-        }
-
-        LocalDateTime payDeadline = now.plus(properties.payment().payDeadline());
-        if (!RowCounts.changedOne(seatHoldRepository.markPaying(holdId, payDeadline))) {
-            throw new ApiException(ErrorCode.HOLD_EXPIRED, Map.of("holdId", holdId));
-        }
-        if (!RowCounts.changedExactly(seatRepository.extendHeldUntil(holdId, payDeadline), hold.getSeatCount())) {
-            throw new ApiException(ErrorCode.SEAT_STATE_CHANGED, Map.of("holdId", holdId));
-        }
+        requirePayable(hold, now);
+        LocalDateTime deadline = now.plus(payDeadline);
+        heldToPaying(hold, deadline);
         List<Long> seatIds = seatRepository.findHeldSeatIds(holdId);
 
         String orderId = UUID.randomUUID().toString().replace("-", "");
         Payment payment = paymentRepository.save(Payment.requested(holdId, userId, idempotencyKey,
-                orderId, hold.getTotalAmount(), now.plus(properties.payment().requestedRecheckAfter())));
-        return new Started(payment.getId(), holdId, hold.getPerformanceId(), userId, orderId,
-                hold.getTotalAmount(), hold.getHoldToken(), List.copyOf(seatIds), payDeadline, now);
+                orderId, hold.getTotalAmount(), now.plus(requestedRecheckAfter)));
+        return new Started(payment.getId(), orderId, hold.getTotalAmount(), gateOf(hold, seatIds), deadline, now);
     }
 
     // 요청 스레드와 대사가 동시에 불러도 hold 락 뒤 PAYING 확인으로 한 번만 효과가 있다
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public PaymentSettlement confirm(long paymentId, String pgTxId) {
         Locked locked = lock(paymentId);
-        SeatHold hold = locked.hold();
-        Payment payment = locked.payment();
-        if (!isPaying(hold, payment)) {
-            return current(payment, hold);
+        if (!locked.paying()) {
+            return PaymentSettlement.seatsUnchanged(paymentReader.resultOf(locked.payment(), locked.hold()));
         }
+        SeatHold hold = locked.hold();
         long holdId = hold.getId();
         List<Long> seatIds = seatRepository.lockHeldSeatIds(holdId);
         LocalDateTime now = dbClock.now();
-
-        if (seatIds.size() == hold.getSeatCount()) {
-            RowCounts.requireExactly(seatRepository.markSold(holdId), seatIds.size(), "seat SOLD");
-            RowCounts.requireExactly(seatHoldRepository.markConfirmed(holdId), 1, "hold CONFIRMED");
-            RowCounts.requireExactly(paymentRepository.markApproved(paymentId, pgTxId), 1, "payment APPROVED");
-            Booking booking = bookingRepository.save(Booking.confirmed(bookingNumber(now, holdId), holdId,
-                    paymentId, hold.getUserId(), hold.getPerformanceId(), hold.getTotalAmount()));
-            RowCounts.requireExactly(bookingSeatRepository.copySoldSeats(booking.getId(), holdId), seatIds.size(),
-                    "booking_seat");
-            outboxWriter.write(OutboxTaskType.TICKET_ISSUED, booking.getId(), json("bookingId", booking.getId()));
-            // 서버와 DB의 시간대가 달라도 맞도록 DB 시각 기준 남은 시간으로 바꾼다
-            LocalDateTime gateCloseAt = seatCatalog.performance(hold.getPerformanceId()).gateCloseAt();
-            Instant gateCloseInstant = clock.instant().plus(Duration.between(now, gateCloseAt));
-            return applied(payment, hold, PaymentOutcome.CONFIRMED, PaymentStatus.APPROVED,
-                    HoldStatus.CONFIRMED, booking, seatIds, gateCloseInstant);
+        if (seatIds.size() != hold.getSeatCount()) {
+            return payingToRefunding(locked, pgTxId, seatIds);
         }
 
-        // 결제 마감이 지나 남이 좌석을 가져갔다. 돈은 받았으므로 남은 좌석을 풀고 환불을 맡긴다
-        RowCounts.requireExactly(seatRepository.releaseHeldSeats(holdId), seatIds.size(), "seat AVAILABLE");
-        RowCounts.requireExactly(seatHoldRepository.markRefunding(holdId), 1, "hold REFUNDING");
+        RowCounts.requireExactly(seatRepository.markSold(holdId), seatIds.size(), "seat SOLD");
+        RowCounts.requireExactly(seatHoldRepository.markConfirmed(holdId), 1, "hold CONFIRMED");
         RowCounts.requireExactly(paymentRepository.markApproved(paymentId, pgTxId), 1, "payment APPROVED");
-        outboxWriter.write(OutboxTaskType.REFUND_REQUESTED, paymentId, json(
-                "paymentId", paymentId, "orderId", payment.getOrderId()));
-        return applied(payment, hold, PaymentOutcome.SEAT_LOST, PaymentStatus.APPROVED,
-                HoldStatus.REFUNDING, null, seatIds, null);
+        IssuedBooking booking = bookingIssuer.issue(new IssueBookingCommand(hold.getUserId(),
+                hold.getPerformanceId(), holdId, paymentId, hold.getTotalAmount(), seatIds.size(), now));
+        // 서버와 DB의 시간대가 달라도 맞도록 DB 시각 기준 남은 시간으로 바꾼다
+        LocalDateTime gateCloseAt = seatCatalog.performance(hold.getPerformanceId()).gateCloseAt();
+        Instant gateCloseInstant = clock.instant().plus(Duration.between(now, gateCloseAt));
+        return PaymentSettlement.seatsChanged(new PaymentResult(paymentId, PaymentOutcome.CONFIRMED,
+                        PaymentStatus.APPROVED, HoldStatus.CONFIRMED, booking.bookingId(), booking.bookingNumber()),
+                gateOf(hold, seatIds), gateCloseInstant);
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public PaymentSettlement decline(long paymentId) {
-        return releaseAfterPg(paymentId, PaymentStatus.DECLINED);
+        return payingToReleased(paymentId, PaymentStatus.DECLINED);
     }
 
     // 망취소가 PG에서 확정된 뒤 대사가 부른다
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public PaymentSettlement cancelAndRelease(long paymentId) {
-        return releaseAfterPg(paymentId, PaymentStatus.CANCELLED);
+        return payingToReleased(paymentId, PaymentStatus.CANCELLED);
     }
 
     // 결과를 모를 때는 hold·좌석을 그대로 두고 대사가 조회로 확정하게 한다
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public PaymentSettlement markUnknown(long paymentId, String detail) {
-        long recheckMicros = properties.payment().unknownRecheckAfter().toNanos() / 1_000;
-        paymentRepository.markUnknown(paymentId, Texts.abbreviate(detail, Payment.MAX_LAST_ERROR), recheckMicros);
-        Payment payment = paymentRepository.findById(paymentId)
-                .orElseThrow(() -> paymentNotFound(paymentId));
-        return current(payment);
+        paymentRepository.markUnknown(paymentId, Texts.abbreviate(detail, Payment.MAX_LAST_ERROR),
+                unknownRecheckMicros);
+        Payment payment = paymentRepository.findById(paymentId).orElseThrow(() -> paymentNotFound(paymentId));
+        return PaymentSettlement.seatsUnchanged(paymentReader.resultOf(payment));
     }
 
     // PG 환불 확정 뒤 Outbox 워커가 부른다. 다시 불려도 조건부 전이라 두 번째는 바꾸는 행이 없다
@@ -174,49 +161,50 @@ public class PaymentTransaction {
         return RowCounts.changedOne(paymentRepository.markRefunded(paymentId));
     }
 
-    @Transactional(readOnly = true, isolation = Isolation.READ_COMMITTED)
-    public PaymentSettlement view(long userId, long paymentId) {
-        Payment payment = paymentRepository.findByIdAndUserId(paymentId, userId)
-                .orElseThrow(() -> paymentNotFound(paymentId));
-        return current(payment);
+    private static void requirePayable(SeatHold hold, LocalDateTime now) {
+        long holdId = hold.getId();
+        if (hold.getStatus() == HoldStatus.EXPIRED) {
+            throw new ApiException(ErrorCode.HOLD_EXPIRED, Map.of("holdId", holdId));
+        }
+        if (hold.getStatus() != HoldStatus.HELD) {
+            throw new ApiException(ErrorCode.HOLD_NOT_PAYABLE,
+                    Map.of("holdId", holdId, "status", hold.getStatus().name()));
+        }
+        if (!hold.getExpiresAt().isAfter(now)) {
+            throw new ApiException(ErrorCode.HOLD_EXPIRED, Map.of("holdId", holdId));
+        }
     }
 
-    // 유니크 위반 뒤 새 트랜잭션으로 다시 읽는다. 위반한 쪽 결제가 이제는 커밋돼 보인다
-    @Transactional(readOnly = true, isolation = Isolation.READ_COMMITTED)
-    public Optional<StartResult> findAfterDuplicate(long userId, long holdId, String idempotencyKey,
-                                                    boolean idempotencyViolated) {
-        if (idempotencyViolated) {
-            return paymentRepository.findByUserIdAndIdempotencyKey(userId, idempotencyKey)
-                    .map(payment -> new Existing(current(payment)));
+    // 좌석을 결제 마감까지 붙잡는다. 만료 경계에서 진 쪽은 HOLD_EXPIRED다
+    private void heldToPaying(SeatHold hold, LocalDateTime deadline) {
+        long holdId = hold.getId();
+        if (!RowCounts.changedOne(seatHoldRepository.markPaying(holdId, deadline))) {
+            throw new ApiException(ErrorCode.HOLD_EXPIRED, Map.of("holdId", holdId));
         }
-        Optional<Payment> sameHold = paymentRepository.findByHoldId(holdId)
-                .filter(payment -> payment.getUserId() == userId);
-        if (sameHold.isEmpty()) {
-            return Optional.empty();
+        if (!RowCounts.changedExactly(seatRepository.extendHeldUntil(holdId, deadline), hold.getSeatCount())) {
+            throw new ApiException(ErrorCode.SEAT_STATE_CHANGED, Map.of("holdId", holdId));
         }
-        if (sameHold.get().getIdempotencyKey().equals(idempotencyKey)) {
-            return Optional.of(new Existing(current(sameHold.get())));
-        }
-        SeatHold hold = seatHoldRepository.findById(holdId)
-                .orElseThrow(() -> new IllegalStateException("결제 " + sameHold.get().getId() + "의 hold가 없다"));
-        throw otherPaymentOnHold(sameHold.get(), hold);
     }
 
-    // 다른 키의 결제가 이미 끝나 자리가 풀렸으면 다시 고르게 하고, 아직 진행 중이면 다른 화면에서 결제 중이라고 알린다
-    private static ApiException otherPaymentOnHold(Payment other, SeatHold hold) {
-        if (other.getStatus() == PaymentStatus.DECLINED || other.getStatus() == PaymentStatus.CANCELLED) {
-            return new ApiException(ErrorCode.HOLD_NOT_PAYABLE,
-                    Map.of("holdId", hold.getId(), "status", hold.getStatus().name()));
-        }
-        return new ApiException(ErrorCode.ALREADY_PAYING, Map.of("holdId", hold.getId()));
-    }
-
-    private PaymentSettlement releaseAfterPg(long paymentId, PaymentStatus target) {
-        Locked locked = lock(paymentId);
+    // 결제 마감이 지나 남이 좌석을 가져갔다. 돈은 받았으므로 남은 좌석을 풀고 환불을 맡긴다
+    private PaymentSettlement payingToRefunding(Locked locked, String pgTxId, List<Long> seatIds) {
         SeatHold hold = locked.hold();
         Payment payment = locked.payment();
-        if (!isPaying(hold, payment)) {
-            return current(payment, hold);
+        long holdId = hold.getId();
+        long paymentId = payment.getId();
+        RowCounts.requireExactly(seatRepository.releaseHeldSeats(holdId), seatIds.size(), "seat AVAILABLE");
+        RowCounts.requireExactly(seatHoldRepository.markRefunding(holdId), 1, "hold REFUNDING");
+        RowCounts.requireExactly(paymentRepository.markApproved(paymentId, pgTxId), 1, "payment APPROVED");
+        outboxWriter.write(OutboxTaskType.REFUND_REQUESTED, paymentId, refundPayload(paymentId, payment.getOrderId()));
+        return PaymentSettlement.seatsChanged(new PaymentResult(paymentId, PaymentOutcome.SEAT_LOST,
+                PaymentStatus.APPROVED, HoldStatus.REFUNDING, null, null), gateOf(hold, seatIds), null);
+    }
+
+    private PaymentSettlement payingToReleased(long paymentId, PaymentStatus target) {
+        Locked locked = lock(paymentId);
+        SeatHold hold = locked.hold();
+        if (!locked.paying()) {
+            return PaymentSettlement.seatsUnchanged(paymentReader.resultOf(locked.payment(), hold));
         }
         long holdId = hold.getId();
         List<Long> seatIds = seatRepository.lockHeldSeatIds(holdId);
@@ -226,10 +214,9 @@ public class PaymentTransaction {
                 ? paymentRepository.markDeclined(paymentId)
                 : paymentRepository.markCancelled(paymentId);
         RowCounts.requireExactly(updated, 1, "payment " + target);
-        PaymentOutcome outcome = target == PaymentStatus.DECLINED
-                ? PaymentOutcome.DECLINED
-                : PaymentOutcome.CANCELLED;
-        return applied(payment, hold, outcome, target, HoldStatus.RELEASED, null, seatIds, null);
+        return PaymentSettlement.seatsChanged(new PaymentResult(paymentId,
+                PaymentOutcome.of(target, HoldStatus.RELEASED), target, HoldStatus.RELEASED, null, null),
+                gateOf(hold, seatIds), null);
     }
 
     // 결제 엔티티를 읽기 전에 hold를 먼저 잠가야 락 뒤의 최신 결제 상태를 본다
@@ -241,46 +228,15 @@ public class PaymentTransaction {
         return new Locked(hold, payment);
     }
 
-    private static boolean isPaying(SeatHold hold, Payment payment) {
-        return hold.getStatus() == HoldStatus.PAYING
-                && (payment.getStatus() == PaymentStatus.REQUESTED
-                || payment.getStatus() == PaymentStatus.UNKNOWN);
+    private static GateHold gateOf(SeatHold hold, List<Long> seatIds) {
+        return new GateHold(hold.getUserId(), hold.getPerformanceId(), hold.getHoldToken(), seatIds);
     }
 
-    private PaymentSettlement current(Payment payment) {
-        SeatHold hold = seatHoldRepository.findById(payment.getHoldId())
-                .orElseThrow(() -> new IllegalStateException("결제 " + payment.getId() + "의 hold가 없다"));
-        return current(payment, hold);
-    }
-
-    private PaymentSettlement current(Payment payment, SeatHold hold) {
-        PaymentOutcome outcome = PaymentOutcome.of(payment.getStatus(), hold.getStatus());
-        Booking booking = outcome == PaymentOutcome.CONFIRMED
-                ? bookingRepository.findByHoldId(hold.getId()).orElse(null)
-                : null;
-        return new PaymentSettlement(payment.getId(), outcome, false, payment.getStatus(), hold.getStatus(),
-                booking == null ? null : booking.getId(), booking == null ? null : booking.getBookingNumber(),
-                hold.getPerformanceId(), hold.getUserId(), hold.getHoldToken(), List.of(), null);
-    }
-
-    private static PaymentSettlement applied(Payment payment, SeatHold hold, PaymentOutcome outcome,
-                                             PaymentStatus paymentStatus, HoldStatus holdStatus,
-                                             Booking booking, List<Long> seatIds, Instant gateCloseAt) {
-        return new PaymentSettlement(payment.getId(), outcome, true, paymentStatus, holdStatus,
-                booking == null ? null : booking.getId(), booking == null ? null : booking.getBookingNumber(),
-                hold.getPerformanceId(), hold.getUserId(), hold.getHoldToken(), List.copyOf(seatIds), gateCloseAt);
-    }
-
-    static String bookingNumber(LocalDateTime dbNow, long holdId) {
-        return "B" + dbNow.format(BOOKING_DATE) + "-" + String.format("%06d", holdId);
-    }
-
-    private String json(Object... keyValues) {
-        Map<String, Object> payload = new LinkedHashMap<>();
-        for (int i = 0; i < keyValues.length; i += 2) {
-            payload.put((String) keyValues[i], keyValues[i + 1]);
-        }
-        return jsonMapper.writeValueAsString(payload);
+    // 예매 취소 쪽 환불과 같은 모양이다. 키 순서까지 맞춘다
+    private String refundPayload(long paymentId, String orderId) {
+        return jsonMapper.writeValueAsString(jsonMapper.createObjectNode()
+                .put("paymentId", paymentId)
+                .put("orderId", orderId));
     }
 
     private static ApiException paymentNotFound(long paymentId) {
@@ -288,5 +244,9 @@ public class PaymentTransaction {
     }
 
     private record Locked(SeatHold hold, Payment payment) {
+
+        boolean paying() {
+            return hold.getStatus() == HoldStatus.PAYING && payment.getStatus().isOpen();
+        }
     }
 }

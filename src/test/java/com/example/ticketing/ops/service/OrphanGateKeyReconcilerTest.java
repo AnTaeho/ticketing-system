@@ -4,9 +4,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.Mockito.mock;
 
+import com.example.ticketing.booking.service.BookingReader;
 import com.example.ticketing.booking.service.BookingService;
 import com.example.ticketing.booking.service.BookingTransaction;
-import com.example.ticketing.booking.service.BookingViewReader;
 import com.example.ticketing.common.config.TicketingProperties;
 import com.example.ticketing.common.metrics.Metrics;
 import com.example.ticketing.common.metrics.Metrics.Tag;
@@ -25,7 +25,9 @@ import com.example.ticketing.hold.service.SeatGateReflector;
 import com.example.ticketing.hold.service.SeatHoldService;
 import com.example.ticketing.hold.service.SeatHoldTransaction;
 import com.example.ticketing.payment.client.PgResult;
-import com.example.ticketing.payment.dto.PaymentResponse;
+import com.example.ticketing.payment.dto.PayCommand;
+import com.example.ticketing.payment.dto.PaymentOutcome;
+import com.example.ticketing.payment.dto.PaymentResult;
 import com.example.ticketing.payment.repository.PaymentRepository;
 import com.example.ticketing.payment.service.PaymentService;
 import com.example.ticketing.queue.service.QueueService;
@@ -112,7 +114,7 @@ class OrphanGateKeyReconcilerTest {
     @Autowired
     private BookingTransaction bookingTransaction;
     @Autowired
-    private BookingViewReader viewReader;
+    private BookingReader viewReader;
     @Autowired
     private StubPgClient stubPg;
 
@@ -168,9 +170,9 @@ class OrphanGateKeyReconcilerTest {
         List<Long> seats = seatIds(pid).subList(0, 2);
         CreateHoldResult hold = seatHoldService.hold(
                 new CreateHoldCommand(userId, pid, seats, fixtures.admit(pid, userId)));
-        PaymentResponse paid = paymentService.pay(userId, hold.holdId(), UUID.randomUUID().toString(),
-                Optional.empty());
-        assertThat(paid.status()).isEqualTo(PaymentResponse.Status.CONFIRMED);
+        PaymentResult paid = paymentService.pay(new PayCommand(userId, hold.holdId(), UUID.randomUUID().toString(),
+                Optional.empty()));
+        assertThat(paid.outcome()).isEqualTo(PaymentOutcome.CONFIRMED);
         String token = holdToken(hold.holdId());
 
         assertThat(reconciler().reconcileOne(pid)).isEqualTo(new OrphanGateKeyReconciler.Removed(0, 0));
@@ -197,8 +199,9 @@ class OrphanGateKeyReconcilerTest {
         CreateHoldResult paying = seatHoldService.hold(
                 new CreateHoldCommand(payingUser, pid, ids.subList(2, 3), fixtures.admit(pid, payingUser)));
         stubPg.approveWith(PgResult.unknown("timeout"));
-        assertThat(paymentService.pay(payingUser, paying.holdId(), UUID.randomUUID().toString(), Optional.empty())
-                .status()).isEqualTo(PaymentResponse.Status.UNKNOWN);
+        assertThat(paymentService.pay(new PayCommand(payingUser, paying.holdId(), UUID.randomUUID().toString(),
+                Optional.empty()))
+                .outcome()).isEqualTo(PaymentOutcome.UNKNOWN);
         assertThat(holdStatus(paying.holdId())).isEqualTo("PAYING");
         List<String> keys = cleaner.gateKeys(pid);
         assertThat(keys).hasSize(5);

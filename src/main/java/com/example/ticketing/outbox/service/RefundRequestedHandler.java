@@ -40,8 +40,7 @@ public class RefundRequestedHandler implements OutboxHandler {
                 log.warn("[booking outbox] 결제 {} 환불 요청에 PG가 DECLINED로 답했다. 받은 돈이 없으므로 취소로 닫는다", paymentId);
                 paymentTransaction.completeRefund(paymentId);
             }
-            default -> throw new IllegalStateException("PG 취소 " + result.status()
-                    + (result.detail() != null ? ": " + result.detail() : ""));
+            default -> throw new IllegalStateException(result.describe("PG 취소"));
         }
     }
 }

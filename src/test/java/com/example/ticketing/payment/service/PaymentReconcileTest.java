@@ -13,8 +13,9 @@ import com.example.ticketing.hold.service.SeatGateReflector;
 import com.example.ticketing.hold.service.SeatHoldService;
 import com.example.ticketing.payment.client.PgResult;
 import com.example.ticketing.payment.client.PgStatus;
-import com.example.ticketing.payment.dto.StartResult.Started;
-import com.example.ticketing.payment.service.PaymentReconcileTransaction.ClaimedPayment;
+import com.example.ticketing.payment.dto.ClaimedPayment;
+import com.example.ticketing.payment.dto.PayCommand;
+import com.example.ticketing.payment.dto.PaymentStart.Started;
 import com.example.ticketing.support.Fixtures;
 import com.example.ticketing.support.IntegrationTest;
 import com.example.ticketing.support.PaymentDb;
@@ -368,11 +369,12 @@ class PaymentReconcileTest {
     @DisplayName("최종 상태 결제(APPROVED·DECLINED)는 next_check_at이 과거여도 집지 않는다")
     void settledPaymentsAreNotClaimed() {
         Fixture approved = newHold(1);
-        long approvedId = paymentService.pay(approved.userId, approved.holdId, key(), Optional.empty()).paymentId();
+        long approvedId = paymentService.pay(new PayCommand(approved.userId, approved.holdId, key(),
+                Optional.empty())).paymentId();
         Fixture declined = newHold(1);
         stubPg.approveWith(PgResult.of(PgStatus.DECLINED, null));
         long declinedId = paymentIdOfHold(declined.holdId, () ->
-                paymentService.pay(declined.userId, declined.holdId, key(), Optional.empty()));
+                paymentService.pay(new PayCommand(declined.userId, declined.holdId, key(), Optional.empty())));
         db.makeDue(approvedId);
         db.makeDue(declinedId);
 
@@ -464,7 +466,7 @@ class PaymentReconcileTest {
     // 승인 요청이 타임아웃으로 끝난 결제(UNKNOWN, 게이트 키는 결제 마감+1분)
     private long unknownPayment(Fixture f) {
         stubPg.approveWith(PgResult.unknown("read timeout 3s"));
-        long paymentId = paymentService.pay(f.userId, f.holdId, key(), Optional.empty()).paymentId();
+        long paymentId = paymentService.pay(new PayCommand(f.userId, f.holdId, key(), Optional.empty())).paymentId();
         assertThat(db.payment(paymentId)).containsEntry("status", "UNKNOWN");
         return paymentId;
     }

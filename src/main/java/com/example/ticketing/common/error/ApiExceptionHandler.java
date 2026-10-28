@@ -1,6 +1,5 @@
 package com.example.ticketing.common.error;
 
-import com.example.ticketing.common.web.HttpNames;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import org.springframework.core.Ordered;
@@ -36,9 +35,6 @@ public class ApiExceptionHandler {
 
     @ExceptionHandler(MissingRequestHeaderException.class)
     public ResponseEntity<ErrorResponse> handleMissingHeader(MissingRequestHeaderException e) {
-        if (HttpNames.IDEMPOTENCY_KEY_HEADER.equalsIgnoreCase(e.getHeaderName())) {
-            return respond(ErrorCode.IDEMPOTENCY_KEY_REQUIRED, Map.of());
-        }
         return respond(ErrorCode.INVALID_REQUEST, Map.of("header", e.getHeaderName()));
     }
 

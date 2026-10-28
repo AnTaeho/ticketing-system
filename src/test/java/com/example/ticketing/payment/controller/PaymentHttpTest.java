@@ -11,7 +11,7 @@ import com.example.ticketing.payment.client.HttpPgClient;
 import com.example.ticketing.payment.client.OddPgTestConfig;
 import com.example.ticketing.payment.client.PgClient;
 import com.example.ticketing.payment.client.PgStatus;
-import com.example.ticketing.payment.dto.StartResult.Started;
+import com.example.ticketing.payment.dto.PaymentStart.Started;
 import com.example.ticketing.payment.service.PaymentReconcileScheduler;
 import com.example.ticketing.payment.service.PaymentReconcileTransaction;
 import com.example.ticketing.payment.service.PaymentTransaction;

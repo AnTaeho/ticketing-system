@@ -2,7 +2,6 @@ package com.example.ticketing.support;
 
 import com.example.ticketing.payment.client.PgClient;
 import com.example.ticketing.payment.client.PgResult;
-import com.example.ticketing.payment.client.PgScenario;
 import com.example.ticketing.payment.client.PgStatus;
 import java.util.List;
 import java.util.Map;
@@ -49,7 +48,7 @@ public class StubPgClient implements PgClient {
     }
 
     @Override
-    public PgResult approve(String orderId, int amount, Optional<PgScenario> scenario) {
+    public PgResult approve(String orderId, int amount, Optional<String> scenario) {
         approveCalls.incrementAndGet();
         approvals.add(new ApproveCall(orderId, amount, scenario));
         sleep(approveDelayMs);
@@ -144,6 +143,6 @@ public class StubPgClient implements PgClient {
         }
     }
 
-    public record ApproveCall(String orderId, int amount, Optional<PgScenario> scenario) {
+    public record ApproveCall(String orderId, int amount, Optional<String> scenario) {
     }
 }

@@ -10,9 +10,9 @@ import com.example.ticketing.hold.dto.CreateHoldCommand;
 import com.example.ticketing.hold.dto.CreateHoldResult;
 import com.example.ticketing.hold.service.SeatHoldService;
 import com.example.ticketing.payment.client.PgResult;
-import com.example.ticketing.payment.client.PgScenario;
 import com.example.ticketing.payment.client.PgStatus;
-import com.example.ticketing.payment.dto.StartResult.Started;
+import com.example.ticketing.payment.dto.PaymentStart.Started;
+import com.example.ticketing.payment.dto.PgScenario;
 import com.example.ticketing.payment.service.PaymentTransaction;
 import com.example.ticketing.support.Fixtures;
 import com.example.ticketing.support.IntegrationTest;
@@ -98,7 +98,25 @@ class PaymentApiControllerTest {
     }
 
     @Test
-    @DisplayName("200 CONFIRMED {paymentId, status, bookingId, bookingNumber}. 시나리오 헤더는 PgScenario로 넘어간다. "
+    @DisplayName("빈 멱등키는 400 IDEMPOTENCY_KEY_REQUIRED, 64자 초과는 400 INVALID_REQUEST, 결제 행 없음")
+    void idempotencyKeyValidation() throws Exception {
+        Hold h = newHold();
+
+        pay(h, "  ")
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("IDEMPOTENCY_KEY_REQUIRED"));
+        pay(h, "k".repeat(65))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_REQUEST"))
+                .andExpect(jsonPath("$.detail.header").value(KEY))
+                .andExpect(jsonPath("$.detail.maxLength").value(64));
+
+        assertThat(db.paymentCountOfHold(h.holdId)).isZero();
+        assertThat(stubPg.approveCalls()).isZero();
+    }
+
+    @Test
+    @DisplayName("200 CONFIRMED {paymentId, status, bookingId, bookingNumber}. 시나리오 헤더는 PgScenario 이름으로 넘어간다. "
             + "GET 결제·GET hold에도 반영")
     void confirmed() throws Exception {
         Hold h = newHold();
@@ -113,7 +131,7 @@ class PaymentApiControllerTest {
         System.out.println("[S4.3] POST /payments 200 응답: " + body);
         long paymentId = body.get("paymentId").asLong();
         assertThat(stubPg.approvals()).singleElement()
-                .satisfies(call -> assertThat(call.scenario()).isEqualTo(Optional.of(PgScenario.SUCCESS)));
+                .satisfies(call -> assertThat(call.scenario()).isEqualTo(Optional.of(PgScenario.SUCCESS.name())));
 
         JsonNode view = body(mockMvc.perform(get("/api/payments/{paymentId}", paymentId).header(USER, h.userId))
                 .andExpect(status().isOk())

@@ -7,8 +7,9 @@ import com.example.ticketing.common.metrics.Metrics.Tag;
 import com.example.ticketing.hold.service.SeatGateReflector;
 import com.example.ticketing.payment.client.PgClient;
 import com.example.ticketing.payment.client.PgResult;
+import com.example.ticketing.payment.dto.ClaimedPayment;
+import com.example.ticketing.payment.dto.PaymentResult;
 import com.example.ticketing.payment.dto.PaymentSettlement;
-import com.example.ticketing.payment.service.PaymentReconcileTransaction.ClaimedPayment;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Duration;
@@ -78,7 +79,7 @@ public class PaymentReconcileScheduler {
             case CANCELLED -> settle(paymentTransaction.cancelAndRelease(payment.paymentId()));
             case PROCESSING -> recheck(payment, processingRecheckAfter, null, waiting);
             case NOT_FOUND -> notFound(payment);
-            default -> recheck(payment, recheckAfter, describe("PG 조회", pg), queryFailed);
+            default -> recheck(payment, recheckAfter, pg.describe("PG 조회"), queryFailed);
         }
     }
 
@@ -92,19 +93,20 @@ public class PaymentReconcileScheduler {
         switch (cancel.status()) {
             case CANCELLED -> settle(paymentTransaction.cancelAndRelease(payment.paymentId()));
             case DECLINED -> settle(paymentTransaction.decline(payment.paymentId()));
-            case CONFLICT -> recheck(payment, recheckAfter, describe("PG 취소", cancel), waiting);
-            default -> recheck(payment, recheckAfter, describe("PG 취소", cancel), queryFailed);
+            case CONFLICT -> recheck(payment, recheckAfter, cancel.describe("PG 취소"), waiting);
+            default -> recheck(payment, recheckAfter, cancel.describe("PG 취소"), queryFailed);
         }
     }
 
     // 요청 스레드나 다른 서버가 먼저 결론을 냈으면 반영도 그쪽 몫이다
     private void settle(PaymentSettlement settlement) {
-        if (!settlement.applied()) {
-            log.debug("[booking reconcile] 결제 {}는 이미 {}", settlement.paymentId(), settlement.outcome());
+        PaymentResult result = settlement.result();
+        if (!settlement.changedSeats()) {
+            log.debug("[booking reconcile] 결제 {}는 이미 {}", result.paymentId(), result.outcome());
             return;
         }
-        reflector.reflect(settlement, settlement.seatIds());
-        switch (settlement.outcome()) {
+        reflector.reflect(settlement);
+        switch (result.outcome()) {
             case CONFIRMED -> confirmed.increment();
             case SEAT_LOST -> seatLost.increment();
             case DECLINED -> declined.increment();
@@ -112,7 +114,7 @@ public class PaymentReconcileScheduler {
             default -> {
             }
         }
-        log.info("[booking reconcile] 결제 {} → {}", settlement.paymentId(), settlement.outcome());
+        log.info("[booking reconcile] 결제 {} → {}", result.paymentId(), result.outcome());
     }
 
     private void recheck(ClaimedPayment payment, Duration delay, String lastError, Counter result) {
@@ -122,9 +124,5 @@ public class PaymentReconcileScheduler {
 
     private static Counter counter(MeterRegistry meterRegistry, String result) {
         return meterRegistry.counter(Metrics.PAYMENT_RECONCILE, Tag.RESULT, result);
-    }
-
-    private static String describe(String action, PgResult result) {
-        return action + " " + result.status() + (result.detail() != null ? ": " + result.detail() : "");
     }
 }
