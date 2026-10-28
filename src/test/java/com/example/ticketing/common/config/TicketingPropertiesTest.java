@@ -15,7 +15,7 @@ class TicketingPropertiesTest {
     private TicketingProperties props;
 
     @Test
-    @DisplayName("booking 설정이 Duration과 숫자로 묶이고 테스트에서는 시드가 꺼진다")
+    @DisplayName("ticketing 설정이 Duration과 숫자로 묶이고 테스트에서는 시드와 스케줄러가 꺼진다")
     void bound() {
         assertThat(props.seed().enabled()).isFalse();
         assertThat(props.redis().commandTimeout()).isEqualTo(Duration.ofMillis(300));
@@ -32,6 +32,20 @@ class TicketingPropertiesTest {
         assertThat(props.pg().baseUrl()).isEmpty();
         assertThat(props.pg().readTimeout()).isEqualTo(Duration.ofSeconds(3));
         assertThat(props.fakePg().declineRate()).isEqualTo(0.1);
-        assertThat(props.fakePg().slowDelayMs()).isEqualTo(5000);
+        assertThat(props.fakePg().slowDelay()).isEqualTo(Duration.ofSeconds(5));
+        assertThat(props.fakePg().delayMin()).isEqualTo(Duration.ofMillis(200));
+        assertThat(props.fakePg().staleMargin()).isEqualTo(Duration.ofSeconds(30));
+        assertThat(props.seatmap().localCache()).isEqualTo(Duration.ofSeconds(1));
+        assertThat(props.payment().gateKeyMargin()).isEqualTo(Duration.ofMinutes(1));
+        assertThat(props.payment().processingRecheckAfter()).isEqualTo(Duration.ofSeconds(5));
+        assertThat(props.payment().reconcileClaimLease()).isEqualTo(Duration.ofSeconds(30));
+        assertThat(props.outbox().maxBackoff()).isEqualTo(Duration.ofSeconds(60));
+        assertThat(props.ops().stalePaymentAfter()).isEqualTo(Duration.ofSeconds(30));
+        assertThat(props.hold().expiryEnabled()).isFalse();
+        assertThat(props.payment().reconcileEnabled()).isFalse();
+        assertThat(props.outbox().workerEnabled()).isFalse();
+        assertThat(props.queue().promoteEnabled()).isFalse();
+        assertThat(props.seatmap().snapshotEnabled()).isFalse();
+        assertThat(props.ops().orphanEnabled()).isFalse();
     }
 }

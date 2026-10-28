@@ -7,7 +7,6 @@ import com.example.ticketing.fakepg.domain.FakePgScenario;
 import com.example.ticketing.fakepg.domain.FakePgStatus;
 import com.example.ticketing.fakepg.dto.FakePgReply;
 import com.example.ticketing.fakepg.repository.FakePgOrderRepository;
-import java.time.Duration;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -23,7 +22,6 @@ public class FakePgService {
     // 상태는 앞으로만 가므로(없음 → PROCESSING/CANCELLED, APPROVED → CANCELLED) 세 번이면 결론이 난다
     private static final int MAX_CANCEL_ATTEMPTS = 3;
     private static final String PG_TX_ID_PREFIX = "fpg_";
-    private static final Duration STALE_MARGIN = Duration.ofSeconds(30);
 
     private final FakePgOrderRepository repository;
     private final FakePgDecider decider;
@@ -37,7 +35,7 @@ public class FakePgService {
         this.repository = repository;
         this.decider = decider;
         this.sleeper = sleeper;
-        this.staleMicros = Duration.ofMillis(properties.fakePg().slowDelayMs()).plus(STALE_MARGIN).toNanos() / 1_000;
+        this.staleMicros = properties.fakePg().slowDelay().plus(properties.fakePg().staleMargin()).toNanos() / 1_000;
         this.write = new TransactionTemplate(transactionManager);
         this.write.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
         this.write.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);

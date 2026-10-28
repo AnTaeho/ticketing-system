@@ -241,7 +241,7 @@ class PaymentServiceTest {
         f.seatIds.forEach(seatId -> assertThat(db.seat(seatId)).containsEntry("status", "HELD")
                 .containsEntry("hold_id", f.holdId).containsEntry("held_until", payDeadline));
         long payDeadlineMs = Duration.between(db.dbNow(), payDeadline).toMillis();
-        long expectedTtl = payDeadlineMs + Duration.ofMinutes(1).toMillis();
+        long expectedTtl = payDeadlineMs + properties.payment().gateKeyMargin().toMillis();
         assertThat(pttl(RedisKeys.userHold(f.pid, f.userId)))
                 .isBetween(expectedTtl - TOLERANCE_MS, expectedTtl + TOLERANCE_MS);
         for (long seatId : f.seatIds) {

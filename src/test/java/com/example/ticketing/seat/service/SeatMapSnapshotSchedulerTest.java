@@ -3,6 +3,8 @@ package com.example.ticketing.seat.service;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.example.ticketing.common.config.TicketingProperties;
+import com.example.ticketing.common.metrics.Metrics;
+import com.example.ticketing.common.metrics.Metrics.Tag;
 import com.example.ticketing.common.redis.TestTicketingRedis;
 import com.example.ticketing.common.redis.TicketingRedis;
 import com.example.ticketing.seat.repository.SeatMapRedisStore;
@@ -175,7 +177,7 @@ class SeatMapSnapshotSchedulerTest {
     }
 
     private double rebuilds() {
-        return meterRegistry.counter(SeatMapBuilder.REBUILD_METRIC, "source", "scheduler").count();
+        return meterRegistry.counter(Metrics.SEATMAP_REBUILD, Tag.SOURCE, "scheduler").count();
     }
 
     private long openPerformance() {

@@ -2,6 +2,7 @@ package com.example.ticketing.seat.service;
 
 import com.example.ticketing.common.config.TicketingProperties;
 import com.example.ticketing.common.log.ThrottledWarn;
+import com.example.ticketing.common.metrics.Metrics.RebuildSource;
 import com.example.ticketing.common.redis.SchedulerLease;
 import com.example.ticketing.seat.repository.SeatMapRedisStore;
 import io.micrometer.core.instrument.Counter;
@@ -18,7 +19,7 @@ import org.springframework.stereotype.Component;
 // 서버 수와 무관하게 회차당 초당 한 번만 DB를 읽는다. 리더가 멈추면 리스 TTL 뒤 다른 서버가 잡는다
 @Slf4j
 @Component
-@ConditionalOnProperty(name = "booking.seatmap.snapshot-enabled", havingValue = "true", matchIfMissing = true)
+@ConditionalOnProperty(name = "ticketing.seatmap.snapshot-enabled", havingValue = "true", matchIfMissing = true)
 public class SeatMapSnapshotScheduler {
 
     private final SeatCatalog seatCatalog;
@@ -45,10 +46,10 @@ public class SeatMapSnapshotScheduler {
         this.instanceId = instanceId;
         this.leaseTtl = properties.seatmap().leaseTtl();
         this.snapshotTtl = properties.seatmap().snapshotTtl();
-        this.rebuilds = SeatMapBuilder.rebuildCounter(meterRegistry, "scheduler");
+        this.rebuilds = SeatMapBuilder.rebuildCounter(meterRegistry, RebuildSource.SCHEDULER);
     }
 
-    @Scheduled(fixedDelayString = "${booking.seatmap.snapshot-interval-ms}")
+    @Scheduled(fixedDelayString = "${ticketing.seatmap.snapshot-interval-ms}")
     public void snapshot() {
         for (long performanceId : seatCatalog.openPerformanceIds()) {
             try {

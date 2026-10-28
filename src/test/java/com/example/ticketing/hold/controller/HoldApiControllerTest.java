@@ -8,6 +8,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.example.ticketing.common.metrics.Metrics;
 import com.example.ticketing.support.Fixtures;
 import com.example.ticketing.support.IntegrationTest;
 import io.micrometer.core.instrument.Counter;
@@ -197,7 +198,7 @@ class HoldApiControllerTest {
     }
 
     @Test
-    @DisplayName("다른 회차 좌석·없는 좌석·5석은 400 INVALID_SEAT_SELECTION이고 booking.hold.db가 늘지 않는다")
+    @DisplayName("다른 회차 좌석·없는 좌석·5석은 400 INVALID_SEAT_SELECTION이고 ticketing.hold.db가 늘지 않는다")
     void invalidSelectionDoesNotReachDb() throws Exception {
         long pid = fixtures.newPerformance(1, 1, 6);
         long otherPid = fixtures.newPerformance(1, 1, 2);
@@ -271,7 +272,7 @@ class HoldApiControllerTest {
     }
 
     private double dbCounterTotal() {
-        return meterRegistry.find("booking.hold.db").counters().stream().mapToDouble(Counter::count).sum();
+        return meterRegistry.find(Metrics.HOLD_DB).counters().stream().mapToDouble(Counter::count).sum();
     }
 
     private List<Long> seatIds(long pid) {

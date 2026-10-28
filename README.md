@@ -157,9 +157,9 @@ cp src/main/resources/application-local.yml.example src/main/resources/applicati
 
 ```bash
 # 앱을 게이트 옵션과 함께 띄운다 (OFF는 enabled=false)
-./gradlew bootRun --args='--booking.gate.enabled=true --booking.queue.capacity=5000 \
-  --booking.fake-pg.delay-min-ms=50 --booking.fake-pg.delay-max-ms=150 \
-  --booking.fake-pg.decline-rate=0 --booking.fake-pg.slow-rate=0 --spring.jpa.show-sql=false'
+./gradlew bootRun --args='--ticketing.gate.enabled=true --ticketing.queue.capacity=5000 \
+  --ticketing.fake-pg.delay-min=50ms --ticketing.fake-pg.delay-max=150ms \
+  --ticketing.fake-pg.decline-rate=0 --ticketing.fake-pg.slow-rate=0 --spring.jpa.show-sql=false'
 
 MYSQL_PWD=<비밀번호> load-test/run-booking.sh on 2000
 ```

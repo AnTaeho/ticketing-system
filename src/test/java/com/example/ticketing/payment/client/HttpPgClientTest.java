@@ -204,7 +204,7 @@ class HttpPgClientTest {
 
     // 서버 쪽 지연(slow-delay-ms)이 끝나 행이 확정될 때까지 기다려 다음 테스트에 섞이지 않게 한다
     private PgResult awaitSettled(Supplier<PgResult> query) {
-        Duration limit = Duration.ofMillis(properties.fakePg().slowDelayMs()).plusSeconds(5);
+        Duration limit = properties.fakePg().slowDelay().plusSeconds(5);
         long deadline = System.nanoTime() + limit.toNanos();
         PgResult last = query.get();
         while (last.is(PgStatus.PROCESSING) && System.nanoTime() < deadline) {

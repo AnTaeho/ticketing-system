@@ -4,6 +4,11 @@ import com.example.ticketing.common.config.TicketingProperties;
 import com.example.ticketing.common.error.ApiException;
 import com.example.ticketing.common.error.ErrorCode;
 import com.example.ticketing.common.log.ThrottledWarn;
+import com.example.ticketing.common.metrics.Metrics;
+import com.example.ticketing.common.metrics.Metrics.FallbackResult;
+import com.example.ticketing.common.metrics.Metrics.HoldResult;
+import com.example.ticketing.common.metrics.Metrics.ReflectOp;
+import com.example.ticketing.common.metrics.Metrics.Tag;
 import com.example.ticketing.common.time.DbClock;
 import com.example.ticketing.hold.domain.GateResult;
 import com.example.ticketing.hold.domain.SeatHold;
@@ -38,11 +43,6 @@ import org.springframework.stereotype.Service;
 @Slf4j
 @Service
 public class SeatHoldService {
-
-    private static final String DB_COUNTER = "booking.hold.db";
-    private static final String GATE_COUNTER = "booking.hold.gate";
-    private static final String FALLBACK_COUNTER = "booking.hold.fallback";
-    private static final String REFLECT_FAILURE = "booking.redis.reflect.failure";
 
     private final SeatCatalog seatCatalog;
     private final SeatHoldTransaction seatHoldTransaction;
@@ -86,19 +86,19 @@ public class SeatHoldService {
         this.gateEnabled = properties.gate().enabled();
         this.queueRequired = properties.queue().required();
         this.holdTtl = properties.hold().ttl();
-        this.dbOk = meterRegistry.counter(DB_COUNTER, "result", "ok");
-        this.dbStateChanged = meterRegistry.counter(DB_COUNTER, "result", "state_changed");
-        this.dbUserHasHold = meterRegistry.counter(DB_COUNTER, "result", "user_has_hold");
-        this.gateOk = meterRegistry.counter(GATE_COUNTER, "result", "ok");
-        this.gateSeatTaken = meterRegistry.counter(GATE_COUNTER, "result", "seat_taken");
-        this.gateUserHasHold = meterRegistry.counter(GATE_COUNTER, "result", "user_has_hold");
-        this.gateCooldown = meterRegistry.counter(GATE_COUNTER, "result", "cooldown");
-        this.gateSkipped = meterRegistry.counter(GATE_COUNTER, "result", "skipped");
-        this.gateError = meterRegistry.counter(GATE_COUNTER, "result", "error");
-        this.fallbackAcquired = meterRegistry.counter(FALLBACK_COUNTER, "result", "acquired");
-        this.fallbackRejected = meterRegistry.counter(FALLBACK_COUNTER, "result", "rejected");
+        this.dbOk = meterRegistry.counter(Metrics.HOLD_DB, Tag.RESULT, HoldResult.OK);
+        this.dbStateChanged = meterRegistry.counter(Metrics.HOLD_DB, Tag.RESULT, HoldResult.STATE_CHANGED);
+        this.dbUserHasHold = meterRegistry.counter(Metrics.HOLD_DB, Tag.RESULT, HoldResult.USER_HAS_HOLD);
+        this.gateOk = meterRegistry.counter(Metrics.HOLD_GATE, Tag.RESULT, HoldResult.OK);
+        this.gateSeatTaken = meterRegistry.counter(Metrics.HOLD_GATE, Tag.RESULT, HoldResult.SEAT_TAKEN);
+        this.gateUserHasHold = meterRegistry.counter(Metrics.HOLD_GATE, Tag.RESULT, HoldResult.USER_HAS_HOLD);
+        this.gateCooldown = meterRegistry.counter(Metrics.HOLD_GATE, Tag.RESULT, HoldResult.COOLDOWN);
+        this.gateSkipped = meterRegistry.counter(Metrics.HOLD_GATE, Tag.RESULT, HoldResult.SKIPPED);
+        this.gateError = meterRegistry.counter(Metrics.HOLD_GATE, Tag.RESULT, HoldResult.ERROR);
+        this.fallbackAcquired = meterRegistry.counter(Metrics.HOLD_FALLBACK, Tag.RESULT, FallbackResult.ACQUIRED);
+        this.fallbackRejected = meterRegistry.counter(Metrics.HOLD_FALLBACK, Tag.RESULT, FallbackResult.REJECTED);
         this.fallbackPermits = new Semaphore(properties.gate().fallbackMaxConcurrency());
-        this.queueConsumeFailure = meterRegistry.counter(REFLECT_FAILURE, "op", "queue_consume");
+        this.queueConsumeFailure = meterRegistry.counter(Metrics.REDIS_REFLECT_FAILURE, Tag.OP, ReflectOp.QUEUE_CONSUME);
     }
 
     // 토큰은 커밋까지 성공했을 때만 소모한다. 게이트·DB에서 진 사용자는 같은 토큰으로 다른 좌석을 고른다
@@ -154,7 +154,7 @@ public class SeatHoldService {
         return seatCatalog.validateSeats(performanceId, seatIds);
     }
 
-    // 게이트 스위치와 별개다. 처리열을 끄는 것은 booking.queue.required뿐이다. false면 Redis 장애로 확인을 건너뛴 것이다
+    // 게이트 스위치와 별개다. 처리열을 끄는 것은 ticketing.queue.required뿐이다. false면 Redis 장애로 확인을 건너뛴 것이다
     private boolean ensureAdmitted(long userId, long performanceId, String queueToken) {
         if (!queueRequired) {
             return true;

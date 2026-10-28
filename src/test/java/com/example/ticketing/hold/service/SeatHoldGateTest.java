@@ -6,6 +6,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.example.ticketing.common.config.TicketingProperties;
 import com.example.ticketing.common.error.ApiException;
 import com.example.ticketing.common.error.ErrorCode;
+import com.example.ticketing.common.metrics.Metrics;
+import com.example.ticketing.common.metrics.Metrics.Tag;
 import com.example.ticketing.common.redis.RedisKeys;
 import com.example.ticketing.common.redis.TicketingRedis;
 import com.example.ticketing.hold.dto.HoldCreated;
@@ -198,10 +200,10 @@ class SeatHoldGateTest {
     }
 
     private double dbCounter(String result) {
-        return meterRegistry.counter("booking.hold.db", "result", result).count();
+        return meterRegistry.counter(Metrics.HOLD_DB, Tag.RESULT, result).count();
     }
 
     private double gateCounter(String result) {
-        return meterRegistry.counter("booking.hold.gate", "result", result).count();
+        return meterRegistry.counter(Metrics.HOLD_GATE, Tag.RESULT, result).count();
     }
 }

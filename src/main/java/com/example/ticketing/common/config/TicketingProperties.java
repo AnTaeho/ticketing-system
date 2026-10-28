@@ -3,7 +3,8 @@ package com.example.ticketing.common.config;
 import java.time.Duration;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
-@ConfigurationProperties("booking")
+// *Enabled는 @ConditionalOnProperty가 같은 키를 읽는다. 키를 한곳에서 보이려고 접근자를 안 불러도 여기에 둔다
+@ConfigurationProperties("ticketing")
 public record TicketingProperties(
         Seed seed,
         Redis redis,
@@ -27,7 +28,8 @@ public record TicketingProperties(
     public record Hold(
             Duration ttl,
             int maxSeats,
-            long expiryScanMs,
+            boolean expiryEnabled,
+            long expiryScanMs, // @Scheduled 전용
             int expiryBatchSize,
             Duration reholdCooldown
     ) {
@@ -35,11 +37,15 @@ public record TicketingProperties(
 
     public record Payment(
             Duration payDeadline,
+            Duration gateKeyMargin,
             Duration requestedRecheckAfter,
+            Duration processingRecheckAfter,
             Duration unknownRecheckAfter,
             Duration notFoundCancelAfter,
-            long reconcileScanMs,
-            int reconcileBatchSize
+            boolean reconcileEnabled,
+            long reconcileScanMs, // @Scheduled 전용
+            int reconcileBatchSize,
+            Duration reconcileClaimLease
     ) {
     }
 
@@ -50,39 +56,44 @@ public record TicketingProperties(
             int capacity,
             Duration processingTokenTtl,
             Duration waitingTokenTtl,
+            boolean promoteEnabled,
             long promoteIntervalMs,
             boolean required
     ) {
     }
 
     public record Seatmap(
-            long snapshotIntervalMs,
+            boolean snapshotEnabled,
+            long snapshotIntervalMs, // @Scheduled 전용
             Duration snapshotTtl,
-            long localCacheMs,
+            Duration localCache,
             Duration leaseTtl
     ) {
     }
 
     public record Outbox(
-            long pollIntervalMs,
+            boolean workerEnabled,
+            long pollIntervalMs, // @Scheduled 전용
             int batchSize,
             Duration lockDuration,
-            int maxAttempts
+            int maxAttempts,
+            Duration maxBackoff
     ) {
     }
 
-    public record Ops(long orphanScanMs) {
+    public record Ops(boolean orphanEnabled, long orphanScanMs, Duration stalePaymentAfter) {
     }
 
     public record Pg(String baseUrl, Duration connectTimeout, Duration readTimeout) {
     }
 
     public record FakePg(
-            long delayMinMs,
-            long delayMaxMs,
+            Duration delayMin,
+            Duration delayMax,
             double declineRate,
             double slowRate,
-            long slowDelayMs
+            Duration slowDelay,
+            Duration staleMargin
     ) {
     }
 }

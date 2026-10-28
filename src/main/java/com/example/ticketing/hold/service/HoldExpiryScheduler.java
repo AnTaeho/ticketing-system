@@ -1,6 +1,7 @@
 package com.example.ticketing.hold.service;
 
 import com.example.ticketing.common.config.TicketingProperties;
+import com.example.ticketing.common.metrics.Metrics;
 import com.example.ticketing.hold.repository.SeatGateRedisStore;
 import com.example.ticketing.hold.service.HoldExpiryTransaction.ExpiredHold;
 import io.micrometer.core.instrument.Counter;
@@ -15,7 +16,7 @@ import org.springframework.stereotype.Component;
 // 여러 서버가 동시에 돌아도 SKIP LOCKED로 나눠 집으므로 리스를 쓰지 않는다
 @Slf4j
 @Component
-@ConditionalOnProperty(name = "booking.hold.expiry-enabled", havingValue = "true", matchIfMissing = true)
+@ConditionalOnProperty(name = "ticketing.hold.expiry-enabled", havingValue = "true", matchIfMissing = true)
 public class HoldExpiryScheduler {
 
     static final int MAX_ROUNDS = 10;
@@ -34,10 +35,10 @@ public class HoldExpiryScheduler {
         this.gateEnabled = properties.gate().enabled();
         this.batchSize = properties.hold().expiryBatchSize();
         this.reholdCooldown = properties.hold().reholdCooldown();
-        this.expiredCounter = meterRegistry.counter("booking.hold.expired");
+        this.expiredCounter = meterRegistry.counter(Metrics.HOLD_EXPIRED);
     }
 
-    @Scheduled(fixedDelayString = "${booking.hold.expiry-scan-ms}")
+    @Scheduled(fixedDelayString = "${ticketing.hold.expiry-scan-ms}")
     public void scan() {
         int total = 0;
         for (int round = 0; round < MAX_ROUNDS; round++) {

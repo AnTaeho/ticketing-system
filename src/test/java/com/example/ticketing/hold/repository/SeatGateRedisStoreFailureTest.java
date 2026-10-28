@@ -5,6 +5,8 @@ import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.example.ticketing.common.config.TicketingProperties;
+import com.example.ticketing.common.metrics.Metrics;
+import com.example.ticketing.common.metrics.Metrics.Tag;
 import com.example.ticketing.common.redis.TestTicketingRedis;
 import com.example.ticketing.common.redis.TicketingRedis;
 import com.example.ticketing.support.IntegrationTest;
@@ -76,7 +78,7 @@ class SeatGateRedisStoreFailureTest {
     }
 
     private double failures(String op) {
-        return meterRegistry.counter("booking.redis.reflect.failure", "op", op).count();
+        return meterRegistry.counter(Metrics.REDIS_REFLECT_FAILURE, Tag.OP, op).count();
     }
 
     private static int closedPort() throws IOException {

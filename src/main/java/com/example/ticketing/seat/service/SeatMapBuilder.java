@@ -1,5 +1,7 @@
 package com.example.ticketing.seat.service;
 
+import com.example.ticketing.common.metrics.Metrics;
+import com.example.ticketing.common.metrics.Metrics.Tag;
 import com.example.ticketing.seat.domain.SeatMapSnapshot;
 import com.example.ticketing.seat.domain.SeatMapSnapshot.Row;
 import com.example.ticketing.seat.domain.SeatMapSnapshot.SeatCell;
@@ -25,8 +27,6 @@ public class SeatMapBuilder {
               FROM seat
              WHERE performance_id = ?
              ORDER BY section, row_no, seat_no""";
-
-    static final String REBUILD_METRIC = "booking.seatmap.rebuild";
 
     private final JdbcTemplate jdbcTemplate;
     private final JsonMapper jsonMapper;
@@ -62,8 +62,8 @@ public class SeatMapBuilder {
         return Optional.of(jsonMapper.writeValueAsString(snapshot));
     }
 
-    // source: scheduler | miss | fallback
+    // source는 Metrics.RebuildSource 값이다
     static Counter rebuildCounter(MeterRegistry meterRegistry, String source) {
-        return meterRegistry.counter(REBUILD_METRIC, "source", source);
+        return meterRegistry.counter(Metrics.SEATMAP_REBUILD, Tag.SOURCE, source);
     }
 }

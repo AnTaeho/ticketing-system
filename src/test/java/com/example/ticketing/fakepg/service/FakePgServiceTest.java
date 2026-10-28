@@ -115,7 +115,7 @@ class FakePgServiceTest {
         FakePgReply approved = slow.get(10, TimeUnit.SECONDS);
         assertThat(approved.status()).isEqualTo("APPROVED");
         assertThat(approved.pgTxId()).isNotBlank();
-        assertThat(sleeper.calls()).containsExactly(properties.fakePg().slowDelayMs());
+        assertThat(sleeper.calls()).containsExactly(properties.fakePg().slowDelay().toMillis());
 
         FakePgReply cancelled = fakePgService.cancel(orderId);
         assertThat(cancelled).isEqualTo(new FakePgReply(orderId, "CANCELLED", approved.pgTxId(), null));
@@ -170,7 +170,7 @@ class FakePgServiceTest {
         FakePgReply reply = fakePgService.approve(orderId, 1000, FakePgScenario.SLOW_DECLINE);
 
         assertThat(reply).isEqualTo(new FakePgReply(orderId, "DECLINED", null, null));
-        assertThat(sleeper.calls()).containsExactly(properties.fakePg().slowDelayMs());
+        assertThat(sleeper.calls()).containsExactly(properties.fakePg().slowDelay().toMillis());
         assertThat(row(orderId).get(0)).isEqualTo("DECLINED");
     }
 
@@ -186,8 +186,8 @@ class FakePgServiceTest {
             assertThat(reply.status()).isIn("APPROVED", "DECLINED");
             assertThat(row(orderId).get(0)).isEqualTo(reply.status());
         }
-        assertThat(sleeper.calls()).hasSize(20).allSatisfy(ms -> assertThat(ms == config.slowDelayMs()
-                || (ms >= config.delayMinMs() && ms <= config.delayMaxMs())).isTrue());
+        assertThat(sleeper.calls()).hasSize(20).allSatisfy(ms -> assertThat(ms == config.slowDelay().toMillis()
+                || (ms >= config.delayMin().toMillis() && ms <= config.delayMax().toMillis())).isTrue());
     }
 
     private static String newOrderId() {

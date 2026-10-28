@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.within;
 
 import com.example.ticketing.common.config.TicketingProperties;
+import java.time.Duration;
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.List;
@@ -14,7 +15,8 @@ import org.junit.jupiter.api.Test;
 
 class FakePgDeciderTest {
 
-    private static final TicketingProperties.FakePg CONFIG = new TicketingProperties.FakePg(200, 1200, 0.1, 0.05, 5000);
+    private static final TicketingProperties.FakePg CONFIG = new TicketingProperties.FakePg(
+            Duration.ofMillis(200), Duration.ofMillis(1200), 0.1, 0.05, Duration.ofSeconds(5), Duration.ofSeconds(30));
 
     @Test
     @DisplayName("시나리오를 주면 SUCCESS·DECLINE은 지연 없이, SLOW_*는 slow-delay-ms 뒤에 결론낸다")
@@ -57,7 +59,7 @@ class FakePgDeciderTest {
             if (!plan.approve()) {
                 declined++;
             }
-            if (plan.delayMs() == CONFIG.slowDelayMs()) {
+            if (plan.delayMs() == CONFIG.slowDelay().toMillis()) {
                 slow++;
             } else {
                 minDelay = Math.min(minDelay, plan.delayMs());

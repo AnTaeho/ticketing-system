@@ -19,8 +19,9 @@ import org.springframework.transaction.annotation.Transactional;
 @Component
 public class OutboxClaimTransaction {
 
-    static final long MAX_BACKOFF_SECONDS = 60;
     private static final int MAX_LAST_ERROR = 500;
+    // 1L << 63은 음수라 지수를 여기서 멈춘다
+    private static final int MAX_BACKOFF_EXPONENT = Long.SIZE - 2;
 
     // 처리 중 멈춘 작업(locked_until 지남)도 다시 집는다
     private static final String CLAIM_SQL = """
@@ -49,6 +50,7 @@ public class OutboxClaimTransaction {
     private final DbClock dbClock;
     private final Duration lockDuration;
     private final int maxAttempts;
+    private final long maxBackoffSeconds;
 
     public OutboxClaimTransaction(NamedParameterJdbcTemplate jdbcTemplate, DbClock dbClock,
                                   TicketingProperties properties) {
@@ -56,6 +58,7 @@ public class OutboxClaimTransaction {
         this.dbClock = dbClock;
         this.lockDuration = properties.outbox().lockDuration();
         this.maxAttempts = properties.outbox().maxAttempts();
+        this.maxBackoffSeconds = properties.outbox().maxBackoff().toSeconds();
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
@@ -81,7 +84,7 @@ public class OutboxClaimTransaction {
         return jdbcTemplate.update(DONE_SQL, Map.of("id", task.id(), "lockedUntil", task.lockedUntil())) == 1;
     }
 
-    // 다시 해 볼 횟수가 남았으면 PENDING(2^attempt초 뒤, 최대 60초), 다 썼으면 FAILED. 다른 워커가 다시 집었으면 empty
+    // 다시 해 볼 횟수가 남았으면 PENDING(2^attempt초 뒤, 최대 max-backoff), 다 썼으면 FAILED. 다른 워커가 다시 집었으면 empty
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public Optional<OutboxTaskStatus> markFailedAttempt(ClaimedOutboxTask task, String error) {
         int attempt = task.attempt() + 1;
@@ -91,15 +94,15 @@ public class OutboxClaimTransaction {
         params.put("lockedUntil", task.lockedUntil());
         params.put("status", status.name());
         params.put("attempt", attempt);
-        params.put("backoffSeconds", backoffSeconds(attempt));
+        params.put("backoffSeconds", backoffSeconds(attempt, maxBackoffSeconds));
         params.put("lastError", abbreviate(error));
         return jdbcTemplate.update(FAILED_ATTEMPT_SQL, params) == 1
                 ? Optional.of(status)
                 : Optional.empty();
     }
 
-    static long backoffSeconds(int attempt) {
-        return attempt >= 6 ? MAX_BACKOFF_SECONDS : Math.min(1L << attempt, MAX_BACKOFF_SECONDS);
+    static long backoffSeconds(int attempt, long maxSeconds) {
+        return Math.min(1L << Math.min(attempt, MAX_BACKOFF_EXPONENT), maxSeconds);
     }
 
     private static String abbreviate(String error) {

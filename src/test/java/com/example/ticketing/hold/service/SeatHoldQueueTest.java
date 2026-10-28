@@ -12,6 +12,8 @@ import com.example.ticketing.common.config.TicketingProperties.Gate;
 import com.example.ticketing.common.config.TicketingProperties.Queue;
 import com.example.ticketing.common.error.ApiException;
 import com.example.ticketing.common.error.ErrorCode;
+import com.example.ticketing.common.metrics.Metrics;
+import com.example.ticketing.common.metrics.Metrics.Tag;
 import com.example.ticketing.common.redis.RedisKeys;
 import com.example.ticketing.common.redis.TestTicketingRedis;
 import com.example.ticketing.common.redis.TicketingRedis;
@@ -93,8 +95,8 @@ class SeatHoldQueueTest {
         String tokenB = fixtures.admit(pid, userB);
         String expiredA = fixtures.admit(pid, userA);
         redis().opsForZSet().add(RedisKeys.queueProcessing(pid), expiredA, System.currentTimeMillis() - 1_000);
-        double gateBefore = counterSum("booking.hold.gate");
-        double dbBefore = counterSum("booking.hold.db");
+        double gateBefore = counterSum(Metrics.HOLD_GATE);
+        double dbBefore = counterSum(Metrics.HOLD_DB);
 
         for (String token : new String[]{null, "", "  ", tokenB, userA + "." + UUID.randomUUID(), expiredA}) {
             assertThatThrownBy(() -> seatHoldService.hold(userA, pid, target, token))
@@ -103,8 +105,8 @@ class SeatHoldQueueTest {
                     .extracting("code").isEqualTo(ErrorCode.NOT_ADMITTED);
         }
 
-        assertThat(counterSum("booking.hold.gate")).isEqualTo(gateBefore);
-        assertThat(counterSum("booking.hold.db")).isEqualTo(dbBefore);
+        assertThat(counterSum(Metrics.HOLD_GATE)).isEqualTo(gateBefore);
+        assertThat(counterSum(Metrics.HOLD_DB)).isEqualTo(dbBefore);
         assertThat(holdCount(pid)).isZero();
         assertThat(redisKeyCleaner.gateKeys(pid)).isEmpty();
         // 남의 토큰을 써 봐도 그 사람의 자리는 그대로다
@@ -165,12 +167,12 @@ class SeatHoldQueueTest {
         assertThat(redis().hasKey(RedisKeys.queueUser(pid, userId))).isFalse();
 
         seatHoldService.release(userId, hold.holdId());
-        double gateBefore = counterSum("booking.hold.gate");
-        double dbBefore = counterSum("booking.hold.db");
+        double gateBefore = counterSum(Metrics.HOLD_GATE);
+        double dbBefore = counterSum(Metrics.HOLD_DB);
         assertThatThrownBy(() -> seatHoldService.hold(userId, pid, target, token))
                 .extracting("code").isEqualTo(ErrorCode.NOT_ADMITTED);
-        assertThat(counterSum("booking.hold.gate")).isEqualTo(gateBefore);
-        assertThat(counterSum("booking.hold.db")).isEqualTo(dbBefore);
+        assertThat(counterSum(Metrics.HOLD_GATE)).isEqualTo(gateBefore);
+        assertThat(counterSum(Metrics.HOLD_DB)).isEqualTo(dbBefore);
         assertThat(holdCount(pid)).isEqualTo(1);
     }
 
@@ -209,19 +211,19 @@ class SeatHoldQueueTest {
             assertThatThrownBy(() -> service.hold(userId, pid, seatIds(pid).subList(0, 1),
                     (userId + 1) + "." + UUID.randomUUID()))
                     .extracting("code").isEqualTo(ErrorCode.NOT_ADMITTED);
-            double gateErrorBefore = meterRegistry.counter("booking.hold.gate", "result", "error").count();
-            double dbOkBefore = meterRegistry.counter("booking.hold.db", "result", "ok").count();
-            double acquiredBefore = meterRegistry.counter("booking.hold.fallback", "result", "acquired").count();
+            double gateErrorBefore = meterRegistry.counter(Metrics.HOLD_GATE, Tag.RESULT, "error").count();
+            double dbOkBefore = meterRegistry.counter(Metrics.HOLD_DB, Tag.RESULT, "ok").count();
+            double acquiredBefore = meterRegistry.counter(Metrics.HOLD_FALLBACK, Tag.RESULT, "acquired").count();
             double consumeFailureBefore = consumeFailures();
 
             HoldCreated hold = service.hold(userId, pid, seatIds(pid).subList(0, 1), userId + "." + UUID.randomUUID());
 
             assertThat(hold.holdId()).isPositive();
             verifyNoInteractions(spyGate);
-            assertThat(meterRegistry.counter("booking.hold.gate", "result", "error").count() - gateErrorBefore)
+            assertThat(meterRegistry.counter(Metrics.HOLD_GATE, Tag.RESULT, "error").count() - gateErrorBefore)
                     .isEqualTo(1);
-            assertThat(meterRegistry.counter("booking.hold.db", "result", "ok").count() - dbOkBefore).isEqualTo(1);
-            assertThat(meterRegistry.counter("booking.hold.fallback", "result", "acquired").count() - acquiredBefore)
+            assertThat(meterRegistry.counter(Metrics.HOLD_DB, Tag.RESULT, "ok").count() - dbOkBefore).isEqualTo(1);
+            assertThat(meterRegistry.counter(Metrics.HOLD_FALLBACK, Tag.RESULT, "acquired").count() - acquiredBefore)
                     .isEqualTo(1);
             assertThat(consumeFailures() - consumeFailureBefore).isEqualTo(1);
             assertThat(holdCount(pid)).isEqualTo(1);
@@ -231,7 +233,7 @@ class SeatHoldQueueTest {
     }
 
     @Test
-    @DisplayName("booking.queue.required=false면 토큰 없이 선점하고 처리열을 확인·소모하지 않는다")
+    @DisplayName("ticketing.queue.required=false면 토큰 없이 선점하고 처리열을 확인·소모하지 않는다")
     void queueNotRequired() {
         long pid = newPerformance();
         long userId = fixtures.newUser();
@@ -273,7 +275,8 @@ class SeatHoldQueueTest {
         Queue q = p.queue();
         return new TicketingProperties(p.seed(), p.redis(), p.hold(), p.payment(),
                 new Gate(gateEnabled, p.gate().fallbackMaxConcurrency()),
-                new Queue(q.capacity(), q.processingTokenTtl(), q.waitingTokenTtl(), q.promoteIntervalMs(),
+                new Queue(q.capacity(), q.processingTokenTtl(), q.waitingTokenTtl(), q.promoteEnabled(),
+                        q.promoteIntervalMs(),
                         queueRequired),
                 p.seatmap(), p.outbox(), p.ops(), p.pg(), p.fakePg());
     }
@@ -297,7 +300,7 @@ class SeatHoldQueueTest {
     }
 
     private double consumeFailures() {
-        return meterRegistry.counter("booking.redis.reflect.failure", "op", "queue_consume").count();
+        return meterRegistry.counter(Metrics.REDIS_REFLECT_FAILURE, Tag.OP, "queue_consume").count();
     }
 
     private StringRedisTemplate redis() {

@@ -30,7 +30,7 @@ class LocalSeedRunnerTest {
     private JdbcTemplate jdbcTemplate;
 
     @Test
-    @DisplayName("booking.seed.enabled=false면 시드 러너 빈이 없다")
+    @DisplayName("ticketing.seed.enabled=false면 시드 러너 빈이 없다")
     void noBeanWhenDisabled() {
         assertThat(context.getBeanNamesForType(LocalSeedRunner.class)).isEmpty();
     }

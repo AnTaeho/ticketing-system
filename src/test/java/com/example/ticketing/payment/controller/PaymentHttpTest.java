@@ -19,7 +19,6 @@ import com.example.ticketing.support.HttpIntegrationTest;
 import com.example.ticketing.support.PaymentDb;
 import com.example.ticketing.support.RedisKeyCleaner;
 import io.micrometer.core.instrument.MeterRegistry;
-import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -208,8 +207,7 @@ class PaymentHttpTest {
 
     // 서버 쪽 SLOW_SUCCESS 지연(5초)이 끝나 Fake PG 행이 결론 날 때까지 기다린다
     private String awaitFakePgSettled(String orderId) throws InterruptedException {
-        long deadline = System.nanoTime()
-                + Duration.ofMillis(properties.fakePg().slowDelayMs()).plusSeconds(5).toNanos();
+        long deadline = System.nanoTime() + properties.fakePg().slowDelay().plusSeconds(5).toNanos();
         String status = fakePgStatus(orderId);
         while ("PROCESSING".equals(status) && System.nanoTime() < deadline) {
             Thread.sleep(100);

@@ -5,6 +5,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.example.ticketing.common.config.TicketingProperties;
 import com.example.ticketing.common.error.ApiException;
 import com.example.ticketing.common.error.ErrorCode;
+import com.example.ticketing.common.metrics.Metrics;
+import com.example.ticketing.common.metrics.Metrics.Tag;
 import com.example.ticketing.hold.dto.HoldCreated;
 import com.example.ticketing.support.Fixtures;
 import com.example.ticketing.support.IntegrationTest;
@@ -106,7 +108,7 @@ class SeatHoldConcurrencyTest {
         long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt);
         executor.shutdownNow();
         double dbDelta = dbTotal() - dbBefore;
-        System.out.printf("[S3.2] 500명 동시 선점(게이트 %s): %dms, 성공 %d, 거절 %s, booking.hold.db 증가 %.0f, "
+        System.out.printf("[S3.2] 500명 동시 선점(게이트 %s): %dms, 성공 %d, 거절 %s, ticketing.hold.db 증가 %.0f, "
                         + "예기치 못한 예외 %d%n",
                 gateLabel(), elapsedMs, success.get(), rejected, dbDelta, unexpected.size());
 
@@ -311,7 +313,7 @@ class SeatHoldConcurrencyTest {
     }
 
     private double gateCounter(String result) {
-        return meterRegistry.counter("booking.hold.gate", "result", result).count();
+        return meterRegistry.counter(Metrics.HOLD_GATE, Tag.RESULT, result).count();
     }
 
     private static boolean isDeadlock(Throwable t) {
@@ -325,7 +327,7 @@ class SeatHoldConcurrencyTest {
     }
 
     private double dbCounter(String result) {
-        return meterRegistry.counter("booking.hold.db", "result", result).count();
+        return meterRegistry.counter(Metrics.HOLD_DB, Tag.RESULT, result).count();
     }
 
     private List<Long> seatIds(long pid) {

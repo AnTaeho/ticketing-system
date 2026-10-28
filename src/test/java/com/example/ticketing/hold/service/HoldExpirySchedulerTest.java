@@ -12,6 +12,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.example.ticketing.common.config.TicketingProperties;
+import com.example.ticketing.common.metrics.Metrics;
 import com.example.ticketing.hold.repository.SeatGateRedisStore;
 import com.example.ticketing.hold.service.HoldExpiryTransaction.ExpiredHold;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -104,13 +105,13 @@ class HoldExpirySchedulerTest {
 
     private HoldExpiryScheduler scheduler(boolean gateEnabled) {
         TicketingProperties properties = new TicketingProperties(null, null,
-                new TicketingProperties.Hold(Duration.ofMinutes(5), 4, 1000, BATCH, COOLDOWN),
+                new TicketingProperties.Hold(Duration.ofMinutes(5), 4, true, 1000, BATCH, COOLDOWN),
                 null, new TicketingProperties.Gate(gateEnabled, 20), null, null, null, null, null, null);
         return new HoldExpiryScheduler(expiryTransaction, gate, properties, meterRegistry);
     }
 
     private double expiredCount() {
-        return meterRegistry.counter("booking.hold.expired").count();
+        return meterRegistry.counter(Metrics.HOLD_EXPIRED).count();
     }
 
     private static List<ExpiredHold> holds(int count) {

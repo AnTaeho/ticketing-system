@@ -6,6 +6,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.example.ticketing.common.config.TicketingProperties;
 import com.example.ticketing.common.error.ApiException;
 import com.example.ticketing.common.error.ErrorCode;
+import com.example.ticketing.common.metrics.Metrics;
+import com.example.ticketing.common.metrics.Metrics.OutboxResult;
+import com.example.ticketing.common.metrics.Metrics.Tag;
 import com.example.ticketing.common.redis.RedisKeys;
 import com.example.ticketing.common.redis.TestTicketingRedis;
 import com.example.ticketing.common.redis.TicketingRedis;
@@ -127,12 +130,13 @@ class OpsSummaryServiceTest {
         assertThat(summary.gateKeys().seat()).isEqualTo(2L);
         assertThat(summary.gateKeys().userHold()).isEqualTo(1L);
 
-        assertThat(summary.counters()).containsOnlyKeys("booking.hold.gate", "booking.hold.db",
-                "booking.hold.fallback", "booking.hold.expired", "booking.seatmap.rebuild", "booking.payment.reconcile",
-                "booking.outbox.task", "booking.redis.reflect.failure", "booking.gate.orphan.removed");
-        assertThat(summary.counters().get("booking.hold.gate").values())
+        assertThat(summary.counters()).containsOnlyKeys(Metrics.HOLD_GATE, Metrics.HOLD_DB,
+                Metrics.HOLD_FALLBACK, Metrics.HOLD_EXPIRED, Metrics.SEATMAP_REBUILD, Metrics.PAYMENT_RECONCILE,
+                Metrics.OUTBOX_TASK, Metrics.REDIS_REFLECT_FAILURE, Metrics.GATE_ORPHAN_REMOVED,
+                Metrics.GATE_ORPHAN_SKIPPED);
+        assertThat(summary.counters().get(Metrics.HOLD_GATE).values())
                 .containsKeys("ok", "seat_taken", "user_has_hold", "cooldown", "skipped");
-        assertThat(summary.counters().get("booking.outbox.task").tags()).containsExactly("type", "result");
+        assertThat(summary.counters().get(Metrics.OUTBOX_TASK).tags()).containsExactly("type", "result");
     }
 
     @Test
@@ -141,11 +145,11 @@ class OpsSummaryServiceTest {
         Scenario s = mixedPerformance();
         deadRedis = TestTicketingRedis.connectTo("localhost", closedPort(), props);
         SimpleMeterRegistry meters = new SimpleMeterRegistry();
-        meters.counter("booking.hold.gate", "result", "ok").increment(3);
-        meters.counter("booking.hold.gate", "result", "seat_taken").increment();
-        meters.counter("booking.hold.expired").increment(2);
-        meters.counter("booking.outbox.task", "type", "TICKET_ISSUED", "result", "success").increment(4);
-        OpsSummaryService broken = new OpsSummaryService(jdbc, deadRedis, meters);
+        meters.counter(Metrics.HOLD_GATE, Tag.RESULT, "ok").increment(3);
+        meters.counter(Metrics.HOLD_GATE, Tag.RESULT, "seat_taken").increment();
+        meters.counter(Metrics.HOLD_EXPIRED).increment(2);
+        meters.counter(Metrics.OUTBOX_TASK, Tag.TYPE, "TICKET_ISSUED", Tag.RESULT, OutboxResult.DONE).increment(4);
+        OpsSummaryService broken = new OpsSummaryService(jdbc, deadRedis, meters, props);
 
         OpsSummary summary = broken.summarize(s.pid);
 
@@ -157,14 +161,14 @@ class OpsSummaryServiceTest {
         assertThat(summary.seats()).containsEntry("HELD", 3L).containsEntry("SOLD", 2L);
         assertThat(summary.payments()).containsEntry("UNKNOWN", 1L);
         assertThat(summary.attention().failedTasks()).hasSize(1);
-        assertThat(summary.counters().get("booking.hold.gate").values())
+        assertThat(summary.counters().get(Metrics.HOLD_GATE).values())
                 .containsExactly(Map.entry("ok", 3L), Map.entry("seat_taken", 1L));
-        assertThat(summary.counters().get("booking.hold.gate").total()).isEqualTo(4L);
-        assertThat(summary.counters().get("booking.hold.expired").values()).containsExactly(Map.entry("total", 2L));
-        assertThat(summary.counters().get("booking.outbox.task").values())
-                .containsExactly(Map.entry("TICKET_ISSUED/success", 4L));
-        assertThat(summary.counters().get("booking.payment.reconcile").values()).isEmpty();
-        assertThat(summary.counters().get("booking.payment.reconcile").total()).isZero();
+        assertThat(summary.counters().get(Metrics.HOLD_GATE).total()).isEqualTo(4L);
+        assertThat(summary.counters().get(Metrics.HOLD_EXPIRED).values()).containsExactly(Map.entry("total", 2L));
+        assertThat(summary.counters().get(Metrics.OUTBOX_TASK).values())
+                .containsExactly(Map.entry("TICKET_ISSUED/done", 4L));
+        assertThat(summary.counters().get(Metrics.PAYMENT_RECONCILE).values()).isEmpty();
+        assertThat(summary.counters().get(Metrics.PAYMENT_RECONCILE).total()).isZero();
     }
 
     @Test

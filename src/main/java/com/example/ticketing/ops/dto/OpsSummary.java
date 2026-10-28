@@ -45,7 +45,7 @@ public record OpsSummary(
     public record GateKeys(Long seat, Long userHold) {
     }
 
-    // values의 키는 태그 값(태그가 둘이면 "TICKET_ISSUED/success"), 태그가 없으면 "total"
+    // values의 키는 태그 값(태그가 둘이면 "TICKET_ISSUED/done"), 태그가 없으면 "total"
     public record CounterView(List<String> tags, Map<String, Long> values, long total) {
     }
 }

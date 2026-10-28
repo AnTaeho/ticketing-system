@@ -1,13 +1,20 @@
 package com.example.ticketing.outbox.service;
 
 import com.example.ticketing.common.config.TicketingProperties;
+import com.example.ticketing.common.metrics.Metrics;
+import com.example.ticketing.common.metrics.Metrics.OutboxResult;
+import com.example.ticketing.common.metrics.Metrics.Tag;
 import com.example.ticketing.outbox.domain.OutboxTaskStatus;
+import com.example.ticketing.outbox.domain.OutboxTaskType;
 import com.example.ticketing.outbox.dto.ClaimedOutboxTask;
+import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -16,14 +23,13 @@ import org.springframework.stereotype.Component;
 // 여러 서버가 동시에 돌아도 집기의 SKIP LOCKED로 나눠 갖는다. 핸들러는 트랜잭션 밖에서 부른다
 @Slf4j
 @Component
-@ConditionalOnProperty(name = "booking.outbox.worker-enabled", havingValue = "true", matchIfMissing = true)
+@ConditionalOnProperty(name = "ticketing.outbox.worker-enabled", havingValue = "true", matchIfMissing = true)
 public class OutboxWorker {
-
-    static final String METRIC = "booking.outbox.task";
 
     private final OutboxClaimTransaction claimTransaction;
     private final Map<String, OutboxHandler> handlers = new HashMap<>();
     private final MeterRegistry meterRegistry;
+    private final ConcurrentMap<String, TypeCounters> counters = new ConcurrentHashMap<>();
     private final int batchSize;
 
     public OutboxWorker(OutboxClaimTransaction claimTransaction, List<OutboxHandler> handlers,
@@ -35,10 +41,13 @@ public class OutboxWorker {
             }
         }
         this.meterRegistry = meterRegistry;
+        for (OutboxTaskType type : OutboxTaskType.values()) {
+            counters.put(type.name(), TypeCounters.register(meterRegistry, type.name()));
+        }
         this.batchSize = properties.outbox().batchSize();
     }
 
-    @Scheduled(fixedDelayString = "${booking.outbox.poll-interval-ms}")
+    @Scheduled(fixedDelayString = "${ticketing.outbox.poll-interval-ms}")
     public void scan() {
         for (ClaimedOutboxTask task : claimTransaction.claim(batchSize)) {
             try {
@@ -65,7 +74,7 @@ public class OutboxWorker {
             return;
         }
         if (claimTransaction.markDone(task)) {
-            count(task, "done");
+            countersOf(task).done().increment();
         } else {
             log.info("[booking outbox] 작업 {}는 잠금이 지나 다른 워커가 다시 집었다. 결과는 그쪽이 쓴다", task.id());
         }
@@ -80,13 +89,26 @@ public class OutboxWorker {
         if (status.get() == OutboxTaskStatus.FAILED) {
             log.warn("[booking outbox] 작업 {}({}, aggregate {})가 {}번 실패해 FAILED로 멈췄다: {}", task.id(),
                     task.taskType(), task.aggregateId(), task.attempt() + 1, error);
-            count(task, "failed");
+            countersOf(task).failed().increment();
         } else {
-            count(task, "retry");
+            countersOf(task).retry().increment();
         }
     }
 
-    private void count(ClaimedOutboxTask task, String result) {
-        meterRegistry.counter(METRIC, "type", task.taskType(), "result", result).increment();
+    // enum 밖 종류는 DB에 잘못 들어간 행뿐이라 그때만 등록한다
+    private TypeCounters countersOf(ClaimedOutboxTask task) {
+        return counters.computeIfAbsent(task.taskType(), type -> TypeCounters.register(meterRegistry, type));
+    }
+
+    private record TypeCounters(Counter done, Counter retry, Counter failed) {
+
+        static TypeCounters register(MeterRegistry meterRegistry, String type) {
+            return new TypeCounters(counter(meterRegistry, type, OutboxResult.DONE),
+                    counter(meterRegistry, type, OutboxResult.RETRY), counter(meterRegistry, type, OutboxResult.FAILED));
+        }
+
+        private static Counter counter(MeterRegistry meterRegistry, String type, String result) {
+            return meterRegistry.counter(Metrics.OUTBOX_TASK, Tag.TYPE, type, Tag.RESULT, result);
+        }
     }
 }

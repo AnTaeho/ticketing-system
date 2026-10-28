@@ -10,6 +10,8 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.example.ticketing.common.config.TicketingProperties;
+import com.example.ticketing.common.metrics.Metrics;
+import com.example.ticketing.common.metrics.Metrics.Tag;
 import com.example.ticketing.hold.domain.HoldStatus;
 import com.example.ticketing.hold.repository.SeatGateRedisStore;
 import com.example.ticketing.payment.client.PgClient;
@@ -112,15 +114,16 @@ class PaymentReconcileSchedulerTest {
 
     private PaymentReconcileScheduler scheduler(boolean gateEnabled) {
         TicketingProperties properties = new TicketingProperties(null, null, null,
-                new TicketingProperties.Payment(Duration.ofMinutes(10), Duration.ofSeconds(30), RECHECK,
-                        Duration.ofSeconds(30), 2000, BATCH),
+                new TicketingProperties.Payment(Duration.ofMinutes(10), Duration.ofMinutes(1), Duration.ofSeconds(30),
+                        Duration.ofSeconds(5), RECHECK, Duration.ofSeconds(30), true, 2000, BATCH,
+                        Duration.ofSeconds(30)),
                 new TicketingProperties.Gate(gateEnabled, 20), null, null, null, null, null, null);
         return new PaymentReconcileScheduler(reconcileTransaction, paymentTransaction, pgClient, gate, properties,
                 meterRegistry);
     }
 
     private double count(String result) {
-        return meterRegistry.counter(PaymentReconcileScheduler.METRIC, "result", result).count();
+        return meterRegistry.counter(Metrics.PAYMENT_RECONCILE, Tag.RESULT, result).count();
     }
 
     private static ClaimedPayment claimed(long paymentId, String orderId, boolean cancelDue) {

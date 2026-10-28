@@ -105,7 +105,7 @@ class FakePgConcurrencyTest {
                 replies.stream().map(FakePgReply::status).toList(), sleeper.calls());
 
         assertThat(approved).hasSize(1);
-        assertThat(sleeper.calls()).containsExactly(properties.fakePg().slowDelayMs());
+        assertThat(sleeper.calls()).containsExactly(properties.fakePg().slowDelay().toMillis());
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM fake_pg_transaction WHERE order_id = ?", Long.class, orderId)).isEqualTo(1);
         assertThat(fakePgService.query(orderId))

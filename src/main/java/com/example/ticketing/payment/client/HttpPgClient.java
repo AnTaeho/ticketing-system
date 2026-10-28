@@ -81,7 +81,7 @@ public class HttpPgClient implements PgClient {
         try {
             String baseUrl = baseUrl();
             if (baseUrl == null) {
-                result = PgResult.unknown("PG 주소를 정할 수 없다: booking.pg.base-url과 local.server.port가 모두 없다");
+                result = PgResult.unknown("PG 주소를 정할 수 없다: ticketing.pg.base-url과 local.server.port가 모두 없다");
             } else {
                 result = request.apply(baseUrl).exchangeForRequiredValue((req, res) -> map(operation,
                         res.getStatusCode().value(),

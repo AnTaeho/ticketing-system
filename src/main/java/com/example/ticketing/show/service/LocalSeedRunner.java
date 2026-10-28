@@ -17,7 +17,7 @@ import org.springframework.stereotype.Component;
 @Slf4j
 @Component
 @Profile("local")
-@ConditionalOnProperty(prefix = "booking.seed", name = "enabled", havingValue = "true", matchIfMissing = true)
+@ConditionalOnProperty(name = "ticketing.seed.enabled", havingValue = "true", matchIfMissing = true)
 @RequiredArgsConstructor
 public class LocalSeedRunner implements ApplicationRunner {
 

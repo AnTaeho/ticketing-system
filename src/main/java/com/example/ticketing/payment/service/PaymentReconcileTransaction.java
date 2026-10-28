@@ -18,9 +18,6 @@ import org.springframework.transaction.annotation.Transactional;
 @Component
 public class PaymentReconcileTransaction {
 
-    // 한 건의 PG 조회가 끝나기 전에 다른 서버가 같은 결제를 집지 않게 미뤄 둔다
-    static final Duration CLAIM_LEASE = Duration.ofSeconds(30);
-
     private static final String CLAIM_SQL = """
             SELECT id, hold_id, order_id, status, created_at FROM booking_payment
              WHERE status IN ('REQUESTED', 'UNKNOWN') AND next_check_at <= NOW(6)
@@ -38,6 +35,8 @@ public class PaymentReconcileTransaction {
     private final PaymentRepository paymentRepository;
     private final DbClock dbClock;
     private final Duration notFoundCancelAfter;
+    // 한 건의 PG 조회가 끝나기 전에 다른 서버가 같은 결제를 집지 않게 미뤄 둔다
+    private final long claimLeaseMicros;
 
     public PaymentReconcileTransaction(NamedParameterJdbcTemplate jdbcTemplate,
                                        PaymentRepository paymentRepository, DbClock dbClock,
@@ -46,6 +45,7 @@ public class PaymentReconcileTransaction {
         this.paymentRepository = paymentRepository;
         this.dbClock = dbClock;
         this.notFoundCancelAfter = properties.payment().notFoundCancelAfter();
+        this.claimLeaseMicros = micros(properties.payment().reconcileClaimLease());
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
@@ -58,7 +58,7 @@ public class PaymentReconcileTransaction {
             return List.of();
         }
         List<Long> ids = rows.stream().map(Row::paymentId).toList();
-        jdbcTemplate.update(LEASE_SQL, Map.of("ids", ids, "leaseMicros", micros(CLAIM_LEASE)));
+        jdbcTemplate.update(LEASE_SQL, Map.of("ids", ids, "leaseMicros", claimLeaseMicros));
 
         Map<Long, LocalDateTime> payDeadlines = new HashMap<>();
         jdbcTemplate.query(PAY_DEADLINE_SQL, Map.of("holdIds", rows.stream().map(Row::holdId).toList()),

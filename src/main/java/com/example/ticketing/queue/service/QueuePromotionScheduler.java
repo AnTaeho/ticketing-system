@@ -13,7 +13,7 @@ import org.springframework.stereotype.Component;
 // 승격은 Lua가 정원을 지키므로 겹쳐 돌아도 넘치지 않지만, 한 서버만 돌도록 리스로 묶는다
 @Slf4j
 @Component
-@ConditionalOnProperty(name = "booking.queue.promote-enabled", havingValue = "true", matchIfMissing = true)
+@ConditionalOnProperty(name = "ticketing.queue.promote-enabled", havingValue = "true", matchIfMissing = true)
 public class QueuePromotionScheduler {
 
     static final String LEASE = "queue-promote";
@@ -41,7 +41,7 @@ public class QueuePromotionScheduler {
         this.leaseTtl = Duration.ofMillis(intervalMs * 2);
     }
 
-    @Scheduled(fixedDelayString = "${booking.queue.promote-interval-ms}")
+    @Scheduled(fixedDelayString = "${ticketing.queue.promote-interval-ms}")
     public void promote() {
         lease.runIfLeader(LEASE, leaseTtl, this::promoteAll);
     }

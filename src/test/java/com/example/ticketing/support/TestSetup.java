@@ -11,14 +11,14 @@ import org.springframework.test.context.TestPropertySource;
 @Target(ElementType.ANNOTATION_TYPE)
 @Retention(RetentionPolicy.RUNTIME)
 @TestPropertySource(properties = {
-        "booking.seed.enabled=false",
-        "booking.hold.expiry-enabled=false",
-        "booking.payment.reconcile-enabled=false",
-        "booking.outbox.worker-enabled=false",
-        "booking.queue.promote-enabled=false",
-        "booking.seatmap.snapshot-enabled=false",
-        "booking.ops.orphan-enabled=false",
-        "booking.redis.database=1",
+        "ticketing.seed.enabled=false",
+        "ticketing.hold.expiry-enabled=false",
+        "ticketing.payment.reconcile-enabled=false",
+        "ticketing.outbox.worker-enabled=false",
+        "ticketing.queue.promote-enabled=false",
+        "ticketing.seatmap.snapshot-enabled=false",
+        "ticketing.ops.orphan-enabled=false",
+        "ticketing.redis.database=1",
         "spring.datasource.url=jdbc:mysql://localhost:3306/ticketing_booking_test"
                 + "?createDatabaseIfNotExist=true&serverTimezone=Asia/Seoul&characterEncoding=UTF-8"
 })

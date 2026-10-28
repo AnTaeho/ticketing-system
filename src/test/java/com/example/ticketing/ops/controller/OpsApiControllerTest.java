@@ -5,6 +5,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.example.ticketing.common.metrics.Metrics;
 import com.example.ticketing.support.Fixtures;
 import com.example.ticketing.support.IntegrationTest;
 import com.example.ticketing.web.controller.OpsPageController;
@@ -60,8 +61,8 @@ class OpsApiControllerTest {
                 .andExpect(jsonPath("$.redisAvailable").value(true))
                 .andExpect(jsonPath("$.queue.waiting").value(0))
                 .andExpect(jsonPath("$.gateKeys.seat").value(0))
-                .andExpect(jsonPath("$.counters['booking.hold.gate'].tags[0]").value("result"))
-                .andExpect(jsonPath("$.counters['booking.hold.gate'].total").isNumber());
+                .andExpect(jsonPath("$.counters['" + Metrics.HOLD_GATE + "'].tags[0]").value("result"))
+                .andExpect(jsonPath("$.counters['" + Metrics.HOLD_GATE + "'].total").isNumber());
     }
 
     @Test

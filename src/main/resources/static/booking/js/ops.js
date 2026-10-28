@@ -5,7 +5,7 @@
   // 0이 아니면 주황으로 보이는 상태
   var BAD = { UNKNOWN: true, REFUNDING: true, FAILED: true };
   // 스케줄러가 1초마다 올리는 수라 강조하면 다른 변화가 묻힌다
-  var STEADY = { 'ctr.booking.seatmap.rebuild': true };
+  var STEADY = { 'ctr.ticketing.seatmap.rebuild': true };
   var TYPE_NAMES = { TICKET_ISSUED: '발권 알림', REFUND_REQUESTED: '환불' };
 
   var body = document.body;

@@ -8,6 +8,8 @@ import com.example.ticketing.booking.service.BookingService;
 import com.example.ticketing.booking.service.BookingTransaction;
 import com.example.ticketing.booking.service.BookingViewReader;
 import com.example.ticketing.common.config.TicketingProperties;
+import com.example.ticketing.common.metrics.Metrics;
+import com.example.ticketing.common.metrics.Metrics.Tag;
 import com.example.ticketing.common.redis.RedisKeys;
 import com.example.ticketing.common.redis.SchedulerLease;
 import com.example.ticketing.common.redis.TestTicketingRedis;
@@ -455,11 +457,11 @@ class OrphanGateKeyReconcilerTest {
     }
 
     private double removedCount(String kind) {
-        return meterRegistry.counter(OrphanGateKeyReconciler.REMOVED_COUNTER, "kind", kind).count();
+        return meterRegistry.counter(Metrics.GATE_ORPHAN_REMOVED, Tag.KIND, kind).count();
     }
 
     private double skippedCount() {
-        return meterRegistry.counter(OrphanGateKeyReconciler.SKIPPED_COUNTER, "reason", "fresh").count();
+        return meterRegistry.counter(Metrics.GATE_ORPHAN_SKIPPED, Tag.REASON, "fresh").count();
     }
 
     private List<Long> seatIds(long pid) {

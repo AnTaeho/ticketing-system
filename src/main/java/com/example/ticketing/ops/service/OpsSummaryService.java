@@ -1,8 +1,11 @@
 package com.example.ticketing.ops.service;
 
 import com.example.ticketing.booking.domain.BookingStatus;
+import com.example.ticketing.common.config.TicketingProperties;
 import com.example.ticketing.common.error.ApiException;
 import com.example.ticketing.common.error.ErrorCode;
+import com.example.ticketing.common.metrics.Metrics;
+import com.example.ticketing.common.metrics.Metrics.Tag;
 import com.example.ticketing.common.redis.RedisKeys;
 import com.example.ticketing.common.redis.TicketingRedis;
 import com.example.ticketing.hold.domain.HoldStatus;
@@ -40,7 +43,6 @@ import org.springframework.stereotype.Service;
 public class OpsSummaryService {
 
     static final int LIST_LIMIT = 20;
-    static final int STALE_PAYMENT_SECONDS = 30;
     private static final long SCAN_COUNT = 200;
 
     // 태그 순서는 값을 이어 붙이는 순서다
@@ -91,17 +93,20 @@ public class OpsSummaryService {
               JOIN seat_hold h ON h.id = bp.hold_id
              WHERE h.performance_id = ?
                AND bp.status IN ('UNKNOWN', 'REQUESTED')
-               AND bp.created_at < NOW(6) - INTERVAL %d SECOND
-             ORDER BY bp.id DESC LIMIT %d""".formatted(STALE_PAYMENT_SECONDS, LIST_LIMIT);
+               AND bp.created_at < NOW(6) - INTERVAL ? MICROSECOND
+             ORDER BY bp.id DESC LIMIT %d""".formatted(LIST_LIMIT);
 
     private final JdbcTemplate jdbcTemplate;
     private final TicketingRedis bookingRedis;
     private final MeterRegistry meterRegistry;
+    private final long stalePaymentMicros;
 
-    public OpsSummaryService(JdbcTemplate jdbcTemplate, TicketingRedis bookingRedis, MeterRegistry meterRegistry) {
+    public OpsSummaryService(JdbcTemplate jdbcTemplate, TicketingRedis bookingRedis, MeterRegistry meterRegistry,
+                             TicketingProperties properties) {
         this.jdbcTemplate = jdbcTemplate;
         this.bookingRedis = bookingRedis;
         this.meterRegistry = meterRegistry;
+        this.stalePaymentMicros = properties.ops().stalePaymentAfter().toNanos() / 1_000;
     }
 
     public OpsSummary summarize(long performanceId) {
@@ -157,7 +162,8 @@ public class OpsSummaryService {
                 rs.getObject("updated_at", LocalDateTime.class)), performanceId);
         List<StalePayment> stale = jdbcTemplate.query(STALE_PAYMENT_SQL, (rs, i) -> new StalePayment(
                 rs.getLong("id"), rs.getLong("hold_id"), rs.getString("status"),
-                rs.getObject("created_at", LocalDateTime.class), rs.getString("last_error")), performanceId);
+                rs.getObject("created_at", LocalDateTime.class), rs.getString("last_error")),
+                performanceId, stalePaymentMicros);
         return new Attention(failed, refunding, stale);
     }
 
@@ -206,15 +212,16 @@ public class OpsSummaryService {
 
     private static Map<String, List<String>> counters() {
         Map<String, List<String>> counters = new LinkedHashMap<>();
-        counters.put("booking.hold.gate", List.of("result"));
-        counters.put("booking.hold.db", List.of("result"));
-        counters.put("booking.hold.fallback", List.of("result"));
-        counters.put("booking.hold.expired", List.of());
-        counters.put("booking.seatmap.rebuild", List.of("source"));
-        counters.put("booking.payment.reconcile", List.of("result"));
-        counters.put("booking.outbox.task", List.of("type", "result"));
-        counters.put("booking.redis.reflect.failure", List.of("op"));
-        counters.put("booking.gate.orphan.removed", List.of("kind"));
+        counters.put(Metrics.HOLD_GATE, List.of(Tag.RESULT));
+        counters.put(Metrics.HOLD_DB, List.of(Tag.RESULT));
+        counters.put(Metrics.HOLD_FALLBACK, List.of(Tag.RESULT));
+        counters.put(Metrics.HOLD_EXPIRED, List.of());
+        counters.put(Metrics.SEATMAP_REBUILD, List.of(Tag.SOURCE));
+        counters.put(Metrics.PAYMENT_RECONCILE, List.of(Tag.RESULT));
+        counters.put(Metrics.OUTBOX_TASK, List.of(Tag.TYPE, Tag.RESULT));
+        counters.put(Metrics.REDIS_REFLECT_FAILURE, List.of(Tag.OP));
+        counters.put(Metrics.GATE_ORPHAN_REMOVED, List.of(Tag.KIND));
+        counters.put(Metrics.GATE_ORPHAN_SKIPPED, List.of(Tag.REASON));
         return counters;
     }
 

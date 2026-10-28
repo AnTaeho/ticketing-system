@@ -3,6 +3,7 @@ package com.example.ticketing.seat.service;
 import com.example.ticketing.common.config.TicketingProperties;
 import com.example.ticketing.common.error.ApiException;
 import com.example.ticketing.common.error.ErrorCode;
+import com.example.ticketing.common.metrics.Metrics.RebuildSource;
 import com.example.ticketing.common.redis.SchedulerLease;
 import com.example.ticketing.seat.repository.SeatMapRedisStore;
 import io.lettuce.core.RedisException;
@@ -49,11 +50,11 @@ public class SeatMapQueryService {
         this.builder = builder;
         this.store = store;
         this.instanceId = schedulerLease.instanceId();
-        this.localCacheNanos = Duration.ofMillis(properties.seatmap().localCacheMs()).toNanos();
+        this.localCacheNanos = properties.seatmap().localCache().toNanos();
         this.leaseTtl = properties.seatmap().leaseTtl();
         this.snapshotTtl = properties.seatmap().snapshotTtl();
-        this.missRebuilds = SeatMapBuilder.rebuildCounter(meterRegistry, "miss");
-        this.fallbackRebuilds = SeatMapBuilder.rebuildCounter(meterRegistry, "fallback");
+        this.missRebuilds = SeatMapBuilder.rebuildCounter(meterRegistry, RebuildSource.MISS);
+        this.fallbackRebuilds = SeatMapBuilder.rebuildCounter(meterRegistry, RebuildSource.FALLBACK);
     }
 
     public String get(long performanceId) {

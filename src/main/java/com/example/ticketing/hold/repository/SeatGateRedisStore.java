@@ -1,5 +1,8 @@
 package com.example.ticketing.hold.repository;
 
+import com.example.ticketing.common.metrics.Metrics;
+import com.example.ticketing.common.metrics.Metrics.ReflectOp;
+import com.example.ticketing.common.metrics.Metrics.Tag;
 import com.example.ticketing.common.redis.RedisKeys;
 import com.example.ticketing.common.redis.TicketingRedis;
 import com.example.ticketing.hold.domain.GateResult;
@@ -22,8 +25,6 @@ import org.springframework.stereotype.Component;
 @Component
 public class SeatGateRedisStore {
 
-    private static final String REFLECT_FAILURE = "booking.redis.reflect.failure";
-
     @SuppressWarnings("rawtypes")
     private static final DefaultRedisScript<List> HOLD = script("hold.lua", List.class);
     private static final DefaultRedisScript<Long> RELEASE = script("release.lua", Long.class);
@@ -38,10 +39,10 @@ public class SeatGateRedisStore {
 
     public SeatGateRedisStore(TicketingRedis bookingRedis, MeterRegistry meterRegistry) {
         this.redis = bookingRedis.template();
-        this.releaseFailure = meterRegistry.counter(REFLECT_FAILURE, "op", "release");
-        this.extendFailure = meterRegistry.counter(REFLECT_FAILURE, "op", "extend");
-        this.confirmFailure = meterRegistry.counter(REFLECT_FAILURE, "op", "confirm");
-        this.cooldownFailure = meterRegistry.counter(REFLECT_FAILURE, "op", "cooldown");
+        this.releaseFailure = meterRegistry.counter(Metrics.REDIS_REFLECT_FAILURE, Tag.OP, ReflectOp.RELEASE);
+        this.extendFailure = meterRegistry.counter(Metrics.REDIS_REFLECT_FAILURE, Tag.OP, ReflectOp.EXTEND);
+        this.confirmFailure = meterRegistry.counter(Metrics.REDIS_REFLECT_FAILURE, Tag.OP, ReflectOp.CONFIRM);
+        this.cooldownFailure = meterRegistry.counter(Metrics.REDIS_REFLECT_FAILURE, Tag.OP, ReflectOp.COOLDOWN);
     }
 
     // Redis 예외를 그대로 던진다. 장애 시 DB 판정으로 넘기는 일은 호출자가 한다

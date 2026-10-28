@@ -28,12 +28,12 @@ import org.springframework.stereotype.Service;
 public class PaymentService {
 
     static final int MAX_IDEMPOTENCY_KEY_LENGTH = 64;
-    private static final Duration GATE_KEY_MARGIN = Duration.ofMinutes(1);
 
     private final PaymentTransaction paymentTransaction;
     private final PgClient pgClient;
     private final SeatGateRedisStore gate;
     private final boolean gateEnabled;
+    private final Duration gateKeyMargin;
     private final PaymentGateReflector reflector;
 
     public PaymentService(PaymentTransaction paymentTransaction, PgClient pgClient,
@@ -42,6 +42,7 @@ public class PaymentService {
         this.pgClient = pgClient;
         this.gate = gate;
         this.gateEnabled = properties.gate().enabled();
+        this.gateKeyMargin = properties.payment().gateKeyMargin();
         this.reflector = new PaymentGateReflector(gate, gateEnabled);
     }
 
@@ -55,7 +56,7 @@ public class PaymentService {
 
         // 게이트 키가 결제 중에 풀리지 않게 결제 마감 뒤까지 늘린다
         if (gateEnabled) {
-            Duration ttl = Duration.between(started.dbNow(), started.payDeadline()).plus(GATE_KEY_MARGIN);
+            Duration ttl = Duration.between(started.dbNow(), started.payDeadline()).plus(gateKeyMargin);
             gate.extendQuietly(started.performanceId(), userId, started.seatIds(), started.holdToken(), ttl);
         }
 

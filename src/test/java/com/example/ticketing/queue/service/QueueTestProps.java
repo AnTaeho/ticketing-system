@@ -12,7 +12,8 @@ final class QueueTestProps {
     static TicketingProperties withCapacity(TicketingProperties p, int capacity) {
         Queue q = p.queue();
         return new TicketingProperties(p.seed(), p.redis(), p.hold(), p.payment(), p.gate(),
-                new Queue(capacity, q.processingTokenTtl(), q.waitingTokenTtl(), q.promoteIntervalMs(), q.required()),
+                new Queue(capacity, q.processingTokenTtl(), q.waitingTokenTtl(), q.promoteEnabled(), q.promoteIntervalMs(),
+                        q.required()),
                 p.seatmap(), p.outbox(), p.ops(), p.pg(), p.fakePg());
     }
 }

@@ -201,10 +201,10 @@ class FakePgControllerTest {
     }
 
     @Test
-    @DisplayName("승인 지연 중 앱이 죽어 남은 PROCESSING: slow-delay-ms+30초보다 오래되면 조회·취소가 DECLINED로 확정한다. "
+    @DisplayName("승인 지연 중 앱이 죽어 남은 PROCESSING: slow-delay+stale-margin(30초)보다 오래되면 조회·취소가 DECLINED로 확정한다. "
             + "최근 PROCESSING은 조회 200 PROCESSING, 취소 409 그대로")
     void staleProcessingIsDeclined() throws Exception {
-        long staleSeconds = properties.fakePg().slowDelayMs() / 1_000 + 31;
+        long staleSeconds = properties.fakePg().slowDelay().plus(properties.fakePg().staleMargin()).toSeconds() + 1;
         String staleForQuery = insertProcessing(staleSeconds);
         String staleForCancel = insertProcessing(staleSeconds);
         String recent = insertProcessing(0);

@@ -1,6 +1,10 @@
 package com.example.ticketing.ops.service;
 
 import com.example.ticketing.common.config.TicketingProperties;
+import com.example.ticketing.common.metrics.Metrics;
+import com.example.ticketing.common.metrics.Metrics.OrphanKind;
+import com.example.ticketing.common.metrics.Metrics.SkipReason;
+import com.example.ticketing.common.metrics.Metrics.Tag;
 import com.example.ticketing.common.redis.RedisKeys;
 import com.example.ticketing.common.redis.SchedulerLease;
 import com.example.ticketing.common.redis.TicketingRedis;
@@ -36,12 +40,10 @@ import org.springframework.stereotype.Component;
 // Redis 반영 실패로 DB와 어긋난 게이트 키를 지운다. 키가 남으면 DB에서 빈 좌석도 게이트가 막는다
 @Slf4j
 @Component
-@ConditionalOnProperty(name = "booking.ops.orphan-enabled", havingValue = "true", matchIfMissing = true)
+@ConditionalOnProperty(name = "ticketing.ops.orphan-enabled", havingValue = "true", matchIfMissing = true)
 public class OrphanGateKeyReconciler {
 
     static final String LEASE = "orphan";
-    static final String REMOVED_COUNTER = "booking.gate.orphan.removed";
-    static final String SKIPPED_COUNTER = "booking.gate.orphan.skipped";
     static final Duration FRESH_WINDOW = Duration.ofSeconds(10);
 
     private static final long SCAN_COUNT = 200;
@@ -85,12 +87,12 @@ public class OrphanGateKeyReconciler {
         this.seatCatalog = seatCatalog;
         this.leaseTtl = Duration.ofMillis(properties.ops().orphanScanMs() * 2);
         this.holdTtlMs = properties.hold().ttl().toMillis();
-        this.seatRemoved = meterRegistry.counter(REMOVED_COUNTER, "kind", "seat");
-        this.userHoldRemoved = meterRegistry.counter(REMOVED_COUNTER, "kind", "userhold");
-        this.skippedFresh = meterRegistry.counter(SKIPPED_COUNTER, "reason", "fresh");
+        this.seatRemoved = meterRegistry.counter(Metrics.GATE_ORPHAN_REMOVED, Tag.KIND, OrphanKind.SEAT);
+        this.userHoldRemoved = meterRegistry.counter(Metrics.GATE_ORPHAN_REMOVED, Tag.KIND, OrphanKind.USER_HOLD);
+        this.skippedFresh = meterRegistry.counter(Metrics.GATE_ORPHAN_SKIPPED, Tag.REASON, SkipReason.FRESH);
     }
 
-    @Scheduled(fixedDelayString = "${booking.ops.orphan-scan-ms}")
+    @Scheduled(fixedDelayString = "${ticketing.ops.orphan-scan-ms}")
     public void reconcile() {
         lease.runIfLeader(LEASE, leaseTtl, this::reconcileAll);
     }

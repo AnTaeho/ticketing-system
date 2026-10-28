@@ -33,7 +33,7 @@ management:
     redis:
       enabled: false           # 기본 연결은 타임아웃이 없어 장애 때 60초 붙잡는다. 예매 연결로 보는 bookingRedis가 대신한다
 
-booking:
+ticketing:
   seed:
     enabled: true              # @Profile("local")에서만 의미. 예매 테스트는 false
   redis:
@@ -43,16 +43,21 @@ booking:
   hold:
     ttl: 5m
     max-seats: 4
+    expiry-enabled: true       # false면 만료 스케줄러 빈을 만들지 않는다. 아래 *-enabled도 같다(테스트는 모두 false)
     expiry-scan-ms: 1000
     expiry-batch-size: 50
     rehold-cooldown: 10m
   payment:
     pay-deadline: 10m
+    gate-key-margin: 1m        # 결제 중 게이트 키를 결제 마감보다 이만큼 더 남긴다
     requested-recheck-after: 30s
+    processing-recheck-after: 5s     # PG가 아직 처리 중이라고 답한 결제를 다시 볼 때까지
     unknown-recheck-after: 10s
     not-found-cancel-after: 30s
+    reconcile-enabled: true
     reconcile-scan-ms: 2000
     reconcile-batch-size: 20
+    reconcile-claim-lease: 30s       # 집은 결제를 PG 조회가 끝날 때까지 다른 서버가 다시 집지 않게 미뤄 둔다
   gate:
     enabled: true              # 부하 테스트 비교 스위치
     fallback-max-concurrency: 8      # Hikari 풀(10)보다 작게
@@ -60,27 +65,34 @@ booking:
     capacity: 200
     processing-token-ttl: 10m
     waiting-token-ttl: 60m
+    promote-enabled: true
     promote-interval-ms: 1000
     required: true             # false면 선점이 처리열 토큰을 확인·소모하지 않는다(부하 테스트의 Redis 없음 기준선용)
   seatmap:
+    snapshot-enabled: true
     snapshot-interval-ms: 1000
     snapshot-ttl: 30s
-    local-cache-ms: 1000
+    local-cache: 1s
     lease-ttl: 2s
   outbox:
+    worker-enabled: true
     poll-interval-ms: 500
     batch-size: 50
     lock-duration: 60s
     max-attempts: 5
+    max-backoff: 60s           # 재시도 간격은 2^attempt초이고 이 값에서 멈춘다
   ops:
+    orphan-enabled: true
     orphan-scan-ms: 30000
+    stale-payment-after: 30s   # 운영 화면에 오래 걸리는 결제로 올리는 기준
   pg:
     base-url: ""               # 비우면 http://localhost:${local.server.port}/fake-pg
     connect-timeout: 500ms
     read-timeout: 3s
   fake-pg:
-    delay-min-ms: 200
-    delay-max-ms: 1200
+    delay-min: 200ms
+    delay-max: 1200ms
     decline-rate: 0.1
     slow-rate: 0.05
-    slow-delay-ms: 5000
+    slow-delay: 5s
+    stale-margin: 30s          # 가장 느린 응답보다 이만큼 더 PROCESSING이면 승인 시간 초과로 거절한다

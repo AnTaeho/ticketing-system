@@ -7,6 +7,8 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doAnswer;
 
+import com.example.ticketing.common.metrics.Metrics;
+import com.example.ticketing.common.metrics.Metrics.Tag;
 import com.example.ticketing.common.redis.RedisKeys;
 import com.example.ticketing.common.redis.TicketingRedis;
 import com.example.ticketing.support.Fixtures;
@@ -54,15 +56,15 @@ class SeatHoldGateRollbackTest {
                 invocation.callRealMethod();
                 throw new DataAccessResourceFailureException("db connection lost");
             }).when(spy).persistHold(anyLong(), any(), anyString());
-            double gateOkBefore = meterRegistry.counter("booking.hold.gate", "result", "ok").count();
-            double releaseFailureBefore = meterRegistry.counter("booking.redis.reflect.failure", "op", "release").count();
+            double gateOkBefore = meterRegistry.counter(Metrics.HOLD_GATE, Tag.RESULT, "ok").count();
+            double releaseFailureBefore = meterRegistry.counter(Metrics.REDIS_REFLECT_FAILURE, Tag.OP, "release").count();
 
             String queueToken = fixtures.admit(pid, userId);
             assertThatThrownBy(() -> seatHoldService.hold(userId, pid, target, queueToken))
                     .isInstanceOf(DataAccessResourceFailureException.class);
 
-            assertThat(meterRegistry.counter("booking.hold.gate", "result", "ok").count() - gateOkBefore).isEqualTo(1);
-            assertThat(meterRegistry.counter("booking.redis.reflect.failure", "op", "release").count())
+            assertThat(meterRegistry.counter(Metrics.HOLD_GATE, Tag.RESULT, "ok").count() - gateOkBefore).isEqualTo(1);
+            assertThat(meterRegistry.counter(Metrics.REDIS_REFLECT_FAILURE, Tag.OP, "release").count())
                     .isEqualTo(releaseFailureBefore);
             assertThat(redisKeyCleaner.gateKeys(pid)).isEmpty();
             // 서버 오류로 끝난 선점은 토큰을 소모하지 않는다

@@ -3,6 +3,8 @@ package com.example.ticketing.payment.service;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.example.ticketing.common.config.TicketingProperties;
+import com.example.ticketing.common.metrics.Metrics;
+import com.example.ticketing.common.metrics.Metrics.Tag;
 import com.example.ticketing.common.redis.RedisKeys;
 import com.example.ticketing.common.redis.TicketingRedis;
 import com.example.ticketing.hold.dto.HoldCreated;
@@ -480,7 +482,7 @@ class PaymentReconcileTest {
     }
 
     private double count(String result) {
-        return meterRegistry.counter(PaymentReconcileScheduler.METRIC, "result", result).count();
+        return meterRegistry.counter(Metrics.PAYMENT_RECONCILE, Tag.RESULT, result).count();
     }
 
     private long pttl(String key) {

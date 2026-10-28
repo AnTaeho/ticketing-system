@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.example.ticketing.common.config.TicketingProperties;
 import com.example.ticketing.common.config.TicketingProperties.Outbox;
+import com.example.ticketing.common.metrics.Metrics;
+import com.example.ticketing.common.metrics.Metrics.Tag;
 import com.example.ticketing.hold.dto.HoldCreated;
 import com.example.ticketing.hold.service.SeatHoldService;
 import com.example.ticketing.outbox.domain.OutboxTaskType;
@@ -289,12 +291,14 @@ class OutboxWorkerTest {
     }
 
     @Test
-    @DisplayName("백오프는 2^attempt초, 최대 60초")
+    @DisplayName("백오프는 2^attempt초, 최대 max-backoff(60초)")
     void backoffIsCapped() {
-        assertThat(OutboxClaimTransaction.backoffSeconds(1)).isEqualTo(2);
-        assertThat(OutboxClaimTransaction.backoffSeconds(5)).isEqualTo(32);
-        assertThat(OutboxClaimTransaction.backoffSeconds(6)).isEqualTo(60);
-        assertThat(OutboxClaimTransaction.backoffSeconds(40)).isEqualTo(60);
+        long max = properties.outbox().maxBackoff().toSeconds();
+        assertThat(max).isEqualTo(60);
+        assertThat(OutboxClaimTransaction.backoffSeconds(1, max)).isEqualTo(2);
+        assertThat(OutboxClaimTransaction.backoffSeconds(5, max)).isEqualTo(32);
+        assertThat(OutboxClaimTransaction.backoffSeconds(6, max)).isEqualTo(60);
+        assertThat(OutboxClaimTransaction.backoffSeconds(40, max)).isEqualTo(60);
     }
 
     @Test
@@ -392,8 +396,8 @@ class OutboxWorkerTest {
         Outbox outbox = properties.outbox();
         TicketingProperties p = properties;
         TicketingProperties withBatch = new TicketingProperties(p.seed(), p.redis(), p.hold(), p.payment(), p.gate(),
-                p.queue(), p.seatmap(), new Outbox(outbox.pollIntervalMs(), batchSize, outbox.lockDuration(),
-                outbox.maxAttempts()), p.ops(), p.pg(), p.fakePg());
+                p.queue(), p.seatmap(), new Outbox(outbox.workerEnabled(), outbox.pollIntervalMs(), batchSize,
+                outbox.lockDuration(), outbox.maxAttempts(), outbox.maxBackoff()), p.ops(), p.pg(), p.fakePg());
         return new OutboxWorker(claimTransaction, handlers, withBatch, meterRegistry);
     }
 
@@ -497,7 +501,7 @@ class OutboxWorkerTest {
     }
 
     private double count(String type, String result) {
-        return meterRegistry.counter(OutboxWorker.METRIC, "type", type, "result", result).count();
+        return meterRegistry.counter(Metrics.OUTBOX_TASK, Tag.TYPE, type, Tag.RESULT, result).count();
     }
 
     private String showCreateTable(String table) {

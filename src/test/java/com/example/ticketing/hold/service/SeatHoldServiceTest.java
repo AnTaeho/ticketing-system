@@ -218,7 +218,8 @@ class SeatHoldServiceTest {
         TicketingProperties p = properties;
         Queue q = p.queue();
         TicketingProperties noQueue = new TicketingProperties(p.seed(), p.redis(), p.hold(), p.payment(), p.gate(),
-                new Queue(q.capacity(), q.processingTokenTtl(), q.waitingTokenTtl(), q.promoteIntervalMs(), false),
+                new Queue(q.capacity(), q.processingTokenTtl(), q.waitingTokenTtl(), q.promoteEnabled(),
+                        q.promoteIntervalMs(), false),
                 p.seatmap(), p.outbox(), p.ops(), p.pg(), p.fakePg());
         SeatGateRedisStore openGate = mock(SeatGateRedisStore.class);
         when(openGate.tryHold(anyLong(), anyLong(), any(), anyString(), any())).thenReturn(GateResult.ok());

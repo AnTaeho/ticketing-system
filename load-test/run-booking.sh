@@ -2,7 +2,7 @@
 # 지정석 예매(V7) 부하 실행: 회차를 새로 만들고 시나리오 C를 돌린 뒤 MySQL·카운터 차이와 오버부킹을 기록한다.
 #
 # 앱은 직접 띄운다. 게이트 ON/OFF는 enabled 값만 바꿔 다시 띄운다.
-#   ./gradlew bootRun --args='--booking.gate.enabled=true --booking.queue.capacity=5000 --booking.fake-pg.delay-min-ms=50 --booking.fake-pg.delay-max-ms=150 --booking.fake-pg.decline-rate=0 --booking.fake-pg.slow-rate=0'
+#   ./gradlew bootRun --args='--ticketing.gate.enabled=true --ticketing.queue.capacity=5000 --ticketing.fake-pg.delay-min=50ms --ticketing.fake-pg.delay-max=150ms --ticketing.fake-pg.decline-rate=0 --ticketing.fake-pg.slow-rate=0'
 #
 # 사용법: MYSQL_PWD=<비밀번호> load-test/run-booking.sh <on|off> <users> [runs]
 # 환경 변수: MYSQL_USER(root) MYSQL_DB(ticketing) BASE_URL(http://localhost:8080) RAMP_SECONDS(10) SETTLE_SECONDS(11)
@@ -154,10 +154,10 @@ PY
     | awk '{d=$3-$2; if (d != 0) printf "%s=%d ", $1, d}')"
   rm -f "$RESULTS_DIR/.counters-before-$PID" "$RESULTS_DIR/.counters-after-$PID"
   cdiff() { awk -v k="$1" '{for (i=1;i<=NF;i++) {split($i,a,"="); if (a[1]==k) {print a[2]; exit}}} END {}' <<<"$COUNTER_DIFF"; }
-  DB_HOLD="$(cdiff booking.hold.db/_total)"; DB_HOLD="${DB_HOLD:-0}"
-  GATE_OK="$(cdiff booking.hold.gate/ok)"; GATE_OK="${GATE_OK:-0}"
-  GATE_TAKEN="$(cdiff booking.hold.gate/seat_taken)"; GATE_TAKEN="${GATE_TAKEN:-0}"
-  GATE_SKIPPED="$(cdiff booking.hold.gate/skipped)"; GATE_SKIPPED="${GATE_SKIPPED:-0}"
+  DB_HOLD="$(cdiff ticketing.hold.db/_total)"; DB_HOLD="${DB_HOLD:-0}"
+  GATE_OK="$(cdiff ticketing.hold.gate/ok)"; GATE_OK="${GATE_OK:-0}"
+  GATE_TAKEN="$(cdiff ticketing.hold.gate/seat_taken)"; GATE_TAKEN="${GATE_TAKEN:-0}"
+  GATE_SKIPPED="$(cdiff ticketing.hold.gate/skipped)"; GATE_SKIPPED="${GATE_SKIPPED:-0}"
 
   # 앱의 실제 게이트 설정과 인자가 맞는지 카운터로 확인한다
   GATE_CHECK=ok

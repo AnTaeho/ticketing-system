@@ -14,6 +14,8 @@ import static org.mockito.Mockito.when;
 import com.example.ticketing.common.config.TicketingProperties;
 import com.example.ticketing.common.error.ApiException;
 import com.example.ticketing.common.error.ErrorCode;
+import com.example.ticketing.common.metrics.Metrics;
+import com.example.ticketing.common.metrics.Metrics.Tag;
 import com.example.ticketing.common.redis.SchedulerLease;
 import com.example.ticketing.common.redis.TicketingRedis;
 import com.example.ticketing.seat.repository.SeatMapRedisStore;
@@ -120,7 +122,7 @@ class SeatMapQueryServiceTest {
         assertThat(service.get(pid)).isEqualTo("v1");
         verify(mockStore, times(1)).get(pid);
 
-        Thread.sleep(props.seatmap().localCacheMs() + 100);
+        Thread.sleep(props.seatmap().localCache().toMillis() + 100);
         assertThat(service.get(pid)).isEqualTo("v2");
         verify(mockStore, times(2)).get(pid);
     }
@@ -172,7 +174,7 @@ class SeatMapQueryServiceTest {
         double fallbackBefore = rebuilds("fallback");
 
         assertThat(service.get(pid)).isEqualTo(old);
-        Thread.sleep(props.seatmap().localCacheMs() + 100);
+        Thread.sleep(props.seatmap().localCache().toMillis() + 100);
 
         String rebuilt = service.get(pid);
         assertThat(generatedAt(rebuilt)).isGreaterThan(generatedAt(old));
@@ -196,13 +198,13 @@ class SeatMapQueryServiceTest {
         SeatMapQueryService service = service(mockStore, failingBuilder);
 
         assertThat(service.get(pid)).isEqualTo("cached-v1");
-        Thread.sleep(props.seatmap().localCacheMs() + 100);
+        Thread.sleep(props.seatmap().localCache().toMillis() + 100);
 
         assertThat(service.get(pid)).isEqualTo("cached-v1");
         assertThat(service.get(pid)).isEqualTo("cached-v1");
         verify(failingBuilder, times(1)).build(pid);
 
-        Thread.sleep(props.seatmap().localCacheMs() + 100);
+        Thread.sleep(props.seatmap().localCache().toMillis() + 100);
         assertThat(service.get(pid)).isEqualTo("cached-v1");
         verify(failingBuilder, times(2)).build(pid);
     }
@@ -216,7 +218,7 @@ class SeatMapQueryServiceTest {
         when(mockStore.get(pid)).thenReturn(old).thenThrow(new QueryTimeoutException("redis timeout"));
         SeatMapQueryService service = service(mockStore, slowBuilder(200));
         assertThat(service.get(pid)).isEqualTo(old);
-        Thread.sleep(props.seatmap().localCacheMs() + 100);
+        Thread.sleep(props.seatmap().localCache().toMillis() + 100);
         double fallbackBefore = rebuilds("fallback");
 
         List<String> results = runConcurrently(20, () -> service.get(pid));
@@ -351,7 +353,7 @@ class SeatMapQueryServiceTest {
     }
 
     private double rebuilds(String source) {
-        return meterRegistry.counter(SeatMapBuilder.REBUILD_METRIC, "source", source).count();
+        return meterRegistry.counter(Metrics.SEATMAP_REBUILD, Tag.SOURCE, source).count();
     }
 
     private long performance() {
