@@ -31,7 +31,9 @@ com.example.ticketing
 
 - 다른 기능의 `controller`나 `repository`를 직접 부르지 않는다. 필요하면 그 기능의 `service`를 부른다.
 - 테이블의 쓰기는 그 테이블을 가진 기능만 한다. 다른 기능의 테이블을 읽기만 할 때는, 서비스 호출이 순환을 만들면 자기 `*JdbcRepository`의 읽기 SQL로 읽어도 된다.
-- 의존은 한 방향이다: `payment → booking`, `payment·booking → hold → seat → show`. 거꾸로 부르지 않는다.
+- 의존은 한 방향이다: `payment → booking`, `payment·booking → hold → seat → show`, `payment·booking·notification → outbox`. 거꾸로 부르지 않는다.
+- `outbox`는 작업 큐(기록, 집기, 결과 반영)만 맡고 다른 기능을 모른다. 작업 처리는 그 작업을 가진 기능이 `OutboxHandler`로 구현한다(환불은 `payment`, 발권 알림은 `notification`).
+- `ops`는 시연용 집계라 다른 기능의 테이블과 상태 enum을 읽기만 하고, 다른 기능은 `ops`를 부르지 않는다.
 - 두 기능이 서로를 부르면(순환) 한쪽으로 몰거나 공통 개념을 `common`으로 뺀다.
 
 ## 2. 클래스 역할과 이름
@@ -42,10 +44,10 @@ com.example.ticketing
 | `*Service` | 한 유스케이스의 흐름을 짠다. 트랜잭션을 열지 않는다. 커밋 뒤 Redis 반영과 외부 호출을 여기서 한다 | SQL |
 | `*Transaction` | 쓰기 트랜잭션 한 단위. 락, 조건부 UPDATE, 같은 트랜잭션의 Outbox 기록 | 외부 호출, Redis |
 | `*Reader` | 읽기 전용 조회와 조립 | 쓰기 |
-| `*Scheduler` | 주기 실행의 진입점. 집고, 건마다 위임하고, 실패를 기록한다 | 업무 판정 |
+| `*Scheduler` | 주기 실행의 진입점. 집고, 건마다 위임하고, 실패를 기록한다. `@Scheduled` 메서드 이름은 `run()`이다 | 업무 판정 |
 | `*Repository` | JPA. 단건 저장·조회와 native 조건부 UPDATE | 여러 테이블 조립 |
 | `*JdbcRepository` | `NamedParameterJdbcTemplate`. `SKIP LOCKED` 집기, 다건·조인 조회, 대량 INSERT | 업무 판정 |
-| `*RedisStore` | Redis 읽기·쓰기와 Lua 실행. Redis 예외는 그대로 던진다 | 장애 정책 |
+| `*RedisStore` | Redis 읽기·쓰기와 Lua 실행. Redis 장애는 `RedisUnavailableException`으로 바꿔 던진다 | 장애 정책 |
 | `*Client` | 외부 시스템 호출. 실패를 결과 값으로 돌려준다 | 재시도 정책 |
 
 - 메서드 이름은 하는 일을 그대로 쓴다. `boolean`은 이름 그대로의 뜻일 때만 돌려주고, 갈래가 셋 이상이거나 "모름"이 섞이면 enum을 돌려준다.
@@ -63,7 +65,7 @@ com.example.ticketing
 | Service → Controller | `*Result` | `dto` |
 | Controller → HTTP | `*Response` (`from(result)`) | `dto` |
 | `*Transaction` → `*Service` | 결과를 뜻하는 이름의 record (예: `HoldPlacement`, `PaymentConclusion`) | `dto` |
-| Outbox 작업 | 작업 종류별 payload record | `outbox/dto` |
+| Outbox 작업 | 작업 종류별 payload record. 쓰는 기능과 처리하는 기능이 함께 보므로 둘 다 의존하는 곳에 둔다 | `outbox/dto` |
 
 - 엔티티는 `service` 밖으로 나가지 않는다. 엔티티에서 DTO를 만들 때는 `*Result.from(entity)` 한 곳에서만 한다.
 - `Map`은 오류 `detail`에만 쓴다. JSON을 문자열 키로 읽고 쓰지 않는다.
@@ -80,7 +82,7 @@ com.example.ticketing
 
 ## 5. 시간
 
-- 만료·마감 판정은 SQL `NOW(6)`이다. "지금 + 기간"은 SQL에서 바인드한 기간으로 계산한다.
+- 만료·마감 판정은 SQL `NOW(6)`이다. "지금 + 기간"은 SQL에서 바인드한 기간으로 계산한다. 마이크로초 기간 값은 `SqlIntervals.micros`로 만든다.
 - 자바에서 업무 시각이 필요하면 `DbClock`에서 받는다. 경과 시간(캐시 신선도, 간격)은 주입한 `LongSupplier` 나노 시계로 잰다. `System.currentTimeMillis()`·`nanoTime()`을 직접 부르지 않는다.
 
 ## 6. Redis
