@@ -148,7 +148,7 @@ cp src/main/resources/application-local.yml.example src/main/resources/applicati
 - 결제 화면에서 로컬 전용 「결제 상황」(정상 승인 / 거절 / 응답 지연)을 골라 PG 타임아웃 흐름을 시연할 수 있습니다.
 
 ```bash
-./gradlew test           # 통합 테스트 383건. MySQL·Redis 필요
+./gradlew test           # 통합 테스트 402건. MySQL·Redis 필요
 ```
 
 테스트는 전용 DB `ticketing_booking_test`(자동 생성)와 Redis DB 1을 써서 시연 데이터와 섞이지 않습니다.
@@ -172,28 +172,33 @@ prod 프로필은 `ddl-auto: validate`라서 [`docs/booking-schema.sql`](docs/bo
 
 ## 프로젝트 구조
 
+기능별 패키지 안을 역할별 하위 패키지로 나눴습니다. 규칙은 [`docs/CONVENTIONS.md`](docs/CONVENTIONS.md)에 있습니다.
+
 ```
-src/main/java/com/example/ticketing/booking/
-├── common/        예외·에러 응답, 사용자 식별, DB 시계, 예매 전용 Redis 연결, 단일 실행 리스, 헬스
+src/main/java/com/example/ticketing/
 ├── user/          닉네임 데모 로그인
-├── show/          공연·회차, 좌석 배치 규칙, 관리 API, 로컬 시드
-├── seat/          좌석, 좌석 정보 캐시, 좌석맵 스냅샷
+├── show/          공연·회차, 관리 API, 로컬 시드
+├── seat/          좌석, 좌석 배치 규칙, 좌석 정보 캐시, 좌석맵 스냅샷
 ├── queue/         회차별 대기열과 승격 스케줄러
-├── hold/          좌석 잡기·놓기·만료, gate/ (Redis 게이트)
-├── payment/       결제 흐름·대사, pg/ (HTTP 클라이언트), fakepg/ (지연·거절·망취소 재현)
-├── purchase/      예매 조회·취소
-├── outbox/        Outbox 작업, 워커, 발권 알림·환불 핸들러
-├── notification/  발권 알림 기록
-├── ops/           운영 집계, 고아 게이트 키 정리
-└── web/           화면 컨트롤러
+├── hold/          좌석 잡기·놓기·만료, Redis 게이트와 고아 키 정리
+├── payment/       결제 흐름·대사·환불, client/ (PG HTTP 클라이언트)
+├── booking/       예매 발급·조회·취소
+├── outbox/        확정 이후 작업 큐 (기록·집기·디스패치)
+├── notification/  발권 알림
+├── ops/           운영 집계
+├── fakepg/        지연·거절·망취소를 재현하는 가짜 결제사
+├── web/           화면 컨트롤러
+└── common/        error · web · redis · jdbc · time · metrics · log · config
+
+각 기능 안:  controller/  dto/  service/  repository/  domain/
 
 src/main/resources/
-├── scripts/booking/      hold · release · extend · confirm · queue_* · seatmap_lease (Lua)
+├── scripts/booking/      Lua (hold · release · extend · confirm · queue_* · seatmap_lease)
 ├── templates/booking/    화면 템플릿
-└── static/booking/       화면 CSS·JS
+└── static/booking/       화면 CSS·JS (api.js·bk-ui.js 공용 부품 + 화면별 파일)
 
 load-test/                ScenarioCSimulation, run-booking.sh
-docs/booking-schema.sql   prod용 스키마
+docs/                     CONVENTIONS.md (코드 규약), booking-schema.sql (prod 스키마)
 ```
 
 ---
