@@ -7,10 +7,12 @@
   <title th:text="${title} + ' · 티켓 예매'">티켓 예매</title>
   <link rel="stylesheet" th:href="@{/booking/css/booking.css}">
   <script th:src="@{/booking/js/api.js}" defer></script>
+  <script th:src="@{/booking/js/bk-ui.js}" defer></script>
 </th:block>
 </head>
 <body>
-<header class="top" th:fragment="top(title, sub, back)">
+<!-- 화면 머리. back은 뒤로 가기 주소, link·linkText는 오른쪽 링크(없으면 null) -->
+<header class="top" th:fragment="top(title, sub, back, link, linkText)">
   <div class="top-in">
     <a class="back" id="page-back" th:if="${back != null}" th:href="${back}" aria-label="뒤로">
       <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.5 4 6.5 10l6 6"/></svg>
@@ -19,8 +21,15 @@
       <h1 id="page-title" th:text="${title}">티켓 예매</h1>
       <p id="page-sub" th:text="${sub}" th:hidden="${sub == null or sub == ''}"></p>
     </div>
-    <a class="top-link" id="page-link" th:if="${topLink != null}" th:href="${topLink}" th:text="${topLinkText}"></a>
+    <a class="top-link" id="page-link" th:if="${link != null}" th:href="${link}" th:text="${linkText}"></a>
   </div>
 </header>
+
+<!-- 찾을 수 없는 화면·공연. id가 있으면 숨겨 두었다가 스크립트가 연다 -->
+<section class="panel state" th:fragment="lost(id, title, text)" th:id="${id}" role="alert" th:hidden="${id != null}">
+  <p class="state-title" th:text="${title}">찾을 수 없는 화면이에요</p>
+  <p class="state-text" th:text="${text}">주소가 바뀌었거나 잘못 입력됐어요.</p>
+  <a class="btn btn-primary" th:href="@{/booking/shows}">공연 목록</a>
+</section>
 </body>
 </html>

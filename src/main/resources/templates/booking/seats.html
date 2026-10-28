@@ -6,25 +6,25 @@
   <script th:src="@{/booking/js/seats.js}" defer></script>
 </head>
 <body class="seats-page" th:data-performance-id="${performanceId}" th:data-max-seats="${maxSeats}">
-<header th:replace="~{booking/layout :: top('자리 고르기', null, @{/booking/shows})}"></header>
+<header th:replace="~{booking/layout :: top('자리 고르기', null, @{/booking/shows}, null, null)}"></header>
 <main class="wrap">
   <div class="map">
-    <div class="hint" id="hint" hidden>
+    <div class="hint" id="seats-hint" hidden>
       <svg viewBox="0 0 52 40" aria-hidden="true">
-        <rect x="6" y="3" width="10" height="10" rx="2" fill="#fff" stroke="#cf3f5a" stroke-width="2"/>
-        <rect x="21" y="3" width="10" height="10" rx="2" fill="#1f4fd6"/>
-        <path d="M23.5 8.2l2 2 3.6-4" stroke="#fff" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
-        <rect x="36" y="3" width="10" height="10" rx="2" fill="#fff" stroke="#cf3f5a" stroke-width="2"/>
-        <path d="M26 17v8m-3-3 3 3 3-3" stroke="#1f4fd6" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
-        <rect x="4" y="29" width="44" height="9" rx="2.5" fill="#1f4fd6"/>
+        <rect class="h-free" x="6" y="3" width="10" height="10" rx="2" stroke-width="2"/>
+        <rect class="h-mine" x="21" y="3" width="10" height="10" rx="2"/>
+        <path class="h-check" d="M23.5 8.2l2 2 3.6-4" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+        <rect class="h-free" x="36" y="3" width="10" height="10" rx="2" stroke-width="2"/>
+        <path class="h-arrow" d="M26 17v8m-3-3 3 3 3-3" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+        <rect class="h-mine" x="4" y="29" width="44" height="9" rx="2.5"/>
       </svg>
       <p>자리를 눌러 고르고 아래 단추를 누르세요</p>
-      <button class="x" id="hint-close" type="button" aria-label="안내 닫기">
+      <button class="x" id="seats-hint-close" type="button" aria-label="안내 닫기">
         <svg width="14" height="14" viewBox="0 0 14 14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M2 2l10 10M12 2 2 12"/></svg>
       </button>
     </div>
     <div class="panel meta">
-      <ul class="legend" id="legend"></ul>
+      <ul class="legend" id="seats-legend"></ul>
       <ul class="states">
         <li><span class="chip free"></span>빈자리</li>
         <li><span class="chip off"></span>고를 수 없음</li>
@@ -32,22 +32,22 @@
       </ul>
     </div>
     <div class="stage">무대</div>
-    <div class="tabs" role="tablist" aria-label="구역" id="tabs"></div>
-    <p class="where" id="where"></p>
-    <p class="empty map-state" id="map-state" role="status">자리 정보를 불러오고 있어요</p>
-    <div class="sgrid" id="seat-grid" role="tabpanel" hidden></div>
-    <p class="help-again"><button class="link" id="hint-again" type="button">도움말 다시 보기</button></p>
+    <div class="tabs" role="tablist" aria-label="구역" id="seats-tabs"></div>
+    <p class="where" id="seats-where"></p>
+    <p class="empty map-state" id="seats-map-state" role="status">자리 정보를 불러오고 있어요</p>
+    <div class="sgrid" id="seats-grid" role="tabpanel" hidden></div>
+    <p class="help-again"><button class="link" id="seats-hint-again" type="button">도움말 다시 보기</button></p>
   </div>
 </main>
-<div class="bar" id="bar">
-  <div class="bar-note"><p class="alert seat-note" id="seat-note" role="status"></p></div>
-  <div class="bar-in pick" id="pick">
-    <div class="pick-text"><p class="pick-seats" id="pick-seats">아직 고른 자리가 없어요</p><p class="pick-sub" id="pick-sub"></p></div>
-    <button class="btn btn-primary" id="pick-submit" type="button" disabled>자리를 골라 주세요</button>
+<div class="bar" id="seats-bar">
+  <div class="bar-note"><p class="alert seat-note" id="seats-note" role="status"></p></div>
+  <div class="bar-in pick" id="seats-pick">
+    <div class="pick-text"><p class="pick-seats" id="seats-pick-seats">아직 고른 자리가 없어요</p><p class="pick-sub" id="seats-pick-sub"></p></div>
+    <button class="btn btn-primary" id="seats-pick-submit" type="button" disabled>자리를 골라 주세요</button>
   </div>
-  <section class="bar-in stop" id="stop" aria-live="polite" hidden>
-    <div class="stop-text"><p class="stop-title" id="stop-title"></p><p class="stop-sub" id="stop-sub"></p></div>
-    <button class="btn btn-primary" id="stop-action" type="button"></button>
+  <section class="bar-in stop" id="seats-stop" aria-live="polite" hidden>
+    <div class="stop-text"><p class="stop-title" id="seats-stop-title"></p><p class="stop-sub" id="seats-stop-text"></p></div>
+    <button class="btn btn-primary" id="seats-stop-action" type="button"></button>
   </section>
 </div>
 </body>

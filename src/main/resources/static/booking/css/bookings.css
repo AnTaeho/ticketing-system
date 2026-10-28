@@ -4,31 +4,25 @@
 .bk-state{display:flex;align-items:center;gap:8px;margin-bottom:10px}
 .bk-state:focus{outline:none}
 .bk-state .tag{font-size:13px;line-height:24px;padding:0 9px}
-.bk-title{font-size:18px;font-weight:700;line-height:1.35}
+.bk-title{font-size:var(--title-m);font-weight:700;line-height:1.35}
 .bk-when{margin-top:2px;font-size:14px;color:var(--muted)}
 .bk-seats{list-style:none;margin-top:14px;border-top:1px solid var(--line)}
 .bk-seats li{display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:10px 0;border-bottom:1px solid var(--line)}
 .bk-seats strong{font-weight:600}
 .bk-seats span{font-size:14px;color:var(--muted);white-space:nowrap}
-.bk .facts{margin-top:4px}
-.bk .facts div{display:flex;justify-content:space-between;gap:16px;padding:9px 0;border-bottom:1px solid var(--line);font-size:14px}
-.bk .facts dt{color:var(--muted);flex:none}
-.bk .facts dd{text-align:right;font-weight:600}
-.bk-msg{margin-top:14px;padding:10px 12px;border-radius:var(--radius);background:var(--accent-soft);color:#1b2f6b;font-size:14px;line-height:1.5}
+.bk .facts{margin-top:4px;border-top:0}
+.bk .facts div{padding:9px 0}
+.bk-msg{margin-top:14px;padding:10px 12px;border-radius:var(--radius);background:var(--accent-soft);color:var(--accent-text);font-size:14px;line-height:1.5}
 .bk-msg.is-wait{background:var(--bg);color:var(--muted)}
-.bk-msg.is-refund{background:var(--warn-soft);color:#9a3a12}
+.bk-msg.is-refund{background:var(--warn-soft);color:var(--warn-text)}
 .bk-msg.is-done{background:var(--bg);color:var(--muted)}
 .bk-alert{margin-top:12px}
 .bk-foot{margin-top:14px}
 p.bk-foot{text-align:center}
-.ask{padding:14px;border:1px solid var(--line-strong);border-radius:var(--radius)}
-.ask-title{font-size:16px;font-weight:800}
-.ask-text{margin-top:2px;font-size:14px;color:var(--muted)}
-.ask-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px}
 .bk.is-cancelled .bk-title,.bk.is-cancelled .bk-when,.bk.is-cancelled .bk-seats strong{color:var(--muted)}
 
 /* 예매가 없을 때 */
-.bk-none{padding:28px 20px 20px;text-align:center}
-.bk-none-title{font-size:18px;font-weight:700}
+.bk-none{margin-top:0;padding-bottom:20px;text-align:center}
+.bk-none-title{font-size:var(--title-m);font-weight:700}
 .bk-none-text{margin-top:4px;color:var(--muted);font-size:14px}
-.bk-none .btn{margin-top:20px}
+.bk-none>.btn{margin-top:20px}

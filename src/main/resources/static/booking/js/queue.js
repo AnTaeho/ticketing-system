@@ -6,9 +6,7 @@
 
   var pid = document.body.dataset.performanceId;
   var showId = bk.positiveId(bk.query('show'));
-  var tokenKey = 'bk_queue_' + pid;
-  var showHref = showId ? '/booking/shows/' + showId : '/booking/shows';
-  var seatsHref = '/booking/performances/' + pid + '/seats' + (showId ? '?show=' + showId : '');
+  var tokenKey = bk.keys.queueToken(pid);
 
   var wait = document.getElementById('q-wait');
   var ahead = document.getElementById('q-ahead');
@@ -16,23 +14,16 @@
   var meter = document.getElementById('q-meter');
   var fill = document.getElementById('q-fill');
   var start = document.getElementById('q-start');
-  var state = document.getElementById('q-state');
-  var stateTitle = document.getElementById('q-state-title');
-  var stateText = document.getElementById('q-state-text');
-  var action = document.getElementById('q-action');
   var note = document.getElementById('q-note');
   var sub = document.getElementById('q-sub');
+  var stateBox = bk.stateBox('q-state');
 
+  var token = bk.session.get(tokenKey);
+  // 이 화면에 막 들어와 저장된 표를 처음 확인하는 중. 이미 쓴 표일 수 있어 끝났으면 말없이 새로 선다
+  var arrived = !!token;
   var firstPosition = null;
-  var timer = null;
-  var onAction = null;
 
-  action.addEventListener('click', function () { if (onAction) onAction(); });
-
-  function later(fn, ms) {
-    clearTimeout(timer);
-    timer = setTimeout(fn, ms);
-  }
+  var poller = bk.poller({ interval: POLL_MS, run: step, onData: stepDone, onError: stepFailed });
 
   function showNote(message) {
     note.textContent = message || '';
@@ -41,13 +32,7 @@
 
   function showState(title, text, button) {
     wait.hidden = true;
-    state.hidden = false;
-    stateTitle.textContent = title;
-    stateText.textContent = text || '';
-    stateText.hidden = !text;
-    onAction = button ? button.run : null;
-    action.hidden = !button;
-    if (button) action.textContent = button.label;
+    stateBox.show(title, text, button);
   }
 
   // position은 나를 포함한 순번이라 내 앞 사람 수는 하나 적다
@@ -60,106 +45,101 @@
     start.textContent = '줄 선 때 ' + bk.count(firstPosition) + '명';
     fill.style.width = done.toFixed(1) + '%';
     meter.setAttribute('aria-valuenow', String(Math.round(done)));
-    state.hidden = true;
+    stateBox.box.hidden = true;
     wait.hidden = false;
   }
 
+  function forgetToken() {
+    token = null;
+    bk.session.remove(tokenKey);
+  }
+
+  // 표가 없으면 줄을 서고, 있으면 순서를 묻는다
+  function step() {
+    if (token) {
+      return bk.get('/api/performances/' + pid + '/queue/tokens/' + encodeURIComponent(token))
+        .then(function (status) { return { status: status }; });
+    }
+    showNote('');
+    showState('줄을 서고 있어요', '잠시만 기다려 주세요.');
+    return bk.post('/api/performances/' + pid + '/queue/tokens')
+      .then(function (entered) { return { entered: entered }; });
+  }
+
+  function stepDone(r) {
+    if (r.entered) {
+      token = r.entered.token;
+      arrived = false;
+      bk.session.set(tokenKey, token);
+      if (r.entered.status === 'PROCESSING') admit();
+      else poller.now();
+      return;
+    }
+    var s = r.status;
+    showNote('');
+    if (s.status === 'PROCESSING') {
+      admit();
+    } else if (s.status === 'EXPIRED') {
+      if (arrived) { forgetToken(); poller.now(); } else expired();
+    } else {
+      arrived = false;
+      showWaiting(s.position, s.estimatedWaitSeconds);
+    }
+  }
+
   function admit() {
-    clearTimeout(timer);
+    poller.stop();
     showNote('');
     showState('차례가 됐어요', '자리 고르는 화면으로 넘어가요.');
     // 뒤로 가기가 이 화면에 다시 걸리지 않게 기록을 바꿔 넘어간다
-    location.replace(seatsHref);
+    location.replace(bk.links.seats(pid, showId));
   }
 
   function expired() {
-    clearTimeout(timer);
-    bk.session.remove(tokenKey);
+    poller.stop();
+    forgetToken();
     showNote('');
     showState('입장 순서가 지났어요', '줄을 다시 서면 맨 뒤부터 기다려요.',
-      { label: '다시 줄 서기', run: function () { firstPosition = null; enter(); } });
+      { label: '다시 줄 서기', run: function () { firstPosition = null; poller.now(); } });
   }
 
   // 사람이 많거나 연결이 끊기면 지금 화면을 두고 잠시 뒤 같은 일을 다시 한다
-  function retryLater(e, retry) {
-    var message = e.code === 'NETWORK'
-      ? '인터넷 연결이 불안정해요. 연결되면 이어서 기다려요'
-      : '사람이 많아 잠시 막혔어요. 잠시 뒤 저절로 다시 이어 가요';
+  function retryLater(e) {
+    var network = bk.isNetworkError(e);
+    var words = network ? bk.WORDS.network : bk.WORDS.busy;
     if (wait.hidden) {
-      showState(e.code === 'NETWORK' ? '인터넷 연결이 불안정해요' : '사람이 많아 잠시 막혔어요',
-        '잠시 뒤 저절로 다시 이어 가요.');
+      showState(words, '잠시 뒤 저절로 다시 이어 가요.');
     } else {
-      showNote(message);
+      showNote(words + (network ? '. 연결되면 이어서 기다려요' : '. 잠시 뒤 저절로 다시 이어 가요'));
     }
-    later(retry, RETRY_MS);
+    poller.later(RETRY_MS);
   }
 
-  function fail(e, retry) {
-    if (e.status === 503 || e.code === 'NETWORK') {
-      retryLater(e, retry);
+  function stepFailed(e) {
+    // 다른 닉네임으로 받은 토큰 등 쓸 수 없는 토큰이면 버리고 새로 선다
+    if (token && e.code === 'QUEUE_TOKEN_NOT_FOUND') {
+      forgetToken();
+      poller.now();
       return;
     }
-    clearTimeout(timer);
+    if (e.status === 503 || bk.isNetworkError(e)) {
+      retryLater(e);
+      return;
+    }
+    poller.stop();
     showNote('');
     if (e.code === 'NOT_OPEN' || e.code === 'PERFORMANCE_NOT_FOUND') {
       showState('지금은 줄을 설 수 없어요', e.message,
-        { label: '공연 정보로 돌아가기', run: function () { location.href = showHref; } });
+        { label: '공연 정보로 돌아가기', run: function () { location.href = bk.links.show(showId); } });
       return;
     }
-    showState('줄을 서지 못했어요', e.message, { label: '다시 시도', run: retry });
+    showState('줄을 서지 못했어요', e.message, { label: '다시 시도', run: poller.now });
   }
 
-  // arrived: 이 화면에 막 들어와 저장된 표를 처음 확인하는 중. 이미 쓴 표일 수 있어 끝났으면 말없이 새로 선다
-  function poll(token, arrived) {
-    bk.get('/api/performances/' + pid + '/queue/tokens/' + encodeURIComponent(token)).then(function (s) {
-      showNote('');
-      if (s.status === 'PROCESSING') return admit();
-      if (s.status === 'EXPIRED') {
-        if (!arrived) return expired();
-        bk.session.remove(tokenKey);
-        return enter();
-      }
-      showWaiting(s.position, s.estimatedWaitSeconds);
-      later(function () { poll(token, false); }, POLL_MS);
-    }, function (e) {
-      // 다른 닉네임으로 받은 토큰 등 쓸 수 없는 토큰이면 버리고 새로 선다
-      if (e.code === 'QUEUE_TOKEN_NOT_FOUND') {
-        bk.session.remove(tokenKey);
-        return enter();
-      }
-      fail(e, function () { poll(token, arrived); });
-    });
-  }
-
-  function enter() {
-    showNote('');
-    showState('줄을 서고 있어요', '잠시만 기다려 주세요.');
-    bk.post('/api/performances/' + pid + '/queue/tokens').then(function (r) {
-      bk.session.set(tokenKey, r.token);
-      if (r.status === 'PROCESSING') return admit();
-      poll(r.token, false);
-    }, function (e) {
-      fail(e, enter);
-    });
-  }
-
-  function loadHeader() {
-    bk.setHeader(null, null, showHref);
-    if (!showId) return;
-    bk.get('/api/shows/' + showId).then(function (show) {
-      var performance = (show.performances || []).filter(function (p) { return String(p.id) === pid; })[0];
-      if (!performance) {
-        bk.setHeader(show.title, show.venueName, showHref);
-        return;
-      }
-      var when = bk.dateTime(performance.startsAt);
-      bk.setHeader(show.title, when + ' · ' + show.venueName, showHref);
-      sub.textContent = when + ' 회차 줄이에요';
-      sub.hidden = false;
-    }, function () { /* 머리글은 없어도 줄은 선다 */ });
-  }
-
-  loadHeader();
-  var saved = bk.session.get(tokenKey);
-  if (saved) poll(saved, true); else enter();
+  bk.loadPerformanceHeader(showId, pid).then(function (found) {
+    if (!found || !found.performance) return;
+    sub.textContent = bk.dateTime(found.performance.startsAt) + ' 회차 줄이에요';
+    sub.hidden = false;
+  });
+  poller.now();
 })();

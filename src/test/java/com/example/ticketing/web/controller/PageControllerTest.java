@@ -47,18 +47,18 @@ class PageControllerTest {
 
     @ParameterizedTest(name = "{0} 경로는 {1} 뷰를 그린다")
     @CsvSource({
-            "/booking/login, booking/login, /booking/js/login.js",
-            "/booking/shows, booking/shows, /booking/js/shows.js",
-            "/booking/shows/7, booking/show, /booking/js/show.js",
-            "/booking/performances/9/queue, booking/queue, /booking/js/queue.js",
-            "/booking/performances/9/seats, booking/seats, /booking/js/seats.js",
-            "/booking/holds/5/checkout, booking/checkout, /booking/js/checkout.js",
-            "/booking/bookings, booking/bookings, /booking/js/bookings.js",
-            "/booking/ops/performances/9, booking/ops, /booking/js/ops.js"
+            "/booking/login, booking/login, /booking/js/login.js, /booking/css/login.css",
+            "/booking/shows, booking/shows, /booking/js/shows.js, /booking/css/shows.css",
+            "/booking/shows/7, booking/show, /booking/js/show.js, /booking/css/show.css",
+            "/booking/performances/9/queue, booking/queue, /booking/js/queue.js, /booking/css/queue.css",
+            "/booking/performances/9/seats, booking/seats, /booking/js/seats.js, /booking/css/seats.css",
+            "/booking/holds/5/checkout, booking/checkout, /booking/js/checkout.js, /booking/css/checkout.css",
+            "/booking/bookings, booking/bookings, /booking/js/bookings.js, /booking/css/bookings.css",
+            "/booking/ops/performances/9, booking/ops, /booking/js/ops.js, /booking/css/ops.css"
     })
-    @DisplayName("각 화면 경로는 해당 뷰를 공통 레이아웃과 함께 그린다")
-    void rendersPage(String path, String viewName, String pageScript) throws Exception {
-        mockMvc.perform(get(path))
+    @DisplayName("각 화면 경로는 해당 뷰를 공통 레이아웃과 화면 전용 스타일·스크립트와 함께 그린다")
+    void rendersPage(String path, String viewName, String pageScript, String pageStyle) throws Exception {
+        String html = mockMvc.perform(get(path))
                 .andExpect(status().isOk())
                 .andExpect(view().name(viewName))
                 .andExpect(content().contentTypeCompatibleWith("text/html"))
@@ -66,8 +66,15 @@ class PageControllerTest {
                 .andExpect(content().string(containsString("name=\"viewport\"")))
                 .andExpect(content().string(containsString("href=\"/booking/css/booking.css\"")))
                 .andExpect(content().string(containsString("src=\"/booking/js/api.js\"")))
+                .andExpect(content().string(containsString("src=\"/booking/js/bk-ui.js\"")))
                 .andExpect(content().string(containsString("src=\"" + pageScript + "\"")))
-                .andExpect(content().string(containsString("id=\"page-title\"")));
+                .andExpect(content().string(containsString("id=\"page-title\"")))
+                .andReturn().getResponse().getContentAsString();
+        assertThat(html.indexOf("src=\"/booking/js/bk-ui.js\""))
+                .isGreaterThan(html.indexOf("src=\"/booking/js/api.js\""))
+                .isLessThan(html.indexOf("src=\"" + pageScript + "\""));
+        assertThat(html.indexOf("href=\"" + pageStyle + "\""))
+                .isGreaterThan(html.indexOf("href=\"/booking/css/booking.css\""));
     }
 
     @Test
@@ -98,8 +105,8 @@ class PageControllerTest {
                 .andExpect(model().attribute("maxSeats", 4))
                 .andExpect(content().string(containsString("data-performance-id=\"9\"")))
                 .andExpect(content().string(containsString("data-max-seats=\"4\"")))
-                .andExpect(content().string(containsString("id=\"seat-grid\"")))
-                .andExpect(content().string(containsString("id=\"pick-submit\"")))
+                .andExpect(content().string(containsString("id=\"seats-grid\"")))
+                .andExpect(content().string(containsString("id=\"seats-pick-submit\"")))
                 .andReturn().getResponse().getContentAsString();
         assertThat(html.indexOf("href=\"/booking/css/seats.css\""))
                 .isGreaterThan(html.indexOf("href=\"/booking/css/booking.css\""));
@@ -114,9 +121,9 @@ class PageControllerTest {
                 .andExpect(model().attribute("demoPg", true))
                 .andExpect(content().string(containsString("data-hold-id=\"5\"")))
                 .andExpect(content().string(containsString("data-demo-pg=\"true\"")))
-                .andExpect(content().string(containsString("id=\"clock\"")))
-                .andExpect(content().string(containsString("id=\"pay\"")))
-                .andExpect(content().string(containsString("id=\"release\"")))
+                .andExpect(content().string(containsString("id=\"co-clock\"")))
+                .andExpect(content().string(containsString("id=\"co-pay\"")))
+                .andExpect(content().string(containsString("id=\"co-release\"")))
                 .andExpect(content().string(containsString("name=\"scenario\" value=\"SLOW_SUCCESS\"")))
                 .andReturn().getResponse().getContentAsString();
         assertThat(html.indexOf("href=\"/booking/css/checkout.css\""))
@@ -141,7 +148,7 @@ class PageControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(model().attribute("demoPg", false))
                 .andExpect(content().string(containsString("data-demo-pg=\"false\"")))
-                .andExpect(content().string(containsString("id=\"pay\"")))
+                .andExpect(content().string(containsString("id=\"co-pay\"")))
                 .andExpect(content().string(not(containsString("name=\"scenario\""))));
     }
 
@@ -161,7 +168,7 @@ class PageControllerTest {
     void bookingsPage() throws Exception {
         String html = mockMvc.perform(get("/booking/bookings"))
                 .andExpect(status().isOk())
-                .andExpect(content().string(containsString("id=\"bookings\"")))
+                .andExpect(content().string(containsString("id=\"bk-list\"")))
                 .andExpect(content().string(containsString("아직 예매한 공연이 없어요")))
                 .andExpect(content().string(containsString("공연 보러 가기")))
                 .andReturn().getResponse().getContentAsString();
@@ -254,10 +261,15 @@ class PageControllerTest {
     @CsvSource({
             "/booking/css/booking.css",
             "/booking/js/api.js",
+            "/booking/js/bk-ui.js",
             "/booking/js/login.js",
+            "/booking/css/login.css",
             "/booking/js/shows.js",
+            "/booking/css/shows.css",
             "/booking/js/show.js",
+            "/booking/css/show.css",
             "/booking/js/queue.js",
+            "/booking/css/queue.css",
             "/booking/js/seats.js",
             "/booking/css/seats.css",
             "/booking/js/checkout.js",

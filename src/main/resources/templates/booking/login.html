@@ -2,19 +2,20 @@
 <html lang="ko" xmlns:th="http://www.thymeleaf.org">
 <head>
   <th:block th:replace="~{booking/layout :: assets('시작하기')}"></th:block>
+  <link rel="stylesheet" th:href="@{/booking/css/login.css}">
   <script th:src="@{/booking/js/login.js}" defer></script>
 </head>
 <body class="narrow">
-<header th:replace="~{booking/layout :: top('티켓 예매', '공연을 고르고 자리를 잡아 보세요', null)}"></header>
+<header th:replace="~{booking/layout :: top('티켓 예매', '공연을 고르고 자리를 잡아 보세요', null, null, null)}"></header>
 <main class="wrap">
   <form class="panel login" id="login-form" novalidate>
     <h2>닉네임으로 시작해요</h2>
     <p class="lead">비밀번호 없이 닉네임만 있으면 돼요.</p>
     <div class="field">
-      <label for="nickname">닉네임</label>
-      <input class="input" id="nickname" name="nickname" type="text" autocomplete="nickname"
-             maxlength="20" placeholder="예: 별빛관객" aria-describedby="nickname-note" required>
-      <p class="note" id="nickname-note">2~20자로 써 주세요. 같은 닉네임으로 들어오면 내 예매를 다시 볼 수 있어요.</p>
+      <label for="login-nickname">닉네임</label>
+      <input class="input" id="login-nickname" name="nickname" type="text" autocomplete="nickname"
+             maxlength="20" placeholder="예: 별빛관객" aria-describedby="login-nickname-note" required>
+      <p class="note" id="login-nickname-note">2~20자로 써 주세요. 같은 닉네임으로 들어오면 내 예매를 다시 볼 수 있어요.</p>
     </div>
     <p class="alert" id="login-error" role="alert" hidden></p>
     <button class="btn btn-primary" id="login-submit" type="submit">시작하기</button>

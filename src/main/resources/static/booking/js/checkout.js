@@ -6,63 +6,73 @@
   var SLOW_AFTER_MS = 2 * 60 * 1000;
   var PAY_TIMEOUT_MS = 15000;
   var URGENT_SECONDS = 60;
-  var SHOWS_HREF = '/booking/shows';
-  var BOOKINGS_HREF = '/booking/bookings';
   var METHOD_NAMES = { CARD: '신용·체크카드', EASY_PAY: '간편결제' };
+  var AGAIN = '다시 예매하려면 줄을 서서 자리를 골라 주세요.';
 
   var body = document.body;
   var holdId = body.dataset.holdId;
   var demoPg = body.dataset.demoPg === 'true';
   var showId = bk.positiveId(bk.query('show'));
-  var showHref = showId ? '/booking/shows/' + showId : SHOWS_HREF;
-  var keyName = 'bk_idem_' + holdId;
-  var methodName = 'bk_method_' + holdId;
+  var showHref = bk.links.show(showId);
+  var idemKey = bk.keys.idempotency(holdId);
+  var methodKey = bk.keys.payMethod(holdId);
   var el = bk.el;
 
-  var back = document.getElementById('page-back');
-  var clock = document.getElementById('clock');
-  var clockMain = document.getElementById('clock-main');
-  var clockSub = document.getElementById('clock-sub');
-  var loading = document.getElementById('co-loading');
-  var co = document.getElementById('co');
-  var seatLines = document.getElementById('seat-lines');
-  var amountRows = document.getElementById('amount-rows');
-  var total = document.getElementById('total');
-  var payBar = document.getElementById('pay-bar');
-  var coNote = document.getElementById('co-note');
-  var actions = document.getElementById('actions');
-  var payButton = document.getElementById('pay');
-  var releaseButton = document.getElementById('release');
-  var ask = document.getElementById('ask');
-  var askNo = document.getElementById('ask-no');
-  var askYes = document.getElementById('ask-yes');
-  var pend = document.getElementById('pend');
-  var pendNote = document.getElementById('pend-note');
-  var pendLead = document.getElementById('pend-lead');
-  var pendFacts = document.getElementById('pend-facts');
-  var pendAfter = document.getElementById('pend-after');
-  var result = document.getElementById('result');
-  var resultTitle = document.getElementById('result-title');
-  var resultText = document.getElementById('result-text');
-  var resultTicket = document.getElementById('result-ticket');
-  var resultNumber = document.getElementById('result-number');
-  var resultFacts = document.getElementById('result-facts');
-  var resultMain = document.getElementById('result-main');
-  var resultSub = document.getElementById('result-sub');
+  var ui = {
+    back: document.getElementById('page-back'),
+    clock: document.getElementById('co-clock'),
+    clockMain: document.getElementById('co-clock-main'),
+    clockSub: document.getElementById('co-clock-sub'),
+    loading: document.getElementById('co-loading'),
+    order: document.getElementById('co-order'),
+    seatLines: document.getElementById('co-seat-lines'),
+    amountRows: document.getElementById('co-amount-rows'),
+    total: document.getElementById('co-total'),
+    payBar: document.getElementById('co-pay-bar'),
+    note: document.getElementById('co-note'),
+    actions: document.getElementById('co-actions'),
+    pay: document.getElementById('co-pay'),
+    release: document.getElementById('co-release'),
+    pend: document.getElementById('co-pend'),
+    pendNote: document.getElementById('co-pend-note'),
+    pendLead: document.getElementById('co-pend-lead'),
+    pendFacts: document.getElementById('co-pend-facts'),
+    pendAfter: document.getElementById('co-pend-after'),
+    result: document.getElementById('co-result'),
+    resultTitle: document.getElementById('co-result-title'),
+    resultText: document.getElementById('co-result-text'),
+    resultTicket: document.getElementById('co-result-ticket'),
+    resultNumber: document.getElementById('co-result-number'),
+    resultFacts: document.getElementById('co-result-facts'),
+    resultMain: document.getElementById('co-result-main'),
+    resultSub: document.getElementById('co-result-sub')
+  };
 
-  // loading → pay → paying → pending / result
-  var stage = 'loading';
-  var hold = null;
-  var headerDone = false;
-  var deadlineAt = 0;
-  var timeUp = false;
-  var tickTimer = null;
-  var recheckTimer = null;
-  var pollTimer = null;
-  var pollSeq = 0;
-  var pendingPaymentId = null;
-  var pendingSince = 0;
-  var memoryKey = null;
+  var state = {
+    stage: 'loading',        // loading → pay → paying → pending / result
+    hold: null,
+    headerDone: false,
+    deadlineAt: 0,           // 결제 마감의 이 화면 시계 값
+    timeUp: false,
+    pendingPaymentId: null,
+    pendingSince: 0,
+    memoryKey: null          // 저장소를 못 쓸 때의 결제 요청 번호
+  };
+  var timers = { tick: null, recheck: null };
+
+  var ask = bk.confirmBox({
+    id: 'co-ask', title: '자리를 놓을까요?', text: '놓으면 다른 분이 바로 고를 수 있어요.',
+    no: '아니요', yes: '예, 놓을게요', busy: '놓고 있어요', focus: 'no',
+    onNo: function () { closeAsk(); ui.release.focus(); },
+    onYes: releaseHold
+  });
+  ui.payBar.insertBefore(ask.node, ui.actions);
+
+  var pendingPoller = bk.poller({ interval: POLL_MS, run: checkPending, onData: pendingChecked, onError: pendingFailed });
+
+  function has(table, key) {
+    return Object.prototype.hasOwnProperty.call(table, key);
+  }
 
   // 브라우저 시계를 바꿔도 흔들리지 않는 시계
   function mono() {
@@ -87,69 +97,21 @@
 
   // 저장소를 못 쓰면 이 화면이 떠 있는 동안만 같은 번호를 쓴다
   function idempotencyKey() {
-    var key = bk.session.get(keyName) || memoryKey;
+    var key = bk.session.get(idemKey) || state.memoryKey;
     if (!key) {
       key = uuid();
-      bk.session.set(keyName, key);
+      bk.session.set(idemKey, key);
     }
-    memoryKey = key;
+    state.memoryKey = key;
     return key;
   }
 
-  // ---- 글 만들기 ----
-
-  function byPlace(a, b) {
-    if (a.section !== b.section) return a.section < b.section ? -1 : 1;
-    return a.rowNo - b.rowNo || a.seatNo - b.seatNo;
-  }
-
-  // [{grade, count, price, sum}] 비싼 등급부터
-  function grades(seats) {
-    var map = {};
-    seats.forEach(function (s) {
-      var g = map[s.grade] || (map[s.grade] = { grade: s.grade, count: 0, price: s.price, sum: 0 });
-      g.count++;
-      g.sum += s.price;
-    });
-    return Object.keys(map).map(function (k) { return map[k]; }).sort(function (a, b) {
-      return b.price - a.price || (a.grade < b.grade ? -1 : 1);
-    });
-  }
-
-  // R석 2매 · S석 1매
-  function gradesText(seats) {
-    return grades(seats).map(function (g) { return g.grade + '석 ' + g.count + '매'; }).join(' · ');
-  }
-
-  // A구역 3열 9번, 10번 / B구역 1열 2번
-  function placesText(seats) {
-    var groups = [];
-    seats.slice().sort(byPlace).forEach(function (s) {
-      var last = groups[groups.length - 1];
-      if (last && last.section === s.section && last.rowNo === s.rowNo) last.nos.push(s.seatNo);
-      else groups.push({ section: s.section, rowNo: s.rowNo, nos: [s.seatNo] });
-    });
-    return groups.map(function (g) {
-      return g.section + '구역 ' + g.rowNo + '열 ' + g.nos.map(function (n) { return n + '번'; }).join(', ');
-    }).join(' / ');
-  }
-
-  // rows: [{k, v, small, num}]
-  function fillFacts(dl, rows) {
-    dl.textContent = '';
-    rows.forEach(function (row) {
-      if (!row) return;
-      dl.appendChild(el('div', null,
-        el('dt', { text: row.k }),
-        el('dd', { class: row.num ? 'num' : null }, row.v, row.small ? el('small', { text: row.small }) : null)));
-    });
-  }
-
   function seatFacts(withMethod) {
+    var hold = state.hold;
     var seats = hold ? hold.seats || [] : [];
-    var method = METHOD_NAMES[bk.session.get(methodName)];
+    var method = METHOD_NAMES[bk.session.get(methodKey)];
     return [
-      seats.length ? { k: '자리', v: placesText(seats), small: gradesText(seats) } : null,
+      seats.length ? { k: '자리', v: bk.seatText(seats), small: bk.gradeText(seats) } : null,
       hold ? { k: '결제 금액', v: bk.won(hold.totalAmount), num: true } : null,
       withMethod && method ? { k: '결제 수단', v: method } : null
     ];
@@ -159,33 +121,55 @@
 
   // 단추 자리는 남겨 두어 결제 중에 머리글 글자가 옆으로 밀리지 않게 한다
   function setBack(href) {
-    if (!back) return;
-    back.style.visibility = href ? '' : 'hidden';
-    if (href) back.setAttribute('href', href);
+    if (!ui.back) return;
+    ui.back.style.visibility = href ? '' : 'hidden';
+    if (href) ui.back.setAttribute('href', href);
   }
 
   function stopTimers() {
-    clearTimeout(tickTimer);
-    clearTimeout(recheckTimer);
-    clearTimeout(pollTimer);
-    pollSeq++;
+    clearTimeout(timers.tick);
+    clearTimeout(timers.recheck);
+    pendingPoller.stop();
   }
 
   function showOnly(node) {
-    [loading, co, pend, pendAfter, result].forEach(function (n) { n.hidden = n !== node; });
-    if (node === pend) pendAfter.hidden = false;
-    clock.hidden = node !== co;
-    body.classList.toggle('is-narrow', node !== co);
+    [ui.loading, ui.order, ui.pend, ui.pendAfter, ui.result].forEach(function (n) { n.hidden = n !== node; });
+    if (node === ui.pend) ui.pendAfter.hidden = false;
+    ui.clock.hidden = node !== ui.order;
+    body.classList.toggle('is-narrow', node !== ui.order);
   }
 
   function queueHref() {
-    if (!hold) return SHOWS_HREF;
-    return '/booking/performances/' + hold.performanceId + '/queue' + (showId ? '?show=' + showId : '');
+    if (!state.hold) return bk.links.shows;
+    return bk.links.queue(state.hold.performanceId, showId);
   }
 
   function forgetQueueToken() {
-    if (hold) bk.session.remove('bk_queue_' + hold.performanceId);
+    if (state.hold) bk.session.remove(bk.keys.queueToken(state.hold.performanceId));
   }
+
+  // 결과 화면의 단추. 줄 서기부터 다시 하는 단추는 남은 대기 표를 지우고 간다
+  var LINKS = {
+    repick: function () { return { label: '자리 다시 고르기', href: queueHref(), before: forgetQueueToken }; },
+    shows: function () { return { label: '공연 목록', href: bk.links.shows }; },
+    bookings: function () { return { label: '내 예매 보기', href: bk.links.bookings }; },
+    reload: function () { return { label: '다시 불러오기', href: location.pathname + location.search }; }
+  };
+
+  // 결제가 끝난 화면들. facts는 고른 자리와 금액을 함께 보일지
+  var RESULTS = {
+    done: { title: '예매가 끝났어요', facts: true, main: 'bookings', sub: 'shows' },
+    declined: { title: '결제가 거절됐어요. 자리는 풀렸어요', text: AGAIN, main: 'repick', sub: 'shows' },
+    expired: { title: '결제 시간이 지나 자리가 풀렸어요',
+      text: '놓친 자리는 10분 뒤에 다시 고를 수 있어요. 다른 자리는 지금 고를 수 있어요.', main: 'repick', sub: 'shows' },
+    seatLost: { title: '결제는 됐지만 자리를 지키지 못했어요', text: '결제 금액은 자동으로 돌려드려요.', main: 'repick', sub: 'shows' },
+    cancelled: { title: '결제가 취소돼 자리가 풀렸어요', text: AGAIN, main: 'repick', sub: 'shows' },
+    released: { title: '이미 놓은 자리예요', text: AGAIN, main: 'repick', sub: 'shows' },
+    alreadyFreed: { title: '이미 풀린 자리예요', text: AGAIN, main: 'repick', sub: 'shows' },
+    alreadyBooked: { title: '이미 예매가 끝난 자리예요', text: '취소는 내 예매에서 할 수 있어요.', facts: true, main: 'bookings', sub: 'shows' },
+    notFound: { title: '찾을 수 없는 자리예요', text: '공연 목록에서 다시 골라 주세요.', main: 'shows' },
+    loadFailed: { title: '결제 정보를 불러오지 못했어요', main: 'reload', sub: 'shows' }
+  };
 
   function setLink(node, action) {
     node.hidden = !action;
@@ -195,212 +179,146 @@
     node.onclick = action.before || null;
   }
 
-  // 결제가 끝난 화면. 줄 서기부터 다시 하는 단추는 남은 대기 표를 지우고 간다
-  function showResult(opts) {
+  // extra: {text, number}로 표의 글을 바꾼다
+  function showResult(kind, extra) {
+    var r = RESULTS[kind];
+    var x = extra || {};
     stopTimers();
-    stage = 'result';
-    resultTitle.textContent = opts.title;
-    resultText.textContent = opts.text || '';
-    resultTicket.hidden = !opts.number;
-    resultNumber.textContent = opts.number || '';
-    fillFacts(resultFacts, opts.facts || []);
-    setLink(resultMain, opts.main);
-    setLink(resultSub, opts.sub);
-    showOnly(result);
+    state.stage = 'result';
+    ui.resultTitle.textContent = r.title;
+    ui.resultText.textContent = x.text || r.text || '';
+    ui.resultTicket.hidden = !x.number;
+    ui.resultNumber.textContent = x.number || '';
+    bk.fillFacts(ui.resultFacts, r.facts ? seatFacts(false) : []);
+    setLink(ui.resultMain, r.main ? LINKS[r.main]() : null);
+    setLink(ui.resultSub, r.sub ? LINKS[r.sub]() : null);
+    showOnly(ui.result);
     setBack(showHref);
     window.scrollTo(0, 0);
   }
 
-  function repick() {
-    return { label: '자리 다시 고르기', href: queueHref(), before: forgetQueueToken };
-  }
-
-  function showsLink() {
-    return { label: '공연 목록', href: SHOWS_HREF };
-  }
-
   function showDone(number) {
-    showResult({
-      title: '예매가 끝났어요',
-      text: number ? '내 예매에서 언제든 다시 볼 수 있어요.' : '예매번호는 내 예매에서 볼 수 있어요.',
+    showResult('done', {
       number: number,
-      facts: seatFacts(false),
-      main: { label: '내 예매 보기', href: BOOKINGS_HREF },
-      sub: showsLink()
-    });
-  }
-
-  function showDeclined() {
-    showResult({
-      title: '결제가 거절됐어요. 자리는 풀렸어요',
-      text: '다시 예매하려면 줄을 서서 자리를 골라 주세요.',
-      main: repick(), sub: showsLink()
-    });
-  }
-
-  function showExpired() {
-    showResult({
-      title: '결제 시간이 지나 자리가 풀렸어요',
-      text: '놓친 자리는 10분 뒤에 다시 고를 수 있어요. 다른 자리는 지금 고를 수 있어요.',
-      main: repick(), sub: showsLink()
-    });
-  }
-
-  function showSeatLost() {
-    showResult({
-      title: '결제는 됐지만 자리를 지키지 못했어요',
-      text: '결제 금액은 자동으로 돌려드려요.',
-      main: repick(), sub: showsLink()
-    });
-  }
-
-  function showCancelled() {
-    showResult({
-      title: '결제가 취소돼 자리가 풀렸어요',
-      text: '다시 예매하려면 줄을 서서 자리를 골라 주세요.',
-      main: repick(), sub: showsLink()
-    });
-  }
-
-  function showReleased() {
-    showResult({
-      title: '이미 놓은 자리예요',
-      text: '다시 예매하려면 줄을 서서 자리를 골라 주세요.',
-      main: repick(), sub: showsLink()
-    });
-  }
-
-  function showNotFound() {
-    showResult({
-      title: '찾을 수 없는 자리예요',
-      text: '공연 목록에서 다시 골라 주세요.',
-      main: showsLink()
+      text: number ? '내 예매에서 언제든 다시 볼 수 있어요.' : '예매번호는 내 예매에서 볼 수 있어요.'
     });
   }
 
   function showLoadFailed(e) {
-    showResult({
-      title: '결제 정보를 불러오지 못했어요',
-      text: e.code === 'NETWORK' ? bk.NETWORK_MESSAGE : '잠시 뒤 다시 불러와 주세요.',
-      main: { label: '다시 불러오기', href: location.pathname + location.search },
-      sub: showsLink()
-    });
+    showResult('loadFailed', { text: bk.isNetworkError(e) ? bk.NETWORK_MESSAGE : '잠시 뒤 다시 불러와 주세요.' });
   }
 
   // ---- 결제 화면 ----
 
   function renderOrder() {
-    var seats = (hold.seats || []).slice().sort(byPlace);
-    seatLines.textContent = '';
+    var seats = (state.hold.seats || []).slice().sort(bk.bySeat);
+    ui.seatLines.textContent = '';
     seats.forEach(function (s) {
-      seatLines.appendChild(el('div', { class: 'seat-line' },
-        el('strong', { text: s.section + '구역 ' + s.rowNo + '열 ' + s.seatNo + '번' }),
-        el('span', { class: 'num', text: s.grade + '석 ' + bk.won(s.price) })));
+      ui.seatLines.appendChild(el('div', { class: 'seat-line' },
+        el('strong', { text: bk.seatName(s) }),
+        el('span', { class: 'num', text: bk.seatPrice(s) })));
     });
-    amountRows.textContent = '';
-    grades(seats).forEach(function (g) {
-      amountRows.appendChild(el('div', { class: 'row' },
+    ui.amountRows.textContent = '';
+    bk.gradeGroups(seats).forEach(function (g) {
+      ui.amountRows.appendChild(el('div', { class: 'row' },
         el('span', { class: 'k', text: g.grade + '석 ' + g.count + '매' }),
         el('span', { class: 'num', text: bk.won(g.sum) })));
     });
-    total.textContent = bk.won(hold.totalAmount);
+    ui.total.textContent = bk.won(state.hold.totalAmount);
   }
 
   // off는 다시 누를 수 없는 끝난 상태다. 요청 중인 꺼짐과 모양을 나눈다
   function setPayButton(label, enabled, off) {
-    payButton.textContent = label;
-    payButton.disabled = !enabled;
-    payButton.classList.toggle('is-off', !!off);
+    ui.pay.textContent = label;
+    ui.pay.disabled = !enabled;
+    ui.pay.classList.toggle('is-off', !!off);
   }
 
   function showCoNote(message) {
-    coNote.textContent = message || '';
-    coNote.hidden = !message;
+    ui.note.textContent = message || '';
+    ui.note.hidden = !message;
   }
 
   function closeAsk() {
-    ask.hidden = true;
-    actions.hidden = false;
-    askYes.disabled = false;
-    askNo.disabled = false;
-    askYes.textContent = '예, 놓을게요';
+    ask.close();
+    ui.actions.hidden = false;
   }
 
   function paintClock(text) {
-    clockMain.textContent = '';
+    ui.clockMain.textContent = '';
     if (text) {
-      clockMain.textContent = text;
-      clockSub.textContent = '';
-      clockSub.hidden = true;
+      ui.clockMain.textContent = text;
+      ui.clockSub.textContent = '';
+      ui.clockSub.hidden = true;
       return;
     }
-    clockMain.appendChild(el('b', { class: 'num', id: 'clock-left' }));
-    clockMain.appendChild(document.createTextNode(' 안에 결제해 주세요'));
-    clockSub.textContent = '지나면 자리가 풀려요';
-    clockSub.hidden = false;
+    ui.clockMain.appendChild(el('b', { class: 'num', id: 'co-clock-left' }));
+    ui.clockMain.appendChild(document.createTextNode(' 안에 결제해 주세요'));
+    ui.clockSub.textContent = '지나면 자리가 풀려요';
+    ui.clockSub.hidden = false;
   }
 
   // 남은 시간은 서버가 준 두 시각의 차이로만 정하고 이 화면의 시계로 줄여 간다
   function startClock() {
-    clearTimeout(tickTimer);
-    deadlineAt = mono() + (bk.epochOf(hold.expiresAt) - bk.epochOf(hold.serverNow));
-    timeUp = false;
+    clearTimeout(timers.tick);
+    state.deadlineAt = mono() + (bk.epochOf(state.hold.expiresAt) - bk.epochOf(state.hold.serverNow));
+    state.timeUp = false;
     paintClock(null);
     tick();
   }
 
   function tick() {
-    clearTimeout(tickTimer);
-    var left = deadlineAt - mono();
+    clearTimeout(timers.tick);
+    var left = state.deadlineAt - mono();
     var seconds = Math.ceil(left / 1000);
     if (seconds <= 0) {
       // 결제 요청이 나가 있는 동안에는 서버가 결제 마감으로 바꿨을 수 있어 기다린다
-      if (stage === 'pay') expire();
+      if (state.stage === 'pay') expire();
       return;
     }
-    var shown = document.getElementById('clock-left');
+    var shown = document.getElementById('co-clock-left');
     if (shown) shown.textContent = bk.clockText(seconds * 1000);
-    clock.classList.toggle('urgent', seconds < URGENT_SECONDS);
-    tickTimer = setTimeout(tick, (left % 1000) + 5);
+    ui.clock.classList.toggle('urgent', seconds < URGENT_SECONDS);
+    timers.tick = setTimeout(tick, (left % 1000) + 5);
   }
 
   // 실제로 푸는 일은 서버가 한다. 화면은 단추를 끄고 서버 상태를 다시 본다
   function expire() {
-    timeUp = true;
-    clock.classList.add('urgent');
+    state.timeUp = true;
+    ui.clock.classList.add('urgent');
     paintClock('결제 시간이 지나 자리가 풀렸어요');
     closeAsk();
     showCoNote('');
     setPayButton('결제 시간이 지났어요', false, true);
-    releaseButton.disabled = true;
-    clearTimeout(recheckTimer);
-    recheckTimer = setTimeout(reload, RECHECK_MS);
+    ui.release.disabled = true;
+    clearTimeout(timers.recheck);
+    timers.recheck = setTimeout(reload, RECHECK_MS);
+  }
+
+  // 결제를 다시 누를 수 있게 단추와 고른 것을 연다
+  function unlockPay() {
+    ui.release.disabled = false;
+    lockChoices(false);
   }
 
   function showPay(note) {
-    clearTimeout(pollTimer);
-    clearTimeout(recheckTimer);
-    stage = 'pay';
+    pendingPoller.stop();
+    clearTimeout(timers.recheck);
+    state.stage = 'pay';
     renderOrder();
     closeAsk();
     showCoNote(note || '');
     setPayButton('결제하기', true);
-    releaseButton.disabled = false;
-    lockChoices(false);
-    showOnly(co);
+    unlockPay();
+    showOnly(ui.order);
     setBack(showHref);
     idempotencyKey();
     startClock();
   }
 
-  function scenario() {
-    var picked = document.querySelector('input[name="scenario"]:checked');
+  function checkedValue(name) {
+    var picked = document.querySelector('input[name="' + name + '"]:checked');
     return picked ? picked.value : null;
-  }
-
-  function method() {
-    var picked = document.querySelector('input[name="method"]:checked');
-    return picked ? picked.value : 'CARD';
   }
 
   // 결제 요청이 나가 있는 동안 고른 것을 바꿔도 그 요청에는 반영되지 않으므로 함께 끈다
@@ -408,25 +326,28 @@
     document.querySelectorAll('input[name="method"], input[name="scenario"]').forEach(function (input) {
       input.disabled = locked;
     });
-    co.classList.toggle('is-locked', locked);
+    ui.order.classList.toggle('is-locked', locked);
   }
 
-  payButton.addEventListener('click', function () {
-    if (stage !== 'pay' || timeUp) return;
-    stage = 'paying';
+  function startPay() {
+    if (state.stage !== 'pay' || state.timeUp) return;
+    state.stage = 'paying';
     closeAsk();
     showCoNote('');
     setPayButton('결제하고 있어요', false);
-    releaseButton.disabled = true;
+    ui.release.disabled = true;
     lockChoices(true);
     setBack(null);
-    var chosen = method();
-    bk.session.set(methodName, chosen);
+    var chosen = checkedValue('method') || 'CARD';
+    bk.session.set(methodKey, chosen);
     var headers = { 'Idempotency-Key': idempotencyKey() };
-    if (demoPg && scenario()) headers['X-Fake-Pg-Scenario'] = scenario();
+    var scenario = checkedValue('scenario');
+    if (demoPg && scenario) headers['X-Fake-Pg-Scenario'] = scenario;
     bk.post('/api/holds/' + holdId + '/payments', { method: chosen }, { headers: headers, timeoutMs: PAY_TIMEOUT_MS })
       .then(paid, payFailed);
-  });
+  }
+
+  ui.pay.addEventListener('click', startPay);
 
   function paid(r) {
     if (!r || !r.status) {
@@ -437,19 +358,32 @@
     else startPending(r.paymentId, null);
   }
 
+  // 결과가 정해진 결제 실패는 결과 화면으로 간다
+  var PAY_FAILURES = {
+    PAYMENT_DECLINED: 'declined',
+    HOLD_EXPIRED: 'expired',
+    SEAT_LOST_REFUNDING: 'seatLost',
+    PAYMENT_CANCELLED: 'cancelled',
+    HOLD_NOT_FOUND: 'notFound'
+  };
+
   function payFailed(e) {
-    switch (e.code) {
-      case 'PAYMENT_DECLINED': showDeclined(); return;
-      case 'HOLD_EXPIRED': showExpired(); return;
-      case 'SEAT_LOST_REFUNDING': showSeatLost(); return;
-      case 'PAYMENT_CANCELLED': showCancelled(); return;
-      case 'HOLD_NOT_FOUND': showNotFound(); return;
-      case 'ALREADY_PAYING': startPending(null, '다른 화면에서 결제하고 있어요'); return;
-      case 'HOLD_NOT_PAYABLE': stage = 'pay'; reload(); return;
+    if (has(PAY_FAILURES, e.code)) {
+      showResult(PAY_FAILURES[e.code]);
+    } else if (e.code === 'ALREADY_PAYING') {
+      startPending(null, '다른 화면에서 결제하고 있어요');
+    } else if (e.code === 'HOLD_NOT_PAYABLE') {
+      state.stage = 'pay';
+      reload();
+    } else {
+      payAgain(e);
     }
-    stage = 'pay';
-    releaseButton.disabled = false;
-    lockChoices(false);
+  }
+
+  // 결과를 모르거나 요청이 막힌 결제는 같은 화면에서 다시 누르게 한다
+  function payAgain(e) {
+    state.stage = 'pay';
+    unlockPay();
     setBack(showHref);
     if (e.status === 0 || e.status >= 500) {
       // 같은 번호로 다시 보내므로 이미 처리된 결제면 같은 결과가 돌아온다
@@ -459,244 +393,171 @@
       showCoNote(e.message);
       setPayButton('결제하기', true);
     }
-    if (timeUp || deadlineAt - mono() <= 0) expire();
+    if (state.timeUp || state.deadlineAt - mono() <= 0) expire();
     else tick();
   }
 
   // ---- 자리 놓기 ----
 
   // 놓지 못한 까닭은 서버가 알려 준 그 순간의 자리 상태로 고른다
+  var NOT_CANCELLABLE = { RELEASED: 'alreadyFreed', EXPIRED: 'alreadyFreed', CONFIRMED: 'alreadyBooked' };
+
   function notCancellable(e) {
-    switch (e.detail.status) {
-      case 'RELEASED':
-      case 'EXPIRED':
-        showResult({
-          title: '이미 풀린 자리예요',
-          text: '다시 예매하려면 줄을 서서 자리를 골라 주세요.',
-          main: repick(), sub: showsLink()
-        });
-        return;
-      case 'CONFIRMED':
-        showResult({
-          title: '이미 예매가 끝난 자리예요',
-          text: '취소는 내 예매에서 할 수 있어요.',
-          facts: seatFacts(false),
-          main: { label: '내 예매 보기', href: BOOKINGS_HREF },
-          sub: showsLink()
-        });
-        return;
-      case 'PAYING':
-        reload('결제를 하고 있는 중이라 놓을 수 없어요');
-        return;
-      default:
-        reload(e.message);
-    }
+    var status = e.detail.status;
+    if (has(NOT_CANCELLABLE, status)) showResult(NOT_CANCELLABLE[status]);
+    else if (status === 'PAYING') reload('결제를 하고 있는 중이라 놓을 수 없어요');
+    else reload(e.message);
   }
 
-  releaseButton.addEventListener('click', function () {
-    if (stage !== 'pay' || timeUp) return;
+  ui.release.addEventListener('click', function () {
+    if (state.stage !== 'pay' || state.timeUp) return;
     showCoNote('');
-    actions.hidden = true;
-    ask.hidden = false;
-    askNo.focus();
+    ui.actions.hidden = true;
+    ask.open();
   });
 
-  askNo.addEventListener('click', function () {
-    closeAsk();
-    releaseButton.focus();
-  });
-
-  askYes.addEventListener('click', function () {
-    if (stage !== 'pay') return;
-    askYes.disabled = true;
-    askNo.disabled = true;
-    askYes.textContent = '놓고 있어요';
+  function releaseHold() {
+    if (state.stage !== 'pay') return;
+    ask.busy();
     bk.del('/api/holds/' + holdId).then(function () {
       stopTimers();
-      stage = 'result';
+      state.stage = 'result';
       forgetQueueToken();
-      bk.session.remove(keyName);
+      bk.session.remove(idemKey);
       location.href = showHref;
     }, function (e) {
       closeAsk();
-      if (e.code === 'HOLD_NOT_CANCELLABLE') {
-        notCancellable(e);
-      } else if (e.code === 'HOLD_NOT_FOUND') {
-        showNotFound();
-      } else {
-        showCoNote(e.message);
-      }
+      if (e.code === 'HOLD_NOT_CANCELLABLE') notCancellable(e);
+      else if (e.code === 'HOLD_NOT_FOUND') showResult('notFound');
+      else showCoNote(e.message);
     });
-  });
+  }
 
   // ---- 결제 확인 중 ----
 
   function startPending(paymentId, note) {
-    clearTimeout(tickTimer);
-    clearTimeout(recheckTimer);
-    stage = 'pending';
-    pendingPaymentId = paymentId;
-    pendingSince = mono();
-    pendNote.textContent = note || '';
-    pendNote.hidden = !note;
-    pendLead.textContent = '이 화면을 닫아도 결과는 내 예매에 나와요.';
-    fillFacts(pendFacts, seatFacts(true));
-    showOnly(pend);
+    clearTimeout(timers.tick);
+    clearTimeout(timers.recheck);
+    state.stage = 'pending';
+    state.pendingPaymentId = paymentId;
+    state.pendingSince = mono();
+    ui.pendNote.textContent = note || '';
+    ui.pendNote.hidden = !note;
+    ui.pendLead.textContent = '이 화면을 닫아도 결과는 내 예매에 나와요.';
+    bk.fillFacts(ui.pendFacts, seatFacts(true));
+    showOnly(ui.pend);
     setBack(null);
     window.scrollTo(0, 0);
-    poll();
+    pendingPoller.now();
   }
 
-  function schedulePoll() {
-    clearTimeout(pollTimer);
-    if (stage === 'pending' && !document.hidden) pollTimer = setTimeout(poll, POLL_MS);
-  }
-
-  function poll() {
-    clearTimeout(pollTimer);
-    if (stage !== 'pending' || document.hidden) return;
-    if (mono() - pendingSince >= SLOW_AFTER_MS) {
-      pendLead.textContent = '조금 더 걸리고 있어요. 결과는 내 예매에서 볼 수 있어요';
+  function checkPending() {
+    if (mono() - state.pendingSince >= SLOW_AFTER_MS) {
+      ui.pendLead.textContent = '조금 더 걸리고 있어요. 결과는 내 예매에서 볼 수 있어요';
     }
-    var seq = ++pollSeq;
     // 다른 화면이 시작한 결제는 번호를 모르므로 자리 상태에서 찾는다
-    if (!pendingPaymentId) {
-      bk.get('/api/holds/' + holdId).then(function (h) {
-        if (seq !== pollSeq) return;
-        hold = h;
-        if (h.status !== 'PAYING' && h.status !== 'HELD') { route(h); return; }
-        pendingPaymentId = h.paymentId || null;
-        if (pendingPaymentId) poll(); else schedulePoll();
-      }, function (e) {
-        if (seq !== pollSeq) return;
-        if (e.status === 404) showNotFound(); else schedulePoll();
-      });
+    if (!state.pendingPaymentId) {
+      return bk.get('/api/holds/' + holdId).then(function (h) { return { hold: h }; });
+    }
+    return bk.get('/api/payments/' + state.pendingPaymentId).then(function (p) { return { payment: p }; });
+  }
+
+  // 결론이 난 것만 화면을 바꾼다. 나머지는 poller가 계속 묻는다
+  function pendingChecked(r) {
+    if (r.payment) {
+      settle(r.payment);
       return;
     }
-    bk.get('/api/payments/' + pendingPaymentId).then(function (p) {
-      if (seq !== pollSeq) return;
-      settle(p);
-    }, function () {
-      if (seq !== pollSeq) return;
-      schedulePoll();
-    });
+    state.hold = r.hold;
+    if (r.hold.status !== 'PAYING' && r.hold.status !== 'HELD') {
+      route(r.hold);
+      return;
+    }
+    state.pendingPaymentId = r.hold.paymentId || null;
+    if (state.pendingPaymentId) pendingPoller.now();
   }
 
-  // 결론이 난 결제만 화면을 바꾼다. 나머지는 계속 묻는다
+  function pendingFailed(e) {
+    if (!state.pendingPaymentId && e.status === 404) showResult('notFound');
+  }
+
   function settle(p) {
     if (p.status === 'APPROVED') {
-      if (p.holdStatus === 'CONFIRMED') { showDone(p.bookingNumber); return; }
-      if (p.holdStatus === 'REFUNDING' || p.holdStatus === 'RELEASED') { showSeatLost(); return; }
+      if (p.holdStatus === 'CONFIRMED') showDone(p.bookingNumber);
+      else if (p.holdStatus === 'REFUNDING' || p.holdStatus === 'RELEASED') showResult('seatLost');
     } else if (p.status === 'DECLINED') {
-      showDeclined();
-      return;
+      showResult('declined');
     } else if (p.status === 'CANCELLED') {
-      showCancelled();
-      return;
+      showResult('cancelled');
     }
-    schedulePoll();
   }
 
   // ---- 자리 상태로 화면 고르기 ----
 
+  var RELEASE_REASONS = { DECLINED: 'declined', CANCELLED: 'cancelled', APPROVED: 'seatLost' };
+  var HOLD_RESULTS = { EXPIRED: 'expired', REFUNDING: 'seatLost' };
+
   // 풀린 자리는 결제 기록으로 까닭을 가린다
   function explainReleased(h) {
-    if (!h.paymentId) { showReleased(); return; }
+    if (!h.paymentId) { showResult('released'); return; }
     bk.get('/api/payments/' + h.paymentId).then(function (p) {
-      if (p.status === 'DECLINED') showDeclined();
-      else if (p.status === 'CANCELLED') showCancelled();
-      else if (p.status === 'APPROVED') showSeatLost();
-      else showReleased();
-    }, function () { showReleased(); });
+      showResult(has(RELEASE_REASONS, p.status) ? RELEASE_REASONS[p.status] : 'released');
+    }, function () { showResult('released'); });
+  }
+
+  function showConfirmed(h) {
+    if (!h.paymentId) { showDone(null); return; }
+    bk.get('/api/payments/' + h.paymentId).then(function (p) { showDone(p.bookingNumber); },
+      function () { showDone(null); });
   }
 
   function route(h, note) {
-    hold = h;
-    if (!headerDone) {
+    state.hold = h;
+    if (!state.headerDone) {
       // 대기 표는 자리를 잡을 때 이미 썼다. 남겨 두면 다음 예매가 쓴 표로 줄을 선다
       forgetQueueToken();
-      loadHeader();
+      state.headerDone = true;
+      bk.loadPerformanceHeader(showId, h.performanceId);
     }
-    switch (h.status) {
-      case 'HELD':
-        showPay(note);
-        return;
-      case 'PAYING':
-        startPending(h.paymentId || null, note);
-        return;
-      case 'CONFIRMED':
-        stopTimers();
-        if (!h.paymentId) { showDone(null); return; }
-        bk.get('/api/payments/' + h.paymentId).then(function (p) { showDone(p.bookingNumber); },
-          function () { showDone(null); });
-        return;
-      case 'EXPIRED':
-        showExpired();
-        return;
-      case 'REFUNDING':
-        showSeatLost();
-        return;
-      case 'RELEASED':
-        stopTimers();
-        explainReleased(h);
-        return;
-      default:
-        showReleased();
+    if (h.status === 'HELD') {
+      showPay(note);
+    } else if (h.status === 'PAYING') {
+      startPending(h.paymentId || null, note);
+    } else if (h.status === 'CONFIRMED') {
+      stopTimers();
+      showConfirmed(h);
+    } else if (h.status === 'RELEASED') {
+      stopTimers();
+      explainReleased(h);
+    } else {
+      showResult(has(HOLD_RESULTS, h.status) ? HOLD_RESULTS[h.status] : 'released');
     }
   }
 
   // 결제 요청이 나가 있는 동안 늦게 온 자리 상태는 버린다
   function reload(note) {
-    clearTimeout(recheckTimer);
+    clearTimeout(timers.recheck);
     bk.get('/api/holds/' + holdId).then(function (h) {
-      if (stage !== 'paying') route(h, note);
+      if (state.stage !== 'paying') route(h, note);
     }, function (e) {
-      if (stage === 'paying') return;
-      if (e.status === 404) { showNotFound(); return; }
-      if (stage === 'loading') { showLoadFailed(e); return; }
-      if (stage !== 'pay') return;
+      if (state.stage === 'paying') return;
+      if (e.status === 404) { showResult('notFound'); return; }
+      if (state.stage === 'loading') { showLoadFailed(e); return; }
+      if (state.stage !== 'pay') return;
       // 시간이 다 된 뒤 다시 보는 중이면 조금 뒤 또 본다
-      if (timeUp) { recheckTimer = setTimeout(reload, RECHECK_MS); return; }
+      if (state.timeUp) { timers.recheck = setTimeout(reload, RECHECK_MS); return; }
       showCoNote(note || e.message);
       setPayButton('결제하기', true);
-      releaseButton.disabled = false;
-      lockChoices(false);
+      unlockPay();
     });
   }
 
-  // ---- 머리글 ----
-
-  function loadHeader() {
-    headerDone = true;
-    if (!showId) return;
-    bk.get('/api/shows/' + showId).then(function (show) {
-      var performance = (show.performances || []).filter(function (p) {
-        return hold && p.id === hold.performanceId;
-      })[0];
-      var sub = performance ? bk.dateTime(performance.startsAt) + ' · ' + show.venueName : show.venueName;
-      bk.setHeader(show.title, sub, null);
-    }, function () { /* 머리글은 없어도 결제는 된다 */ });
-  }
-
-  // ---- 시작 ----
-
+  // 숨어 있는 동안 다른 화면에서 결제했을 수 있어 자리 상태를 다시 본다. 확인 중 폴링은 poller가 다시 잇는다
   document.addEventListener('visibilitychange', function () {
-    if (document.hidden) {
-      clearTimeout(pollTimer);
-      pollSeq++;
-      return;
-    }
-    if (stage === 'pending') poll();
-    // 숨어 있는 동안 다른 화면에서 결제했을 수 있어 자리 상태를 다시 본다
-    else if (stage === 'pay') reload();
+    if (!document.hidden && state.stage === 'pay') reload();
   });
 
-  function syncBar() {
-    body.style.setProperty('--bar-h', payBar.offsetHeight + 'px');
-  }
-  if ('ResizeObserver' in window) new ResizeObserver(syncBar).observe(payBar);
-  else window.addEventListener('resize', syncBar);
-
+  bk.syncBar(ui.payBar);
   setBack(showHref);
   reload();
 })();

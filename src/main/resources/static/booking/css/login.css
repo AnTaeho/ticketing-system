@@ -1,0 +1,12 @@
+/* 시작하기(로그인) 화면. 공통 모양은 booking.css에 있다 */
+.login{padding:24px 20px;margin-top:24px}
+.login h2{font-size:20px;font-weight:800;line-height:1.35}
+.login .lead{margin-top:4px;color:var(--muted)}
+.field{margin-top:22px}
+.field label{display:block;font-size:14px;font-weight:700;margin-bottom:6px}
+.input{display:block;width:100%;height:52px;padding:0 14px;border:1px solid var(--line-strong);border-radius:var(--radius);background:var(--surface);font:inherit;font-size:16px;color:var(--text)}
+.input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+.input[aria-invalid="true"]{border-color:var(--warn);box-shadow:0 0 0 1px var(--warn)}
+.field .note{margin-top:6px}
+.login .alert{margin-top:14px}
+.login .btn{margin-top:20px}

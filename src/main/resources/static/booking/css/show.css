@@ -1,0 +1,10 @@
+/* 공연 정보(날짜 고르기) 화면. 공통 모양은 booking.css에 있다 */
+.about{padding:16px;margin-bottom:20px;color:var(--text)}
+.perfs{display:grid;gap:10px}
+.perf{padding:16px;display:grid;gap:12px}
+.perf-when{font-size:16px;font-weight:700}
+.perf-state{font-size:14px;color:var(--muted)}
+.perf.closed .perf-when{color:var(--muted)}
+@media (min-width:560px){
+  .perf{grid-template-columns:1fr 200px;align-items:center;gap:16px}
+}

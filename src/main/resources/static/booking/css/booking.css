@@ -1,13 +1,19 @@
-/* 예매 화면 공통. 좌석 화면 전용 모양은 seats.css로 따로 둔다 */
+/* 예매 화면 공통: 토큰, 머리, 단추, 알림, 상태 패널, 사실 목록, 확인 단계. 한 화면만 쓰는 모양은 그 화면 이름의 CSS에 둔다 */
 :root{
   --bg:#f4f4f1; --surface:#fff; --line:#e2e2dd; --line-strong:#cfcfc8;
-  --text:#1c1c1a; --muted:#6a6a64; --faint:#9a9a92;
-  --accent:#1f4fd6; --accent-ink:#173da8; --accent-soft:#e9eefc;
-  --warn:#c2410c; --warn-soft:#fdf0e8;
-  --off:#d3d3cd;
+  --text:#1c1c1a; --text-soft:#45453f; --muted:#6a6a64; --faint:#9a9a92;
+  --accent:#1f4fd6; --accent-ink:#173da8; --accent-soft:#e9eefc; --on-accent:#fff;
+  --accent-text:#1b2f6b; --accent-text-soft:#3b4f8a; --accent-band:#d5def8; --accent-pale:#cfd8f6; --accent-tint:rgba(31,79,214,.1);
+  --warn:#c2410c; --warn-soft:#fdf0e8; --warn-text:#9a3a12;
+  --warn-line:#f0c9b2; --warn-rule:#f0d3c2; --warn-band:#f6d5c2;
+  --off:#d3d3cd; --off-soft:#ecece7; --track:#e7e7e2; --stage:#ebebe6;
+  --flash:#ffe08a; --veil:rgba(255,255,255,.6);
   --g-vip:#c27c0e; --g-r:#cf3f5a; --g-s:#2e8f63; --g-a:#7c5cc4;
+  --title-xl:22px; --title-l:21px; --title-m:18px; --title-s:16px;
   --radius:8px;
-  font-family:-apple-system,"Apple SD Gothic Neo","Noto Sans KR",sans-serif;
+  --sans:-apple-system,"Apple SD Gothic Neo","Noto Sans KR",sans-serif;
+  --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+  font-family:var(--sans);
 }
 *{box-sizing:border-box;margin:0;padding:0}
 html{-webkit-text-size-adjust:100%}
@@ -17,7 +23,6 @@ a{color:inherit}
 [hidden]{display:none!important}
 .num{font-variant-numeric:tabular-nums}
 :focus-visible{outline:3px solid var(--accent);outline-offset:2px;border-radius:4px}
-.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 
 /* 상단 공연 정보 */
 .top{background:var(--surface);border-bottom:1px solid var(--line)}
@@ -28,107 +33,52 @@ a{color:inherit}
 .show{min-width:0;flex:1}
 .top-link{flex:none;display:flex;align-items:center;min-height:36px;padding:0 12px;border:1px solid var(--line-strong);border-radius:var(--radius);font-size:14px;font-weight:600;text-decoration:none;white-space:nowrap}
 .top-link:hover{background:var(--bg)}
-.show h1{font-size:16px;font-weight:700;line-height:1.35}
+.show h1{font-size:var(--title-s);font-weight:700;line-height:1.35}
 .show p{font-size:13px;color:var(--muted)}
 
 .wrap{max-width:var(--col,1080px);margin:0 auto;padding:16px}
 .panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius)}
 .sec-title{font-size:14px;font-weight:700;margin-bottom:10px}
 
+/* 화면 폭 */
+.narrow{--col:592px}
+
 /* 단추 */
 .btn{display:flex;align-items:center;justify-content:center;width:100%;min-height:52px;padding:0 18px;border-radius:var(--radius);font-size:16px;font-weight:700;white-space:nowrap;text-decoration:none}
-.btn-primary{background:var(--accent);color:#fff}
+.btn-primary{background:var(--accent);color:var(--on-accent)}
 .btn-primary:hover{background:var(--accent-ink)}
 .btn-ghost{background:var(--surface);border:1px solid var(--line-strong);color:var(--text);font-weight:600}
 .btn-ghost:hover{background:var(--bg)}
-.btn:disabled,.btn.is-off{background:#ecece7;border:1px solid #ecece7;color:var(--muted);font-weight:600;cursor:default}
-.btn-primary:disabled{opacity:.7;background:var(--accent);border-color:var(--accent);color:#fff}
-
-/* 하단 고정 띠 */
-.bar{position:fixed;left:0;right:0;bottom:0;background:var(--surface);border-top:1px solid var(--line);z-index:10}
-.bar-in{max-width:var(--col,1080px);margin:0 auto;padding:12px 16px calc(12px + env(safe-area-inset-bottom))}
-
-/* 처음 한 번 안내 */
-.hint{display:flex;align-items:center;gap:12px;padding:10px 10px 10px 12px;background:var(--accent-soft);border-radius:var(--radius);margin-bottom:12px}
-.hint>svg{flex:none;width:52px;height:40px}
-.hint p{flex:1;font-size:14px;font-weight:600;color:#1b2f6b;line-height:1.4}
-.hint .x{flex:none;width:32px;height:32px;display:grid;place-items:center;border-radius:6px;color:#3b4f8a}
-.hint .x:hover{background:rgba(31,79,214,.1)}
-
-/* 시연용 */
-.demo{border:1px dashed var(--line-strong);border-radius:var(--radius);padding:10px 12px;font-size:13px;color:var(--muted)}
-.demo-head{display:flex;align-items:center;gap:6px;margin-bottom:8px}
-.demo-tag{font-size:11px;font-weight:700;color:var(--muted);border:1px solid var(--line-strong);border-radius:4px;padding:0 5px;line-height:18px}
-.seg{display:grid;grid-template-columns:repeat(3,1fr);border:1px solid var(--line-strong);border-radius:6px;overflow:hidden}
-.seg label{position:relative;text-align:center;padding:6px 4px;font-size:13px;cursor:pointer;border-left:1px solid var(--line-strong)}
-.seg label:first-child{border-left:0}
-.seg input{position:absolute;opacity:0;pointer-events:none}
-.seg label:has(input:checked){background:#ecece7;color:var(--text);font-weight:600}
+/* 꺼진 단추는 회색이다. 요청을 기다리는 주 단추만 파란 채로 흐리게 둔다(끝남 is-off, 고른 것 없음 is-empty는 회색) */
+.btn:disabled,.btn.is-off{background:var(--off-soft);border:1px solid var(--off-soft);color:var(--muted);font-weight:600;cursor:default}
+.btn-primary:disabled:not(.is-off):not(.is-empty){opacity:.7;background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
 
 /* 알림 문구 */
 .alert{padding:10px 12px;border-radius:var(--radius);background:var(--warn-soft);color:var(--warn);font-size:14px;font-weight:600}
 .note{font-size:13px;color:var(--muted)}
 .empty{padding:28px 20px;text-align:center;color:var(--muted)}
-
-/* 화면 폭 */
-.narrow{--col:592px}
-
-/* 로그인 */
-.login{padding:24px 20px;margin-top:24px}
-.login h2{font-size:20px;font-weight:800;line-height:1.35}
-.login .lead{margin-top:4px;color:var(--muted)}
-.field{margin-top:22px}
-.field label{display:block;font-size:14px;font-weight:700;margin-bottom:6px}
-.input{display:block;width:100%;height:52px;padding:0 14px;border:1px solid var(--line-strong);border-radius:var(--radius);background:var(--surface);font:inherit;font-size:16px;color:var(--text)}
-.input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
-.input[aria-invalid="true"]{border-color:var(--warn);box-shadow:0 0 0 1px var(--warn)}
-.field .note{margin-top:6px}
-.login .alert{margin-top:14px}
-.login .btn{margin-top:20px}
-
-/* 공연 목록 */
-.page-head{margin:8px 0 12px;font-size:14px;font-weight:700;color:var(--muted)}
-.cards{display:grid;gap:10px}
-.card{display:block;padding:16px;text-decoration:none}
-.card:hover{border-color:var(--line-strong)}
-.card h2{font-size:17px;font-weight:700;line-height:1.35}
-.card .venue{font-size:14px;color:var(--muted)}
-.card .next{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;margin-top:12px;padding-top:12px;border-top:1px solid var(--line);font-size:14px}
-.tag{display:inline-block;font-size:12px;font-weight:700;line-height:20px;padding:0 7px;border-radius:4px;background:#ecece7;color:var(--muted);white-space:nowrap}
+.tag{display:inline-block;font-size:12px;font-weight:700;line-height:20px;padding:0 7px;border-radius:4px;background:var(--off-soft);color:var(--muted);white-space:nowrap}
 .tag.open{background:var(--accent-soft);color:var(--accent-ink)}
 .tag.warn{background:var(--warn-soft);color:var(--warn)}
 
-/* 공연 상세 */
-.about{padding:16px;margin-bottom:20px;color:var(--text)}
-.perfs{display:grid;gap:10px}
-.perf{padding:16px;display:grid;gap:12px}
-.perf-when{font-size:16px;font-weight:700}
-.perf-state{font-size:14px;color:var(--muted)}
-.perf.closed .perf-when{color:var(--muted)}
-@media (min-width:560px){
-  .perf{grid-template-columns:1fr 200px;align-items:center;gap:16px}
-}
-
-/* 대기열 */
-.q{padding:28px 20px 24px;margin-top:24px}
-.q .label{font-size:15px;color:var(--muted)}
-.q .big{display:flex;align-items:baseline;flex-wrap:wrap;gap:4px 12px;margin-top:2px}
-.q .big strong{font-size:44px;font-weight:800;letter-spacing:-.02em;line-height:1.15}
-.q .big span{font-size:17px;color:var(--muted);font-weight:600}
-.bar-wrap{margin-top:22px}
-.meter{height:8px;background:#e7e7e2;border-radius:4px;overflow:hidden}
-.meter i{display:block;height:100%;background:var(--accent);border-radius:4px;transition:width .8s ease}
-.ends{display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin-top:6px}
-.msg{margin-top:22px;padding-top:18px;border-top:1px solid var(--line);font-size:15px;line-height:1.6}
-.msg b{font-weight:700}
-.sub{margin-top:14px;font-size:13px;color:var(--muted);text-align:center}
-.q-note{margin-top:12px}
-.state-title{font-size:22px;font-weight:800;line-height:1.35}
+/* 상태 패널: 화면 가운데 큰 안내 상자 */
+.state{padding:28px 20px 24px;margin-top:24px}
+.state-title{font-size:var(--title-xl);font-weight:800;line-height:1.35}
 .state-text{margin-top:6px;color:var(--muted)}
-.q .btn{margin-top:22px}
+.state>.btn{margin-top:22px}
 
-/* 화면 경로 오류 */
-.lost{padding:28px 20px 24px;margin-top:24px}
-.lost .btn{margin-top:22px}
+/* 사실 목록 */
+.facts{margin-top:22px;border-top:1px solid var(--line)}
+.facts:empty{display:none}
+.facts div{display:flex;justify-content:space-between;gap:16px;padding:11px 0;border-bottom:1px solid var(--line);font-size:14px}
+.facts dt{color:var(--muted);flex:none}
+.facts dd{text-align:right;font-weight:600}
+.facts dd small{display:block;font-weight:400;color:var(--muted)}
+
+/* 확인 단계 */
+.ask{padding:14px;border:1px solid var(--line-strong);border-radius:var(--radius)}
+.ask-title{font-size:var(--title-s);font-weight:800}
+.ask-text{margin-top:2px;font-size:14px;color:var(--muted)}
+.ask-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px}
 
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}

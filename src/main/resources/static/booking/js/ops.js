@@ -24,10 +24,21 @@
   // 지난번 숫자. 키는 'seats.HELD'처럼 칸마다 하나
   var previous = null;
   var current = {};
-  var timer = null;
-  var busy = false;
-  var stopped = false;
   var headerDone = false;
+
+  var poller = bk.poller({
+    interval: POLL_MS,
+    run: function () { return bk.get('/api/ops/performances/' + performanceId + '/summary'); },
+    onData: render,
+    onError: function (e) {
+      if (e.status === 404) {
+        poller.stop();
+        showError('이 회차를 찾지 못했어요. 주소의 회차 번호를 확인해 주세요', false);
+        return;
+      }
+      showError('집계를 읽지 못했어요. 2초 뒤 다시 읽어요 (' + e.message + ')', true);
+    }
+  });
 
   function num(key, value, extraClass) {
     current[key] = value;
@@ -203,7 +214,7 @@
       var p = data.performance;
       bk.setHeader('운영 현황 · 회차 ' + p.performanceId,
         '「' + p.showTitle + '」 ' + bk.dateTime(p.startsAt) + ' · ' + p.venueName);
-      document.title = '운영 현황 · ' + p.showTitle;
+      bk.setTitle('운영 현황', p.showTitle);
       headerDone = true;
     }
     at.textContent = '마지막으로 읽은 때 ' + (data.generatedAt || '').replace('T', ' ').slice(0, 19);
@@ -246,41 +257,5 @@
     if (stale) body.classList.add('is-stale');
   }
 
-  function schedule() {
-    clearTimeout(timer);
-    timer = null;
-    if (stopped || document.hidden) return;
-    timer = setTimeout(poll, POLL_MS);
-  }
-
-  function poll() {
-    timer = null;
-    if (busy || stopped) return;
-    busy = true;
-    bk.get('/api/ops/performances/' + performanceId + '/summary').then(function (data) {
-      busy = false;
-      render(data);
-      schedule();
-    }, function (e) {
-      busy = false;
-      if (e.status === 404) {
-        stopped = true;
-        showError('이 회차를 찾지 못했어요. 주소의 회차 번호를 확인해 주세요', false);
-        return;
-      }
-      showError('집계를 읽지 못했어요. 2초 뒤 다시 읽어요 (' + e.message + ')', true);
-      schedule();
-    });
-  }
-
-  document.addEventListener('visibilitychange', function () {
-    if (document.hidden) {
-      clearTimeout(timer);
-      timer = null;
-    } else if (!timer && !stopped) {
-      poll();
-    }
-  });
-
-  poll();
+  poller.now();
 })();

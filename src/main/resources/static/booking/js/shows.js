@@ -1,7 +1,7 @@
 (function () {
   'use strict';
 
-  var list = document.getElementById('shows');
+  var list = document.getElementById('shows-list');
   var loading = document.getElementById('shows-loading');
   var error = document.getElementById('shows-error');
   var el = bk.el;
@@ -25,7 +25,7 @@
       return;
     }
     shows.forEach(function (show) {
-      list.appendChild(el('a', { class: 'panel card', href: '/booking/shows/' + show.id },
+      list.appendChild(el('a', { class: 'panel card', href: bk.links.show(show.id) },
         el('h2', { text: show.title }),
         el('p', { class: 'venue', text: show.venueName }),
         nextLine(show.nextPerformance)));

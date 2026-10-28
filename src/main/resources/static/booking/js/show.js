@@ -6,7 +6,7 @@
   var error = document.getElementById('show-error');
   var body = document.getElementById('show-body');
   var about = document.getElementById('show-about');
-  var list = document.getElementById('perfs');
+  var list = document.getElementById('show-perfs');
   var el = bk.el;
   var countdowns = [];
   var lastReloadAt = 0;
@@ -16,7 +16,7 @@
     if (performance.state === 'OPEN') {
       return el('a', {
         class: 'btn btn-primary',
-        href: '/booking/performances/' + performance.id + '/queue?show=' + showId,
+        href: bk.links.queue(performance.id, showId),
         text: '예매하기'
       });
     }
@@ -38,7 +38,7 @@
     loading.hidden = true;
     error.hidden = true;
     bk.setHeader(show.title, show.venueName);
-    document.title = show.title + ' · 티켓 예매';
+    bk.setTitle(show.title);
     about.textContent = show.description || '';
     about.hidden = !show.description;
     countdowns = [];

@@ -6,16 +6,16 @@
   <script th:src="@{/booking/js/bookings.js}" defer></script>
 </head>
 <body class="narrow">
-<header th:replace="~{booking/layout :: top('내 예매', null, @{/booking/shows})}"></header>
+<header th:replace="~{booking/layout :: top('내 예매', null, @{/booking/shows}, null, null)}"></header>
 <main class="wrap">
   <p class="empty" id="bk-loading" role="status">예매 내역을 불러오고 있어요</p>
   <p class="alert" id="bk-error" role="alert" hidden></p>
-  <div class="panel bk-none" id="bk-none" hidden>
+  <div class="panel state bk-none" id="bk-none" hidden>
     <p class="bk-none-title">아직 예매한 공연이 없어요</p>
     <p class="bk-none-text">공연을 고르고 자리를 잡으면 여기에 예매가 모여요.</p>
-    <a class="btn btn-primary" href="/booking/shows">공연 보러 가기</a>
+    <a class="btn btn-primary" th:href="@{/booking/shows}">공연 보러 가기</a>
   </div>
-  <div class="bookings" id="bookings" aria-live="polite"></div>
+  <div class="bookings" id="bk-list" aria-live="polite"></div>
 </main>
 </body>
 </html>

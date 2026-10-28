@@ -6,152 +6,137 @@
   var FLASH_MS = 1000;
   var NOTE_MS = 5000;
   var MAP_FAILS_BEFORE_NOTE = 3;
-  var HINT_KEY = 'bk_hint_seats';
   var TAKEN_MESSAGE = '방금 다른 분이 고른 자리예요. 다른 자리를 골라 주세요';
-  var BUSY_MESSAGE = '사람이 많아 잠시 막혔어요. 잠시 뒤 다시 눌러 주세요';
+  var BUSY_MESSAGE = bk.WORDS.busy + '. 잠시 뒤 다시 눌러 주세요';
 
   var body = document.body;
   var pid = body.dataset.performanceId;
   var maxSeats = Number(body.dataset.maxSeats) || 4;
   var showId = bk.positiveId(bk.query('show'));
-  var tokenKey = 'bk_queue_' + pid;
-  var showHref = showId ? '/booking/shows/' + showId : '/booking/shows';
-  var queueHref = '/booking/performances/' + pid + '/queue' + (showId ? '?show=' + showId : '');
+  var tokenKey = bk.keys.queueToken(pid);
   var el = bk.el;
 
-  var hint = document.getElementById('hint');
-  var hintClose = document.getElementById('hint-close');
-  var hintAgain = document.getElementById('hint-again');
-  var legend = document.getElementById('legend');
-  var tabs = document.getElementById('tabs');
-  var where = document.getElementById('where');
-  var mapState = document.getElementById('map-state');
-  var grid = document.getElementById('seat-grid');
-  var bar = document.getElementById('bar');
-  var note = document.getElementById('seat-note');
-  var pick = document.getElementById('pick');
-  var pickSeats = document.getElementById('pick-seats');
-  var pickSub = document.getElementById('pick-sub');
-  var submit = document.getElementById('pick-submit');
-  var stop = document.getElementById('stop');
-  var stopTitle = document.getElementById('stop-title');
-  var stopSub = document.getElementById('stop-sub');
-  var stopAction = document.getElementById('stop-action');
+  var ui = {
+    hint: document.getElementById('seats-hint'),
+    hintClose: document.getElementById('seats-hint-close'),
+    hintAgain: document.getElementById('seats-hint-again'),
+    legend: document.getElementById('seats-legend'),
+    tabs: document.getElementById('seats-tabs'),
+    where: document.getElementById('seats-where'),
+    mapState: document.getElementById('seats-map-state'),
+    grid: document.getElementById('seats-grid'),
+    bar: document.getElementById('seats-bar'),
+    note: document.getElementById('seats-note'),
+    pick: document.getElementById('seats-pick'),
+    pickSeats: document.getElementById('seats-pick-seats'),
+    pickSub: document.getElementById('seats-pick-sub'),
+    submit: document.getElementById('seats-pick-submit')
+  };
+  var stop = bk.stateBox('seats-stop');
 
-  var map = null;
-  var seatsById = {};
-  var buttons = {};
-  var tabButtons = [];
-  var tabNames = null;
-  var gridShape = null;
-  var legendKey = null;
-  var current = null;
-  var picked = {};
-  var flashes = {};
-  var timer = null;
-  var loadSeq = 0;
-  var failures = 0;
-  var noteTimer = null;
-  var noteKind = null;
-  var submitting = false;
-  var leaving = false;
-  var stopped = false;
-  var onStop = null;
+  var state = {
+    map: null,          // 마지막으로 그린 좌석맵
+    seatsById: {},      // id → 좌석(bk.seat 모양 + free)
+    current: null,      // 보고 있는 구역
+    picked: {},         // id → 고른 좌석
+    flashes: {},        // id → 놓친 자리 표시가 끝나는 시각
+    failures: 0,        // 좌석맵을 이어서 못 받은 횟수
+    afterMap: null,     // 다음 좌석맵을 그린 뒤 한 번 할 일
+    submitting: false,
+    leaving: false,
+    stopped: false
+  };
+  // 다시 그리지 않으려고 기억해 두는 모양
+  var drawn = { buttons: {}, tabButtons: [], tabNames: null, gridShape: null, legendKey: null };
 
-  // ---- 알림·상자 ----
+  var mapPoller = bk.poller({
+    interval: function () { return state.failures >= MAP_FAILS_BEFORE_NOTE ? RETRY_MS : POLL_MS; },
+    run: function () { return bk.get('/api/performances/' + pid + '/seats'); },
+    onData: mapLoaded,
+    onError: mapFailed
+  });
+
+  // ---- 알림 ----
 
   // kind가 'map'이면 좌석맵을 다시 받을 때까지 남겨 둔다
-  function showNote(message, kind) {
-    clearTimeout(noteTimer);
-    note.textContent = message;
-    noteKind = kind || 'once';
-    if (noteKind !== 'map') noteTimer = setTimeout(function () { clearNote(); }, NOTE_MS);
-  }
-
-  function clearNote(kind) {
-    if (kind && noteKind !== kind) return;
-    clearTimeout(noteTimer);
-    note.textContent = '';
-    noteKind = null;
-  }
+  var note = {
+    timer: null,
+    kind: null,
+    show: function (message, kind) {
+      clearTimeout(note.timer);
+      ui.note.textContent = message;
+      note.kind = kind || 'once';
+      if (note.kind !== 'map') note.timer = setTimeout(function () { note.clear(); }, NOTE_MS);
+    },
+    clear: function (kind) {
+      if (kind && note.kind !== kind) return;
+      clearTimeout(note.timer);
+      ui.note.textContent = '';
+      note.kind = null;
+    }
+  };
 
   function showStop(title, text, button) {
-    stopped = true;
-    clearNote();
-    stopTitle.textContent = title;
-    stopSub.textContent = text || '';
-    stopSub.hidden = !text;
-    onStop = button ? button.run : null;
-    stopAction.hidden = !button;
-    if (button) stopAction.textContent = button.label;
-    pick.hidden = true;
-    stop.hidden = false;
+    state.stopped = true;
+    note.clear();
+    stop.show(title, text, button);
+    ui.pick.hidden = true;
     body.classList.add('is-stopped');
-    grid.inert = true;
-    if (button) stopAction.focus();
-  }
-
-  stopAction.addEventListener('click', function () { if (onStop) onStop(); });
-
-  // 띠 높이만큼 본문 아래를 비워 마지막 줄이 띠에 가리지 않게 한다
-  function syncBar() {
-    body.style.setProperty('--bar-h', bar.offsetHeight + 'px');
+    ui.grid.inert = true;
+    if (button) stop.action.focus();
   }
 
   // ---- 안내 ----
 
   function setHint(visible) {
-    hint.hidden = !visible;
-    hintAgain.parentNode.hidden = visible;
+    ui.hint.hidden = !visible;
+    ui.hintAgain.parentNode.hidden = visible;
   }
 
-  hintClose.addEventListener('click', function () {
-    bk.local.set(HINT_KEY, 'done');
+  ui.hintClose.addEventListener('click', function () {
+    bk.local.set(bk.keys.seatsHint, 'done');
     setHint(false);
-    hintAgain.focus();
+    ui.hintAgain.focus();
   });
 
-  hintAgain.addEventListener('click', function () {
+  ui.hintAgain.addEventListener('click', function () {
     setHint(true);
     window.scrollTo(0, 0);
-    hintClose.focus();
+    ui.hintClose.focus();
   });
 
-  // ---- 좌석맵 그리기 ----
+  // ---- 좌석맵 정리 ----
 
-  function label(seat) {
-    return seat.section + '구역 ' + seat.rowNo + '열 ' + seat.no + '번 ' + seat.grade + '석 ' + bk.won(seat.price);
-  }
-
+  // 좌석을 bk.seat 모양으로 바꿔 줄 안에 그대로 두고 id로도 찾게 한다
   function index(snapshot) {
-    seatsById = {};
+    state.seatsById = {};
     snapshot.sections.forEach(function (sec) {
       sec.rows.forEach(function (row) {
-        row.seats.forEach(function (seat) {
-          seatsById[String(seat.id)] = {
-            id: seat.id, section: sec.section, rowNo: row.rowNo, no: seat.no,
-            grade: seat.grade, price: seat.price, s: seat.s
-          };
+        row.seats = row.seats.map(function (raw) {
+          var seat = bk.seat(raw, sec.section, row.rowNo);
+          seat.free = raw.s === 'A';
+          state.seatsById[String(seat.id)] = seat;
+          return seat;
         });
       });
     });
   }
 
   function sectionOf(name) {
-    return map.sections.filter(function (sec) { return sec.section === name; })[0];
+    return state.map.sections.filter(function (sec) { return sec.section === name; })[0];
   }
 
-  function left(sec) {
+  function freeCount(sec) {
     var n = 0;
     sec.rows.forEach(function (row) {
-      row.seats.forEach(function (seat) { if (seat.s === 'A') n++; });
+      row.seats.forEach(function (seat) { if (seat.free) n++; });
     });
     return n;
   }
 
   // 무대에서 본 구역 위치
   function side(name) {
-    var names = map.sections.map(function (sec) { return sec.section; });
+    var names = state.map.sections.map(function (sec) { return sec.section; });
     var i = names.indexOf(name);
     var n = names.length;
     if (n === 1) return '무대 정면';
@@ -161,120 +146,151 @@
     return i < n / 2 ? '무대 가운데 왼쪽' : '무대 가운데 오른쪽';
   }
 
+  // ---- 좌석맵 그리기 ----
+
   function drawLegend() {
     var grades = {};
-    Object.keys(seatsById).forEach(function (id) {
-      var seat = seatsById[id];
+    Object.keys(state.seatsById).forEach(function (id) {
+      var seat = state.seatsById[id];
       grades[seat.grade] = seat.price;
     });
     var list = Object.keys(grades).sort(function (a, b) { return grades[b] - grades[a]; });
     var key = list.map(function (g) { return g + grades[g]; }).join(',');
-    if (key === legendKey) return;
-    legendKey = key;
-    legend.textContent = '';
+    if (key === drawn.legendKey) return;
+    drawn.legendKey = key;
+    ui.legend.textContent = '';
     list.forEach(function (g) {
-      legend.appendChild(el('li', { class: 'g-' + g },
+      ui.legend.appendChild(el('li', { class: 'g-' + g },
         el('span', { class: 'chip', 'aria-hidden': 'true' }),
         el('b', { text: g + '석' }),
         el('span', { class: 'price num', text: bk.won(grades[g]) })));
     });
   }
 
-  function drawTabs() {
-    var names = map.sections.map(function (sec) { return sec.section; }).join(',');
-    if (names !== tabNames) {
-      tabNames = names;
-      tabs.textContent = '';
-      tabButtons = map.sections.map(function (sec) {
-        var tab = el('button', {
-          class: 'tab', type: 'button', role: 'tab', id: 'tab-' + sec.section,
-          'aria-controls': 'seat-grid', 'data-section': sec.section
-        }, el('strong', { text: sec.section + '구역' }), el('span', { class: 'num' }));
-        tabs.appendChild(tab);
-        return tab;
-      });
-      var n = map.sections.length;
-      tabs.style.gridTemplateColumns = n === 4 ? '' : 'repeat(' + n + ',minmax(64px,1fr))';
-      tabs.classList.toggle('many', n > 5);
-    }
-    map.sections.forEach(function (sec, i) {
-      var tab = tabButtons[i];
-      tab.setAttribute('aria-selected', String(sec.section === current));
-      tab.lastChild.textContent = bk.count(left(sec)) + '석 남음';
+  function buildTabs() {
+    ui.tabs.textContent = '';
+    drawn.tabButtons = state.map.sections.map(function (sec) {
+      var tab = el('button', {
+        class: 'tab', type: 'button', role: 'tab', id: 'seats-tab-' + sec.section,
+        'aria-controls': 'seats-grid', 'data-section': sec.section
+      }, el('strong', { text: sec.section + '구역' }), el('span', { class: 'num' }));
+      ui.tabs.appendChild(tab);
+      return tab;
     });
+    var n = state.map.sections.length;
+    ui.tabs.style.gridTemplateColumns = n === 4 ? '' : 'repeat(' + n + ',minmax(64px,1fr))';
+    ui.tabs.classList.toggle('many', n > 5);
+  }
+
+  function drawTabs() {
+    var names = state.map.sections.map(function (sec) { return sec.section; }).join(',');
+    if (names !== drawn.tabNames) {
+      drawn.tabNames = names;
+      buildTabs();
+    }
+    state.map.sections.forEach(function (sec, i) {
+      var tab = drawn.tabButtons[i];
+      tab.setAttribute('aria-selected', String(sec.section === state.current));
+      tab.lastChild.textContent = bk.count(freeCount(sec)) + '석 남음';
+    });
+  }
+
+  // 8석 이상이면 가운데에 통로를 둔다. 통로 앞 번호를 돌려주고, 없으면 0
+  function aisleAfter(cols) {
+    return cols >= 8 ? Math.ceil(cols / 2) : 0;
+  }
+
+  function gridColumns(cols, half) {
+    return half
+      ? '14px repeat(' + half + ',minmax(var(--seat-min),1fr)) 4px repeat(' + (cols - half) + ',minmax(var(--seat-min),1fr)) 14px'
+      : '14px repeat(' + cols + ',minmax(var(--seat-min),1fr)) 14px';
+  }
+
+  function gap() {
+    return el('span', { 'aria-hidden': 'true' });
+  }
+
+  // 맨 위 좌석 번호 줄
+  function appendNumberRow(frag, cols, half) {
+    frag.appendChild(gap());
+    for (var no = 1; no <= cols; no++) {
+      frag.appendChild(el('span', { class: 'cn num', 'aria-hidden': 'true', text: String(no) }));
+      if (no === half) frag.appendChild(gap());
+    }
+    frag.appendChild(gap());
+  }
+
+  // 열 번호, 좌석 단추(없는 번호는 빈칸), 열 번호
+  function appendSeatRow(frag, row, cols, half) {
+    var byNo = {};
+    row.seats.forEach(function (seat) { byNo[seat.seatNo] = seat; });
+    frag.appendChild(el('span', { class: 'rn num', 'aria-hidden': 'true', text: String(row.rowNo) }));
+    for (var n = 1; n <= cols; n++) {
+      var seat = byNo[n];
+      if (seat) {
+        var button = el('button', { class: 'seat', type: 'button', 'data-id': String(seat.id) });
+        drawn.buttons[String(seat.id)] = button;
+        frag.appendChild(button);
+      } else {
+        frag.appendChild(gap());
+      }
+      if (n === half) frag.appendChild(gap());
+    }
+    frag.appendChild(el('span', { class: 'rn num', 'aria-hidden': 'true', text: String(row.rowNo) }));
   }
 
   function buildGrid(sec) {
     var cols = 0;
     sec.rows.forEach(function (row) {
-      row.seats.forEach(function (seat) { cols = Math.max(cols, seat.no); });
+      row.seats.forEach(function (seat) { cols = Math.max(cols, seat.seatNo); });
     });
-    var half = cols >= 8 ? Math.ceil(cols / 2) : 0;
-    grid.style.gridTemplateColumns = half
-      ? '14px repeat(' + half + ',minmax(var(--seat-min),1fr)) 4px repeat(' + (cols - half) + ',minmax(var(--seat-min),1fr)) 14px'
-      : '14px repeat(' + cols + ',minmax(var(--seat-min),1fr)) 14px';
+    var half = aisleAfter(cols);
+    ui.grid.style.gridTemplateColumns = gridColumns(cols, half);
 
     var frag = document.createDocumentFragment();
-    function gap() { frag.appendChild(el('span', { 'aria-hidden': 'true' })); }
-    gap();
-    for (var no = 1; no <= cols; no++) {
-      frag.appendChild(el('span', { class: 'cn num', 'aria-hidden': 'true', text: String(no) }));
-      if (no === half) gap();
-    }
-    gap();
-
-    buttons = {};
+    appendNumberRow(frag, cols, half);
+    drawn.buttons = {};
     var prevGrade = null;
     sec.rows.forEach(function (row) {
       var grade = row.seats.length ? row.seats[0].grade : prevGrade;
       // 등급이 바뀌는 줄 사이에 점선을 긋는다
       if (prevGrade && grade !== prevGrade) frag.appendChild(el('i', { class: 'band', 'aria-hidden': 'true' }));
       prevGrade = grade;
-      var byNo = {};
-      row.seats.forEach(function (seat) { byNo[seat.no] = seat; });
-      frag.appendChild(el('span', { class: 'rn num', 'aria-hidden': 'true', text: String(row.rowNo) }));
-      for (var n = 1; n <= cols; n++) {
-        var seat = byNo[n];
-        if (seat) {
-          var button = el('button', { class: 'seat', type: 'button', 'data-id': String(seat.id) });
-          buttons[String(seat.id)] = button;
-          frag.appendChild(button);
-        } else {
-          gap();
-        }
-        if (n === half) gap();
-      }
-      frag.appendChild(el('span', { class: 'rn num', 'aria-hidden': 'true', text: String(row.rowNo) }));
+      appendSeatRow(frag, row, cols, half);
     });
-    grid.textContent = '';
-    grid.appendChild(frag);
+    ui.grid.textContent = '';
+    ui.grid.appendChild(frag);
+  }
+
+  function seatLabel(seat) {
+    return bk.seatName(seat) + ' ' + bk.seatPrice(seat);
   }
 
   function patchGrid() {
     var now = Date.now();
-    Object.keys(buttons).forEach(function (id) {
-      var seat = seatsById[id];
-      var button = buttons[id];
+    Object.keys(drawn.buttons).forEach(function (id) {
+      var seat = state.seatsById[id];
+      var button = drawn.buttons[id];
       if (!seat) return;
-      var off = seat.s !== 'A';
-      var mine = !!picked[id];
-      var lost = flashes[id] > now;
+      var off = !seat.free;
+      var mine = !!state.picked[id];
+      var lost = state.flashes[id] > now;
       button.className = 'seat g-' + seat.grade + (off ? ' off' : '') + (mine ? ' mine' : '') + (lost ? ' lost' : '');
       button.disabled = off;
       button.setAttribute('aria-pressed', String(mine));
-      button.setAttribute('aria-label', label(seat));
+      button.setAttribute('aria-label', seatLabel(seat));
     });
   }
 
   function drawSection() {
-    var sec = sectionOf(current);
+    var sec = sectionOf(state.current);
     var shape = sec.section + '|' + sec.rows.map(function (row) { return row.rowNo + ':' + row.seats.length; }).join(',');
-    if (shape !== gridShape) {
-      gridShape = shape;
+    if (shape !== drawn.gridShape) {
+      drawn.gridShape = shape;
       buildGrid(sec);
     }
-    grid.setAttribute('aria-labelledby', 'tab-' + sec.section);
-    where.textContent = side(sec.section);
+    ui.grid.setAttribute('aria-labelledby', 'seats-tab-' + sec.section);
+    ui.where.textContent = side(sec.section);
     patchGrid();
   }
 
@@ -282,24 +298,34 @@
     drawLegend();
     drawTabs();
     drawSection();
-    mapState.hidden = true;
-    grid.hidden = false;
+    ui.mapState.hidden = true;
+    ui.grid.hidden = false;
+  }
+
+  function showSection(name) {
+    state.current = name;
+    drawTabs();
+    drawSection();
+  }
+
+  function showMapMessage(text) {
+    ui.mapState.textContent = text;
+    ui.mapState.hidden = false;
   }
 
   // ---- 고른 자리 ----
 
   function pickedList() {
-    return Object.keys(picked).map(function (id) { return seatsById[id] || picked[id]; }).sort(function (a, b) {
-      if (a.section !== b.section) return a.section < b.section ? -1 : 1;
-      return a.rowNo - b.rowNo || a.no - b.no;
-    });
+    return Object.keys(state.picked).map(function (id) {
+      return state.seatsById[id] || state.picked[id];
+    }).sort(bk.bySeat);
   }
 
   function flash(id) {
-    flashes[id] = Date.now() + FLASH_MS;
+    state.flashes[id] = Date.now() + FLASH_MS;
     setTimeout(function () {
-      if (flashes[id] <= Date.now()) delete flashes[id];
-      if (map) patchGrid();
+      if (state.flashes[id] <= Date.now()) delete state.flashes[id];
+      if (state.map) patchGrid();
     }, FLASH_MS + 20);
   }
 
@@ -308,8 +334,8 @@
     var dropped = 0;
     ids.forEach(function (raw) {
       var id = String(raw);
-      if (picked[id]) {
-        delete picked[id];
+      if (state.picked[id]) {
+        delete state.picked[id];
         dropped++;
       }
       flash(id);
@@ -318,281 +344,209 @@
   }
 
   function dropTaken() {
-    var lost = Object.keys(picked).filter(function (id) {
-      return !seatsById[id] || seatsById[id].s !== 'A';
+    var lost = Object.keys(state.picked).filter(function (id) {
+      return !state.seatsById[id] || !state.seatsById[id].free;
     });
     if (lost.length === 0) return 0;
     drop(lost);
-    showNote(TAKEN_MESSAGE);
+    note.show(TAKEN_MESSAGE);
     return lost.length;
   }
 
-  // A구역 3열 9번, 10번 / B구역 1열 2번
-  function seatsText(list) {
-    var groups = [];
-    list.forEach(function (seat) {
-      var last = groups[groups.length - 1];
-      if (last && last.section === seat.section && last.rowNo === seat.rowNo) last.nos.push(seat.no);
-      else groups.push({ section: seat.section, rowNo: seat.rowNo, nos: [seat.no] });
-    });
-    return groups.map(function (g) {
-      return g.section + '구역 ' + g.rowNo + '열 ' + g.nos.map(function (n) { return n + '번'; }).join(', ');
-    }).join(' / ');
+  // 한 자리를 놓쳤다: 그 구역을 보이고 목록에서 빼고 알린다
+  function loseSeat(id, message) {
+    var seat = state.seatsById[String(id)];
+    if (seat && seat.section !== state.current) showSection(seat.section);
+    drop([id]);
+    note.show(message);
+    patchGrid();
   }
 
-  // R석 1매 · S석 1매
-  function gradesText(list) {
-    var counts = {};
-    var prices = {};
-    list.forEach(function (seat) {
-      counts[seat.grade] = (counts[seat.grade] || 0) + 1;
-      prices[seat.grade] = seat.price;
-    });
-    return Object.keys(counts).sort(function (a, b) { return prices[b] - prices[a]; }).map(function (g) {
-      return g + '석 ' + counts[g] + '매';
-    }).join(' · ');
+  function renderPickSummary(list) {
+    ui.pickSub.textContent = '';
+    if (list.length === 0) {
+      ui.pickSeats.textContent = '아직 고른 자리가 없어요';
+      ui.pickSub.textContent = '한 사람이 ' + maxSeats + '석까지 고를 수 있어요';
+      return;
+    }
+    var total = list.reduce(function (sum, seat) { return sum + seat.price; }, 0);
+    ui.pickSeats.textContent = bk.seatText(list);
+    ui.pickSub.appendChild(document.createTextNode(bk.gradeText(list) + ' · '));
+    ui.pickSub.appendChild(el('b', { class: 'num', text: bk.won(total) }));
+    ui.pickSub.appendChild(document.createTextNode(' '));
+    ui.pickSub.appendChild(el('span', { class: 'num', text: '(' + list.length + '/' + maxSeats + '석)' }));
   }
 
   function renderPick() {
     var list = pickedList();
-    pickSub.textContent = '';
-    if (list.length === 0) {
-      pickSeats.textContent = '아직 고른 자리가 없어요';
-      pickSub.textContent = '한 사람이 ' + maxSeats + '석까지 고를 수 있어요';
-    } else {
-      var total = list.reduce(function (sum, seat) { return sum + seat.price; }, 0);
-      pickSeats.textContent = seatsText(list);
-      pickSub.appendChild(document.createTextNode(gradesText(list) + ' · '));
-      pickSub.appendChild(el('b', { class: 'num', text: bk.won(total) }));
-      pickSub.appendChild(document.createTextNode(' '));
-      pickSub.appendChild(el('span', { class: 'num', text: '(' + list.length + '/' + maxSeats + '석)' }));
-    }
-    submit.disabled = list.length === 0 || submitting || stopped;
-    submit.classList.toggle('is-empty', list.length === 0);
-    submit.textContent = submitting ? '자리를 잡고 있어요' : list.length === 0 ? '자리를 골라 주세요' : '이 자리로 할게요';
+    renderPickSummary(list);
+    ui.submit.disabled = list.length === 0 || state.submitting || state.stopped;
+    ui.submit.classList.toggle('is-empty', list.length === 0);
+    ui.submit.textContent = state.submitting ? '자리를 잡고 있어요'
+      : list.length === 0 ? '자리를 골라 주세요' : '이 자리로 할게요';
   }
 
-  grid.addEventListener('click', function (e) {
+  ui.grid.addEventListener('click', function (e) {
     var button = e.target.closest('.seat');
-    if (!button || button.disabled || submitting || stopped) return;
+    if (!button || button.disabled || state.submitting || state.stopped) return;
     var id = button.dataset.id;
-    if (picked[id]) {
-      delete picked[id];
-    } else if (Object.keys(picked).length >= maxSeats) {
-      showNote('한 번에 ' + maxSeats + '석까지 고를 수 있어요');
+    if (state.picked[id]) {
+      delete state.picked[id];
+    } else if (Object.keys(state.picked).length >= maxSeats) {
+      note.show('한 번에 ' + maxSeats + '석까지 고를 수 있어요');
       return;
     } else {
-      picked[id] = seatsById[id];
+      state.picked[id] = state.seatsById[id];
     }
     patchGrid();
     renderPick();
   });
 
-  tabs.addEventListener('click', function (e) {
+  ui.tabs.addEventListener('click', function (e) {
     var tab = e.target.closest('.tab');
-    if (!tab || !map) return;
-    current = tab.dataset.section;
-    drawTabs();
-    drawSection();
+    if (!tab || !state.map) return;
+    showSection(tab.dataset.section);
   });
 
   // ---- 좌석맵 받기 ----
 
   function render(snapshot) {
-    if (map && snapshot.generatedAt === map.generatedAt) return;
-    map = snapshot;
+    if (state.map && snapshot.generatedAt === state.map.generatedAt) return;
+    state.map = snapshot;
     index(snapshot);
-    if (map.sections.length === 0) {
-      mapState.textContent = '고를 수 있는 자리가 없어요';
-      mapState.hidden = false;
-      grid.hidden = true;
+    if (state.map.sections.length === 0) {
+      showMapMessage('고를 수 있는 자리가 없어요');
+      ui.grid.hidden = true;
       return;
     }
-    if (!current || !sectionOf(current)) current = map.sections[0].section;
+    if (!state.current || !sectionOf(state.current)) state.current = state.map.sections[0].section;
     // 내가 보낸 선점이 막 커밋되면 내 자리도 잡힌 자리로 보이므로 그동안은 비교하지 않는다
-    if (!submitting) dropTaken();
+    if (!state.submitting) dropTaken();
     draw();
     renderPick();
   }
 
-  function schedule(ms) {
-    clearTimeout(timer);
-    if (!leaving && !document.hidden) timer = setTimeout(load, ms);
+  function runAfterMap() {
+    var then = state.afterMap;
+    state.afterMap = null;
+    if (then) then();
+  }
+
+  function mapLoaded(snapshot) {
+    state.failures = 0;
+    note.clear('map');
+    render(snapshot);
+    runAfterMap();
   }
 
   function mapFailed(e) {
-    failures++;
+    runAfterMap();
+    state.failures++;
     if (e.status === 404) {
-      mapState.textContent = '공연 날짜를 찾지 못했어요';
-      mapState.hidden = false;
-      grid.hidden = true;
+      showMapMessage('공연 날짜를 찾지 못했어요');
+      ui.grid.hidden = true;
       showStop('공연 날짜를 찾지 못했어요', '공연 정보에서 날짜를 다시 골라 주세요.',
-        { label: '공연 정보로 가기', run: function () { location.href = showHref; } });
+        { label: '공연 정보로 가기', run: function () { location.href = bk.links.show(showId); } });
+      mapPoller.idle();
       return;
     }
-    var network = e.code === 'NETWORK';
-    if (!map) {
-      mapState.textContent = network
-        ? '인터넷 연결이 불안정해요. 연결되면 저절로 다시 불러와요'
-        : '자리 정보를 불러오지 못했어요. 잠시 뒤 저절로 다시 불러와요';
-      mapState.hidden = false;
-    } else if (failures >= MAP_FAILS_BEFORE_NOTE) {
-      showNote(network
-        ? '인터넷 연결이 불안정해요. 연결되면 자리 정보를 다시 불러와요'
+    var network = bk.isNetworkError(e);
+    if (!state.map) {
+      showMapMessage(network
+        ? bk.WORDS.network + '. 연결되면 저절로 다시 불러와요'
+        : '자리 정보를 불러오지 못했어요. 잠시 뒤 저절로 다시 불러와요');
+    } else if (state.failures >= MAP_FAILS_BEFORE_NOTE) {
+      note.show(network
+        ? bk.WORDS.network + '. 연결되면 자리 정보를 다시 불러와요'
         : '자리 정보를 새로 받지 못하고 있어요. 잠시 뒤 저절로 다시 불러와요', 'map');
     }
-    schedule(failures >= MAP_FAILS_BEFORE_NOTE ? RETRY_MS : POLL_MS);
   }
 
-  // then은 이번 요청의 좌석맵을 그린 뒤 한 번 부른다
-  function load(then) {
-    clearTimeout(timer);
-    if (leaving) return;
-    var seq = ++loadSeq;
-    bk.get('/api/performances/' + pid + '/seats').then(function (snapshot) {
-      if (seq !== loadSeq) return;
-      failures = 0;
-      clearNote('map');
-      render(snapshot);
-      if (typeof then === 'function') then(true);
-      schedule(POLL_MS);
-    }, function (e) {
-      if (seq !== loadSeq) return;
-      if (typeof then === 'function') then(false);
-      mapFailed(e);
-    });
+  // 좌석맵을 곧바로 다시 받고, then은 그것을 그린 뒤 한 번 부른다
+  function reloadMap(then) {
+    if (state.leaving) return;
+    state.afterMap = then || null;
+    mapPoller.now();
   }
 
-  document.addEventListener('visibilitychange', function () {
-    if (document.hidden) {
-      clearTimeout(timer);
-      loadSeq++;
-    } else {
-      load();
-    }
-  });
-
-  // ---- 선점 ----
-
-  function checkoutHref(holdId) {
-    return '/booking/holds/' + encodeURIComponent(holdId) + '/checkout' + (showId ? '?show=' + showId : '');
-  }
-
-  function moveTo(id) {
-    var seat = seatsById[String(id)];
-    if (seat && seat.section !== current) {
-      current = seat.section;
-      drawTabs();
-      drawSection();
-    }
-  }
+  // ---- 자리 잡기 ----
 
   function showHeldElsewhere() {
     bk.get('/api/performances/' + pid + '/holds/mine').then(function (h) {
       showStop('이미 잡아 둔 자리가 있어요', '결제 화면에서 결제하거나 자리를 놓을 수 있어요.',
-        { label: '결제 화면으로 가기', run: function () { location.href = checkoutHref(h.holdId); } });
+        { label: '결제 화면으로 가기', run: function () { location.href = bk.links.checkout(h.holdId, showId); } });
     }, function (e) {
-      showNote(e.code === 'HOLD_NOT_FOUND' ? '잡아 둔 자리가 방금 풀렸어요. 다시 눌러 주세요' : e.message);
+      note.show(e.code === 'HOLD_NOT_FOUND' ? '잡아 둔 자리가 방금 풀렸어요. 다시 눌러 주세요' : e.message);
     });
   }
 
-  // 새 좌석맵이 이미 뺀 자리가 있으면 나머지는 그대로 둔다
+  function showNotAdmitted() {
+    showStop('입장 순서가 지났어요', '다시 줄을 서 주세요. 맨 뒤부터 다시 기다려요.',
+      { label: '다시 줄 서기', run: function () {
+        bk.session.remove(tokenKey);
+        location.href = bk.links.queue(pid, showId);
+      } });
+  }
+
+  // DB는 어느 자리인지 알려 주지 않으므로 새 좌석맵에서 잡힌 자리를 찾는다. 못 찾으면 보낸 자리를 모두 뺀다
   function retakeChanged(sent) {
-    load(function () {
-      var gone = sent.filter(function (id) { return !picked[id]; }).length;
+    reloadMap(function () {
+      var gone = sent.filter(function (id) { return !state.picked[id]; }).length;
       if (gone === 0) gone = dropTaken();
       if (gone === 0) {
         drop(sent);
-        showNote(TAKEN_MESSAGE);
+        note.show(TAKEN_MESSAGE);
       }
-      if (map) patchGrid();
+      if (state.map) patchGrid();
       renderPick();
     });
   }
 
+  // 코드마다 화면이 하는 일. 없는 코드는 서버 문구를 띠에 띄운다
+  var HOLD_FAILURES = {
+    SEAT_TAKEN: function (e) { loseSeat(e.detail.seatId, TAKEN_MESSAGE); reloadMap(); },
+    SEAT_STATE_CHANGED: function (e, ids) { retakeChanged((e.detail.seatIds || ids).map(String)); },
+    COOLDOWN: function (e) { loseSeat(e.detail.seatId, e.message); },
+    USER_HAS_HOLD: showHeldElsewhere,
+    NOT_ADMITTED: showNotAdmitted,
+    INVALID_SEAT_SELECTION: function (e) { note.show(e.message); reloadMap(); },
+    BUSY: function () { note.show(BUSY_MESSAGE); },
+    QUEUE_UNAVAILABLE: function () { note.show(BUSY_MESSAGE); }
+  };
+
   function holdFailed(e, ids) {
-    var detail = e.detail || {};
-    switch (e.code) {
-      case 'SEAT_TAKEN':
-        moveTo(detail.seatId);
-        drop([detail.seatId]);
-        showNote(TAKEN_MESSAGE);
-        patchGrid();
-        load();
-        return;
-      case 'SEAT_STATE_CHANGED':
-        // DB는 어느 자리인지 알려 주지 않으므로 새 좌석맵에서 잡힌 자리를 찾는다. 못 찾으면 보낸 자리를 모두 뺀다
-        retakeChanged((detail.seatIds || ids).map(String));
-        return;
-      case 'COOLDOWN':
-        moveTo(detail.seatId);
-        drop([detail.seatId]);
-        showNote(e.message);
-        patchGrid();
-        return;
-      case 'USER_HAS_HOLD':
-        showHeldElsewhere();
-        return;
-      case 'NOT_ADMITTED':
-        showStop('입장 순서가 지났어요', '다시 줄을 서 주세요. 맨 뒤부터 다시 기다려요.',
-          { label: '다시 줄 서기', run: function () {
-            bk.session.remove(tokenKey);
-            location.href = queueHref;
-          } });
-        return;
-      case 'INVALID_SEAT_SELECTION':
-        showNote(e.message);
-        load();
-        return;
-      case 'BUSY':
-      case 'QUEUE_UNAVAILABLE':
-        showNote(BUSY_MESSAGE);
-        return;
-      default:
-        showNote(e.message);
-    }
+    if (Object.prototype.hasOwnProperty.call(HOLD_FAILURES, e.code)) HOLD_FAILURES[e.code](e, ids);
+    else note.show(e.message);
   }
 
-  submit.addEventListener('click', function () {
+  function holdPicked() {
     var list = pickedList();
-    if (list.length === 0 || submitting || stopped) return;
-    submitting = true;
-    clearNote();
+    if (list.length === 0 || state.submitting || state.stopped) return;
+    state.submitting = true;
+    note.clear();
     renderPick();
     var seatIds = list.map(function (seat) { return seat.id; });
     bk.post('/api/performances/' + pid + '/holds', {
       seatIds: seatIds,
       queueToken: bk.session.get(tokenKey)
     }).then(function (r) {
-      leaving = true;
-      clearTimeout(timer);
-      bk.local.set(HINT_KEY, 'done');
+      state.leaving = true;
+      mapPoller.stop();
+      bk.local.set(bk.keys.seatsHint, 'done');
       // 뒤로 가기로 이미 잡은 자리를 다시 고르는 화면에 오지 않게 기록을 바꾼다
-      location.replace(checkoutHref(r.holdId));
+      location.replace(bk.links.checkout(r.holdId, showId));
     }, function (e) {
-      submitting = false;
+      state.submitting = false;
       holdFailed(e, seatIds);
       renderPick();
     });
-  });
-
-  // ---- 머리글 ----
-
-  function loadHeader() {
-    bk.setHeader(null, null, showHref);
-    if (!showId) return;
-    bk.get('/api/shows/' + showId).then(function (show) {
-      var performance = (show.performances || []).filter(function (p) { return String(p.id) === pid; })[0];
-      var sub = performance ? bk.dateTime(performance.startsAt) + ' · ' + show.venueName : show.venueName;
-      bk.setHeader(show.title, sub, showHref);
-    }, function () { /* 머리글은 없어도 자리는 고른다 */ });
   }
 
-  setHint(bk.local.get(HINT_KEY) !== 'done');
+  ui.submit.addEventListener('click', holdPicked);
+
+  setHint(bk.local.get(bk.keys.seatsHint) !== 'done');
   renderPick();
-  syncBar();
-  if ('ResizeObserver' in window) new ResizeObserver(syncBar).observe(bar);
-  else window.addEventListener('resize', syncBar);
-  loadHeader();
-  load();
+  bk.syncBar(ui.bar);
+  bk.loadPerformanceHeader(showId, pid);
+  mapPoller.now();
 })();

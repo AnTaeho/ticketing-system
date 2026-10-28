@@ -2,13 +2,13 @@
   'use strict';
 
   var form = document.getElementById('login-form');
-  var input = document.getElementById('nickname');
+  var input = document.getElementById('login-nickname');
   var error = document.getElementById('login-error');
   var submit = document.getElementById('login-submit');
 
   function nextPath() {
     var next = bk.safePath(bk.query('next'));
-    if (!next || next.indexOf('/booking/login') === 0) return '/booking/shows';
+    if (!next || next.indexOf('/booking/login') === 0) return bk.links.shows;
     return next;
   }
 

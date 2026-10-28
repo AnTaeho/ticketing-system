@@ -2,12 +2,13 @@
 <html lang="ko" xmlns:th="http://www.thymeleaf.org">
 <head>
   <th:block th:replace="~{booking/layout :: assets('입장 대기')}"></th:block>
+  <link rel="stylesheet" th:href="@{/booking/css/queue.css}">
   <script th:src="@{/booking/js/queue.js}" defer></script>
 </head>
 <body class="narrow" th:data-performance-id="${performanceId}">
-<header th:replace="~{booking/layout :: top('입장 대기', null, @{/booking/shows})}"></header>
+<header th:replace="~{booking/layout :: top('입장 대기', null, @{/booking/shows}, null, null)}"></header>
 <main class="wrap">
-  <section class="panel q" id="q-wait" aria-live="polite" hidden>
+  <section class="panel state q" id="q-wait" aria-live="polite" hidden>
     <p class="label">내 앞에</p>
     <div class="big"><strong class="num" id="q-ahead"></strong><span class="num" id="q-eta"></span></div>
     <div class="bar-wrap">
@@ -17,10 +18,10 @@
     <p class="msg">차례가 오면 <b>자리 고르는 화면으로 저절로 넘어가요.</b><br>이 화면을 켜 둔 채로 기다려 주세요.</p>
   </section>
 
-  <section class="panel q" id="q-state" aria-live="polite">
+  <section class="panel state q" id="q-state" aria-live="polite">
     <p class="state-title" id="q-state-title">줄을 서고 있어요</p>
     <p class="state-text" id="q-state-text">잠시만 기다려 주세요.</p>
-    <button class="btn btn-primary" id="q-action" type="button" hidden></button>
+    <button class="btn btn-primary" id="q-state-action" type="button" hidden></button>
   </section>
 
   <p class="alert q-note" id="q-note" role="status" hidden></p>

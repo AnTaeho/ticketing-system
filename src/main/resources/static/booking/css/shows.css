@@ -1,0 +1,7 @@
+/* 공연 목록 화면. 공통 모양은 booking.css에 있다 */
+.cards{display:grid;gap:10px}
+.card{display:block;padding:16px;text-decoration:none}
+.card:hover{border-color:var(--line-strong)}
+.card h2{font-size:17px;font-weight:700;line-height:1.35}
+.card .venue{font-size:14px;color:var(--muted)}
+.card .next{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;margin-top:12px;padding-top:12px;border-top:1px solid var(--line);font-size:14px}
