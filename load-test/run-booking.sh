@@ -20,6 +20,7 @@ fi
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 GATLING_DIR="$REPO/load-test/gatling"
 RESULTS_DIR="$REPO/load-test/results"
+SUMMARIZE="$REPO/load-test/scripts/summarize_simulation.py"
 BASE_URL="${BASE_URL:-http://localhost:8080}"
 RAMP_SECONDS="${RAMP_SECONDS:-10}"
 SETTLE_SECONDS="${SETTLE_SECONDS:-11}"
@@ -35,6 +36,12 @@ mkdir -p "$RESULTS_DIR"
 
 sql() { mysql -u"$MYSQL_USER" -N -B "$MYSQL_DB" -e "$1"; }
 
+post_json() {
+  curl -sf -X POST "$BASE_URL$1" -H 'Content-Type: application/json' -d "$2"
+}
+
+now_ns() { python3 -c 'import time; print(time.time_ns())'; }
+
 # Com_update, Innodb_row_lock_waits, Innodb_row_lock_time(ms) 순서
 mysql_status() {
   sql "SHOW GLOBAL STATUS WHERE Variable_name IN ('Com_update','Innodb_row_lock_waits','Innodb_row_lock_time')" \
@@ -48,136 +55,147 @@ counters() {
     | LC_ALL=C sort
 }
 
-post_json() {
-  curl -sf -X POST "$BASE_URL$1" -H 'Content-Type: application/json' -d "$2"
+# 같은 이름의 전후 값 차이를 "이름=차이 "로 잇는다. 이번 실행에서 0이 아닌 것만 남긴다
+counter_diff() {
+  LC_ALL=C join -a2 -e 0 -o '0,1.2,2.2' "$1" "$2" \
+    | awk '{d=$3-$2; if (d != 0) printf "%s=%d ", $1, d}'
+}
+
+# counter_diff 결과에서 이름 하나의 값. 없으면 0
+counter_value() {
+  local v
+  v="$(awk -v k="$2" '{for (i=1;i<=NF;i++) {split($i,a,"="); if (a[1]==k) {print a[2]; exit}}}' <<<"$1")"
+  echo "${v:-0}"
+}
+
+create_show() {
+  local stamp
+  stamp="$(date +%Y%m%d-%H%M%S)"
+  post_json /api/admin/shows "{\"title\":\"부하 테스트 $stamp\",\"venueName\":\"부하 테스트홀\"}" | jq -r .showId
+}
+
+# 4구역 × 10열 × 20석 = 800석. A구역 1열 20석이 인기석이다
+create_performance() {
+  local open_at starts_at
+  open_at="$(sql "SELECT DATE_FORMAT(NOW() - INTERVAL 1 MINUTE, '%Y-%m-%dT%H:%i:%s')")"
+  starts_at="$(sql "SELECT DATE_FORMAT(NOW() + INTERVAL 1 DAY, '%Y-%m-%dT%H:%i:%s')")"
+  post_json /api/admin/performances \
+    "{\"showId\":$SHOW_ID,\"startsAt\":\"$starts_at\",\"openAt\":\"$open_at\",\"sections\":4,\"rows\":10,\"seatsPerRow\":20}" \
+    | jq -r .performanceId
+}
+
+# 회차가 열린 회차 목록과 좌석맵 스냅샷에 들어갈 때까지 기다리며 쉬는 동안의 초당 Com_update를 잰다
+measure_idle_updates() {
+  local u0 u1
+  read -r u0 _ _ <<<"$(mysql_status)"
+  sleep "$SETTLE_SECONDS"
+  read -r u1 _ _ <<<"$(mysql_status)"
+  python3 -c "print(round(($u1 - $u0) / $SETTLE_SECONDS, 1))"
+}
+
+run_gatling() {
+  (cd "$GATLING_DIR" && mvn -B gatling:test -Dgatling.simulationClass=ScenarioCSimulation \
+    -DPERFORMANCE_ID="$1" -DUSERS="$USERS" -DRAMP_SECONDS="$RAMP_SECONDS" -DBASE_URL="$BASE_URL") >"$2" 2>&1
+}
+
+# Global Information을 보여 준다. Gatling이 실패했으면 로그 끝을 보이고 끝낸다
+show_gatling_result() {
+  local log="$1" exit_code="$2"
+  awk '/---- Global Information/ {p=1} p {print} p && /^====/ {exit}' "$log"
+  if [[ $exit_code -ne 0 ]]; then
+    echo "!!! gatling 실패(exit $exit_code). 로그 끝:" >&2
+    tail -n 40 "$log" >&2
+    exit 1
+  fi
+}
+
+latest_simulation_dir() {
+  ls -td "$GATLING_DIR"/target/gatling/scenariocsimulation-* | head -1
+}
+
+# 앱의 실제 게이트 설정과 인자가 맞는지 카운터로 확인한다
+gate_check() {
+  local counters_diff="$1" ok taken skipped
+  ok="$(counter_value "$counters_diff" ticketing.hold.gate/ok)"
+  taken="$(counter_value "$counters_diff" ticketing.hold.gate/seat_taken)"
+  skipped="$(counter_value "$counters_diff" ticketing.hold.gate/skipped)"
+  if [[ "$GATE" == "on" && "$skipped" -ne 0 ]] || [[ "$GATE" == "off" && $((ok + taken)) -ne 0 ]]; then
+    echo MISMATCH
+  else
+    echo ok
+  fi
+}
+
+# 같은 좌석이 확정 예매 두 건 이상에 들어간 좌석 수. 0이어야 한다
+count_overbooked() {
+  sql "SELECT COUNT(*) FROM (SELECT bs.seat_id FROM booking_seat bs JOIN booking b ON b.id = bs.booking_id
+    WHERE b.status = 'CONFIRMED' AND b.performance_id = $1 GROUP BY bs.seat_id HAVING COUNT(*) > 1) t"
+}
+
+count_confirmed() {
+  sql "SELECT COUNT(*) FROM booking WHERE performance_id = $1 AND status = 'CONFIRMED'"
+}
+
+seat_status_counts() {
+  sql "SELECT GROUP_CONCAT(CONCAT(status, ':', n) ORDER BY status) FROM (SELECT status, COUNT(*) n FROM seat WHERE performance_id = $1 GROUP BY status) t"
+}
+
+# 한 회차를 만들고 부하를 건 뒤 결과 한 줄을 남긴다
+run_once() {
+  local run="$1"
+  local stamp pid idle_rate u0 w0 t0 u1 w1 t1 log start_ns end_ns gatling_exit wall_s sim_dir client
+  local before after counters_diff db_hold check overbooked confirmed seats summary result_file
+
+  stamp="$(date +%Y%m%d-%H%M%S)"
+  pid="$(create_performance)"
+  echo ">>> [run $run/$RUNS] performance $pid, ${SETTLE_SECONDS}s settle"
+  idle_rate="$(measure_idle_updates)"
+
+  before="$RESULTS_DIR/.counters-before-$pid"
+  after="$RESULTS_DIR/.counters-after-$pid"
+  read -r u0 w0 t0 <<<"$(mysql_status)"
+  counters "$pid" >"$before"
+
+  log="$RESULTS_DIR/booking-$GATE-$USERS-$stamp-gatling.log"
+  echo ">>> gatling (log: $log)"
+  start_ns="$(now_ns)"
+  gatling_exit=0
+  run_gatling "$pid" "$log" || gatling_exit=$?
+  end_ns="$(now_ns)"
+
+  read -r u1 w1 t1 <<<"$(mysql_status)"
+  counters "$pid" >"$after"
+  show_gatling_result "$log" "$gatling_exit"
+
+  sim_dir="$(latest_simulation_dir)"
+  client="$(python3 "$SUMMARIZE" "$sim_dir/simulation.log")"
+
+  counters_diff="$(counter_diff "$before" "$after")"
+  rm -f "$before" "$after"
+  db_hold="$(counter_value "$counters_diff" ticketing.hold.db/_total)"
+  check="$(gate_check "$counters_diff")"
+
+  overbooked="$(count_overbooked "$pid")"
+  confirmed="$(count_confirmed "$pid")"
+  seats="$(seat_status_counts "$pid")"
+
+  wall_s="$(python3 -c "print(round(($end_ns - $start_ns) / 1e9, 1))")"
+  summary="gate=$GATE gate_check=$check users=$USERS pid=$pid $client confirmed=$confirmed seats=$seats overbooked=$overbooked db_hold=$db_hold com_update=$((u1 - u0)) row_lock_waits=$((w1 - w0)) row_lock_time_ms=$((t1 - t0)) idle_com_update_per_s=$idle_rate wall_s=$wall_s"
+  result_file="$RESULTS_DIR/booking-$GATE-$USERS-$stamp.txt"
+
+  echo ">>> overbooking rows: $overbooked (0이어야 한다)"
+  echo ">>> counters: $counters_diff"
+  echo ">>> report: $sim_dir/index.html"
+  echo "$summary"
+  echo "$summary counters: $counters_diff" >"$result_file"
+  echo ">>> saved $result_file"
 }
 
 curl -sf "$BASE_URL/actuator/health" >/dev/null || { echo "앱이 $BASE_URL 에서 응답하지 않는다" >&2; exit 1; }
 
-STAMP_SHOW="$(date +%Y%m%d-%H%M%S)"
-SHOW_ID="$(post_json /api/admin/shows "{\"title\":\"부하 테스트 $STAMP_SHOW\",\"venueName\":\"부하 테스트홀\"}" | jq -r .showId)"
+SHOW_ID="$(create_show)"
 echo ">>> show $SHOW_ID (gate=$GATE users=$USERS runs=$RUNS)"
 
 for run in $(seq 1 "$RUNS"); do
-  STAMP="$(date +%Y%m%d-%H%M%S)"
-  OPEN_AT="$(sql "SELECT DATE_FORMAT(NOW() - INTERVAL 1 MINUTE, '%Y-%m-%dT%H:%i:%s')")"
-  STARTS_AT="$(sql "SELECT DATE_FORMAT(NOW() + INTERVAL 1 DAY, '%Y-%m-%dT%H:%i:%s')")"
-  # 4구역 × 10열 × 20석 = 800석. A구역 1열 20석이 인기석이다
-  PID="$(post_json /api/admin/performances \
-    "{\"showId\":$SHOW_ID,\"startsAt\":\"$STARTS_AT\",\"openAt\":\"$OPEN_AT\",\"sections\":4,\"rows\":10,\"seatsPerRow\":20}" \
-    | jq -r .performanceId)"
-  echo ">>> [run $run/$RUNS] performance $PID, ${SETTLE_SECONDS}s settle"
-
-  # 회차가 열린 회차 목록과 좌석맵 스냅샷에 들어갈 때까지 기다리며 쉬는 동안의 Com_update도 잰다
-  read -r IDLE_U0 _ _ <<<"$(mysql_status)"
-  sleep "$SETTLE_SECONDS"
-  read -r IDLE_U1 _ _ <<<"$(mysql_status)"
-
-  read -r U0 W0 T0 <<<"$(mysql_status)"
-  counters "$PID" >"$RESULTS_DIR/.counters-before-$PID"
-
-  LOG="$RESULTS_DIR/booking-$GATE-$USERS-$STAMP-gatling.log"
-  echo ">>> gatling (log: $LOG)"
-  START_NS="$(python3 -c 'import time; print(time.time_ns())')"
-  set +e
-  (cd "$GATLING_DIR" && mvn -B gatling:test -Dgatling.simulationClass=ScenarioCSimulation \
-    -DPERFORMANCE_ID="$PID" -DUSERS="$USERS" -DRAMP_SECONDS="$RAMP_SECONDS" -DBASE_URL="$BASE_URL") >"$LOG" 2>&1
-  MVN_EXIT=$?
-  set -e
-  END_NS="$(python3 -c 'import time; print(time.time_ns())')"
-
-  read -r U1 W1 T1 <<<"$(mysql_status)"
-  counters "$PID" >"$RESULTS_DIR/.counters-after-$PID"
-
-  awk '/---- Global Information/ {p=1} p {print} p && /^====/ {exit}' "$LOG"
-  if [[ $MVN_EXIT -ne 0 ]]; then
-    echo "!!! gatling 실패(exit $MVN_EXIT). 로그 끝:" >&2
-    tail -n 40 "$LOG" >&2
-    exit 1
-  fi
-
-  SIM_DIR="$(ls -td "$GATLING_DIR"/target/gatling/scenariocsimulation-* | head -1)"
-
-  # 선점 응답 시간·상태와 단계별 수를 simulation.log에서 직접 센다(백분위는 nearest-rank)
-  CLIENT="$(python3 - "$SIM_DIR/simulation.log" <<'PY'
-import math, re, sys
-reqs = {}
-for line in open(sys.argv[1], encoding="utf-8"):
-    f = line.rstrip("\n").split("\t")
-    if f[0] != "REQUEST":
-        continue
-    name, start, end, status, msg = f[2], int(f[3]), int(f[4]), f[5], (f[6] if len(f) > 6 else "")
-    reqs.setdefault(name, []).append((end - start, status, msg))
-
-def pct(xs, p):
-    xs = sorted(xs)
-    return xs[max(0, math.ceil(p / 100 * len(xs)) - 1)] if xs else 0
-
-def code(status, msg):
-    if status == "OK":
-        return "201"
-    m = re.search(r"found (\d{3})", msg)
-    return m.group(1) if m else "err"
-
-holds = reqs.get("05 hold", []) + reqs.get("07 hold retry", [])
-codes = {}
-for _, st, msg in holds:
-    c = code(st, msg)
-    codes[c] = codes.get(c, 0) + 1
-out = {
-    "hold_req": len(holds),
-    "hold_201": codes.pop("201", 0),
-    "hold_409": codes.pop("409", 0),
-    "hold_other": sum(codes.values()),
-    "hold_p50_ms": pct([r[0] for r in holds], 50),
-    "hold_p99_ms": pct([r[0] for r in holds], 99),
-    "first_p50_ms": pct([r[0] for r in reqs.get("05 hold", [])], 50),
-    "first_p99_ms": pct([r[0] for r in reqs.get("05 hold", [])], 99),
-    "retry_req": len(reqs.get("07 hold retry", [])),
-    "retry_p50_ms": pct([r[0] for r in reqs.get("07 hold retry", [])], 50),
-    "retry_p99_ms": pct([r[0] for r in reqs.get("07 hold retry", [])], 99),
-    "pay_req": len(reqs.get("08 payment", [])),
-    "pay_ok": sum(1 for r in reqs.get("08 payment", []) if r[1] == "OK"),
-    "ko_other_steps": sum(1 for n, rs in reqs.items() if "hold" not in n for r in rs if r[1] != "OK"),
-}
-if codes:
-    out["hold_other_codes"] = "+".join(f"{k}:{v}" for k, v in sorted(codes.items()))
-starts = [l for l in open(sys.argv[1], encoding="utf-8") if l.startswith("REQUEST")]
-spans = [(int(l.split("\t")[3]), int(l.split("\t")[4])) for l in starts]
-out["sim_s"] = round((max(e for _, e in spans) - min(s for s, _ in spans)) / 1000, 1) if spans else 0
-print(" ".join(f"{k}={v}" for k, v in out.items()))
-PY
-)"
-
-  # 같은 이름의 전후 값 차이. 이번 실행에서 0이 아닌 것만 남긴다
-  COUNTER_DIFF="$(LC_ALL=C join -a2 -e 0 -o '0,1.2,2.2' "$RESULTS_DIR/.counters-before-$PID" "$RESULTS_DIR/.counters-after-$PID" \
-    | awk '{d=$3-$2; if (d != 0) printf "%s=%d ", $1, d}')"
-  rm -f "$RESULTS_DIR/.counters-before-$PID" "$RESULTS_DIR/.counters-after-$PID"
-  cdiff() { awk -v k="$1" '{for (i=1;i<=NF;i++) {split($i,a,"="); if (a[1]==k) {print a[2]; exit}}} END {}' <<<"$COUNTER_DIFF"; }
-  DB_HOLD="$(cdiff ticketing.hold.db/_total)"; DB_HOLD="${DB_HOLD:-0}"
-  GATE_OK="$(cdiff ticketing.hold.gate/ok)"; GATE_OK="${GATE_OK:-0}"
-  GATE_TAKEN="$(cdiff ticketing.hold.gate/seat_taken)"; GATE_TAKEN="${GATE_TAKEN:-0}"
-  GATE_SKIPPED="$(cdiff ticketing.hold.gate/skipped)"; GATE_SKIPPED="${GATE_SKIPPED:-0}"
-
-  # 앱의 실제 게이트 설정과 인자가 맞는지 카운터로 확인한다
-  GATE_CHECK=ok
-  if [[ "$GATE" == "on" && "$GATE_SKIPPED" -ne 0 ]] || [[ "$GATE" == "off" && $((GATE_OK + GATE_TAKEN)) -ne 0 ]]; then
-    GATE_CHECK=MISMATCH
-  fi
-
-  OVERBOOKED="$(sql "SELECT COUNT(*) FROM (SELECT bs.seat_id FROM booking_seat bs JOIN booking b ON b.id = bs.booking_id
-    WHERE b.status = 'CONFIRMED' AND b.performance_id = $PID GROUP BY bs.seat_id HAVING COUNT(*) > 1) t")"
-  CONFIRMED="$(sql "SELECT COUNT(*) FROM booking WHERE performance_id = $PID AND status = 'CONFIRMED'")"
-  SEATS="$(sql "SELECT GROUP_CONCAT(CONCAT(status, ':', n) ORDER BY status) FROM (SELECT status, COUNT(*) n FROM seat WHERE performance_id = $PID GROUP BY status) t")"
-
-  WALL_S="$(python3 -c "print(round(($END_NS - $START_NS) / 1e9, 1))")"
-  IDLE_RATE="$(python3 -c "print(round(($IDLE_U1 - $IDLE_U0) / $SETTLE_SECONDS, 1))")"
-  SUMMARY="gate=$GATE gate_check=$GATE_CHECK users=$USERS pid=$PID $CLIENT confirmed=$CONFIRMED seats=$SEATS overbooked=$OVERBOOKED db_hold=$DB_HOLD com_update=$((U1 - U0)) row_lock_waits=$((W1 - W0)) row_lock_time_ms=$((T1 - T0)) idle_com_update_per_s=$IDLE_RATE wall_s=$WALL_S"
-
-  echo ">>> overbooking rows: $OVERBOOKED (0이어야 한다)"
-  echo ">>> counters: $COUNTER_DIFF"
-  echo ">>> report: $SIM_DIR/index.html"
-  echo "$SUMMARY"
-  echo "$SUMMARY counters: $COUNTER_DIFF" >"$RESULTS_DIR/booking-$GATE-$USERS-$STAMP.txt"
-  echo ">>> saved $RESULTS_DIR/booking-$GATE-$USERS-$STAMP.txt"
+  run_once "$run"
 done

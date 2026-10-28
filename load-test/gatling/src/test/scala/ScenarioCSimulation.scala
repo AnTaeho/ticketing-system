@@ -14,6 +14,8 @@ import scala.util.Random
  * 좌석: 10명 중 7명은 A구역 1열(인기석 20석)의 연속 2석, 3명은 무작위 빈자리 2석을 고른다.
  *       인기석 사용자는 좌석맵에 빈 연속 2석이 있으면 그중에서, 없으면 아무 연속 2석이나 누른다.
  * 선점은 201만 OK로 센다. 409·503은 KO로 남아 오류 목록에서 상태 코드별로 보인다.
+ * 결제는 200(확정)만 OK로 센다. 202(결과 대기)는 KO로 남는다.
+ * 요청 이름은 request-names.properties에서 읽는다(RequestNames).
  *
  * 실행(회차 생성과 수치 정리는 load-test/run-booking.sh가 한다):
  *   mvn gatling:test -Dgatling.simulationClass=ScenarioCSimulation -DPERFORMANCE_ID=123 -DUSERS=2000 -DRAMP_SECONDS=10
@@ -27,6 +29,12 @@ class ScenarioCSimulation extends Simulation {
     .getOrElse(throw new IllegalArgumentException("-DPERFORMANCE_ID가 필요하다"))
 
   val MaxQueuePolls = 300
+
+  // 좌석맵의 좌석 상태 한 글자(A/H/S) 중 빈자리. 구역 이름 A와는 상관없다
+  private val SeatAvailable = "A"
+
+  // 좌석맵은 구역·열 순서로 오므로 첫 구역의 첫 열이 인기석(A구역 1열)이다
+  private val HotRowSeats = "$.sections[0].rows[0].seats[*]"
 
   val httpProtocol = http
     .baseUrl(baseUrl)
@@ -47,9 +55,9 @@ class ScenarioCSimulation extends Simulation {
       .get(s"$perf/seats")
       .header("X-User-Id", "#{userId}")
       .check(status.is(200))
-      .check(jsonPath("$.sections[0].rows[0].seats[*].id").ofType[Long].findAll.saveAs("hotIds"))
-      .check(jsonPath("$.sections[0].rows[0].seats[*].s").findAll.saveAs("hotStates"))
-      .check(jsonPath("$..seats[?(@.s == 'A')].id").ofType[Long].findAll.optional.saveAs("freeIds"))
+      .check(jsonPath(s"$HotRowSeats.id").ofType[Long].findAll.saveAs("hotIds"))
+      .check(jsonPath(s"$HotRowSeats.s").findAll.saveAs("hotStates"))
+      .check(jsonPath(s"$$..seats[?(@.s == '$SeatAvailable')].id").ofType[Long].findAll.optional.saveAs("freeIds"))
 
   private def hold(name: String) =
     http(name)
@@ -64,7 +72,8 @@ class ScenarioCSimulation extends Simulation {
     val hotIds    = session("hotIds").as[Seq[Long]]
     val hotStates = session("hotStates").as[Seq[String]]
     val freeIds   = session("freeIds").asOption[Seq[Long]].getOrElse(Seq.empty)
-    val freePairs = (0 until hotIds.size - 1).filter(i => hotStates(i) == "A" && hotStates(i + 1) == "A")
+    val freePairs = (0 until hotIds.size - 1)
+      .filter(i => hotStates(i) == SeatAvailable && hotStates(i + 1) == SeatAvailable)
 
     def pair(i: Int): Seq[Long] = Seq(hotIds(i), hotIds(i + 1))
     def randomFree: Option[Seq[Long]] =
@@ -86,7 +95,7 @@ class ScenarioCSimulation extends Simulation {
   val scn = scenario(s"Scenario C - booking - ${users}users")
     .feed(userFeeder)
     .exec(
-      http("01 login")
+      http(RequestNames.Login)
         .post("/api/demo/login")
         .body(StringBody("""{"nickname": "#{nickname}"}"""))
         .check(status.is(200))
@@ -94,7 +103,7 @@ class ScenarioCSimulation extends Simulation {
     )
     .exitHereIfFailed
     .exec(
-      http("02 queue enter")
+      http(RequestNames.QueueEnter)
         .post(s"$perf/queue/tokens")
         .header("X-User-Id", "#{userId}")
         .check(status.is(200))
@@ -105,7 +114,7 @@ class ScenarioCSimulation extends Simulation {
     .asLongAs(s => s("queueStatus").as[String] == "WAITING" && s("polls").asOption[Int].getOrElse(0) < MaxQueuePolls, "polls") {
       pause(1.second)
         .exec(
-          http("03 queue poll")
+          http(RequestNames.QueuePoll)
             .get(s"$perf/queue/tokens/#{queueToken}")
             .header("X-User-Id", "#{userId}")
             .check(status.is(200))
@@ -113,19 +122,19 @@ class ScenarioCSimulation extends Simulation {
         )
     }
     .exitHereIf(s => s("queueStatus").as[String] != "PROCESSING")
-    .exec(seatMap("04 seatmap"))
+    .exec(seatMap(RequestNames.SeatMap))
     .exitHereIfFailed
     .exec(chooseSeats(retry = false) _)
     // 좌석이 다 팔려 고를 자리가 없으면 선점하지 않고 끝낸다
     .doIf(_.contains("seatIds")) {
-      exec(hold("05 hold"))
+      exec(hold(RequestNames.Hold))
         .doIf(s => !s.contains("holdId")) {
           exec(_.removeAll("hotIds", "hotStates", "freeIds"))
-            .exec(seatMap("06 seatmap retry"))
+            .exec(seatMap(RequestNames.SeatMapRetry))
             .doIf(s => s("hotIds").asOption[Seq[Long]].isDefined) {
               exec(chooseSeats(retry = true) _)
                 .doIf(_.contains("seatIds")) {
-                  exec(hold("07 hold retry"))
+                  exec(hold(RequestNames.HoldRetry))
                 }
             }
         }
@@ -133,7 +142,7 @@ class ScenarioCSimulation extends Simulation {
     .doIf(_.contains("holdId")) {
       exec(_.set("idempotencyKey", UUID.randomUUID().toString))
         .exec(
-          http("08 payment")
+          http(RequestNames.Payment)
             .post("/api/holds/#{holdId}/payments")
             .header("X-User-Id", "#{userId}")
             .header("Idempotency-Key", "#{idempotencyKey}")
