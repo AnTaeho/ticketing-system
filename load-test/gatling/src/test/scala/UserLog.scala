@@ -20,14 +20,16 @@ class UserLog(path: Option[String]) {
   }
 
   def write(): Unit = path.foreach { p =>
-    val header = "n,enter_at_ms,admitted_at_ms,polls,hold_attempts,hold_status,pay_status,outcome"
+    val header = "n,enter_at_ms,admitted_at_ms,polls,hold_attempts,hold_status,pay_status,outcome," +
+      "heartbeats,heartbeat_status,leave_status"
     Files.write(Paths.get(p), (header +: rows.asScala.toSeq).mkString("", "\n", "\n").getBytes(StandardCharsets.UTF_8))
   }
 
   private def row(s: Session): String = {
     def opt(key: String): String = s(key).asOption[Any].map(_.toString).getOrElse("")
     Seq(opt("n"), opt("enterAt"), opt("admittedAt"), s("polls").asOption[Int].getOrElse(0).toString,
-      s("holdAttempts").asOption[Int].getOrElse(0).toString, opt("holdStatus"), opt("payStatus"), outcome(s))
+      s("holdAttempts").asOption[Int].getOrElse(0).toString, opt("holdStatus"), opt("payStatus"), outcome(s),
+      s("heartbeats").asOption[Int].getOrElse(0).toString, opt("heartbeatStatus"), opt("leaveStatus"))
       .mkString(",")
   }
 

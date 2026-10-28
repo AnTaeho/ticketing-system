@@ -8,7 +8,7 @@ import java.util.concurrent.atomic.AtomicInteger
 import scala.concurrent.duration._
 import scala.util.Random
 
-/** 시나리오들이 함께 쓰는 예매 단계(로그인, 대기열, 좌석맵, 잡기, 결제). 요청 이름은 RequestNames에서 읽는다 */
+/** 시나리오들이 함께 쓰는 예매 단계(로그인, 대기열, 생존 신호, 좌석맵, 잡기, 떠남, 결제). 요청 이름은 RequestNames에서 읽는다 */
 object BookingSteps {
 
   // 좌석맵의 좌석 상태 한 글자(A/H/S) 중 빈자리. 구역 이름 A와는 상관없다
@@ -18,6 +18,11 @@ object BookingSteps {
   private val HotRowSeats = "$.sections[0].rows[0].seats[*]"
 
   def intProp(name: String, default: Int): Int = sys.props.get(name).map(_.toInt).getOrElse(default)
+
+  // 좌석 화면(seats.js)처럼 열 때 한 번, 3초 뒤 한 번, 그 뒤로 HEARTBEAT_MS마다 생존 신호를 보낸다.
+  // 화면 간격은 앱의 processing-idle-timeout(기본 2분)의 1/3이다
+  private val HeartbeatRecheckMs = 3000L
+  private val heartbeatMs: Long = intProp("HEARTBEAT_MS", 40000).toLong
 
   def performanceId: Long = sys.props.get("PERFORMANCE_ID").map(_.toLong)
     .getOrElse(throw new IllegalArgumentException("-DPERFORMANCE_ID가 필요하다"))
@@ -65,6 +70,35 @@ object BookingSteps {
   private def waiting(s: Session): Boolean = s("queueStatus").asOption[String].contains("WAITING")
 
   def admitted(s: Session): Boolean = s.contains("admittedAt")
+
+  private def heartbeat(perf: String): ChainBuilder =
+    exec(
+      http(RequestNames.Heartbeat)
+        .post(s"$perf/queue/tokens/#{queueToken}/heartbeat")
+        .header("X-User-Id", "#{userId}")
+        .check(status.saveAs("heartbeatStatus"))
+        .check(status.is(200))
+    ).exec { s =>
+      val sent = s("heartbeats").asOption[Int].getOrElse(0) + 1
+      val next = if (sent == 1) HeartbeatRecheckMs else heartbeatMs
+      s.set("heartbeats", sent).set("nextHeartbeatAt", System.currentTimeMillis() + next)
+    }
+
+  // 화면은 타이머로 보내지만 여기서는 요청 사이에 차례가 지났는지 보고 보낸다
+  private def heartbeatIfDue(perf: String): ChainBuilder =
+    doIf(s => s("nextHeartbeatAt").asOption[Long].forall(_ <= System.currentTimeMillis())) {
+      heartbeat(perf)
+    }
+
+  // 화면을 떠날 때(pagehide)의 비컨. 대기 중이거나 이미 소모된 토큰이어도 204다
+  private def leave(perf: String): ChainBuilder =
+    exec(
+      http(RequestNames.Leave)
+        .post(s"$perf/queue/tokens/#{queueToken}/leave")
+        .header("X-User-Id", "#{userId}")
+        .check(status.saveAs("leaveStatus"))
+        .check(status.is(204))
+    )
 
   // PROCESSING을 본 시각을 admittedAt으로 남긴다. maxWait가 지나도 WAITING이면 포기한다
   def waitForAdmission(perf: String, pauseMin: FiniteDuration, pauseMax: FiniteDuration,
@@ -142,7 +176,8 @@ object BookingSteps {
 
   // 첫 잡기가 409면 좌석맵을 다시 받아 maxRetries번까지 다시 잡는다. 409가 아닌 실패는 다시 하지 않는다
   def seatAttempts(perf: String, maxRetries: Int, stopWhenSoldOut: Boolean): ChainBuilder =
-    exec(seatMap(perf, RequestNames.SeatMap))
+    exec(heartbeat(perf))
+      .exec(seatMap(perf, RequestNames.SeatMap))
       .exec(chooseSeats(retry = false, stopWhenSoldOut) _)
       .doIf(_.contains("seatIds")) {
         hold(perf, RequestNames.Hold)
@@ -150,6 +185,7 @@ object BookingSteps {
       .asLongAs(s => shouldRetry(s, maxRetries)) {
         exec(s => s.removeAll("hotIds", "hotStates", "freeIds", "holdStatus")
           .set("retries", s("retries").asOption[Int].getOrElse(0) + 1))
+          .exec(heartbeatIfDue(perf))
           .exec(seatMap(perf, RequestNames.SeatMapRetry))
           .exec(chooseSeats(retry = true, stopWhenSoldOut) _)
           .doIf(_.contains("seatIds")) {
@@ -171,7 +207,8 @@ object BookingSteps {
       )
   }
 
-  // 로그인 → 대기열 → 입장 대기 → 잡기 → 결제. 어디서 멈췄든 마지막에 사용자 기록을 남긴다
+  // 로그인 → 대기열 → 입장 대기 → 잡기 → 떠남 → 결제. 어디서 멈췄든 마지막에 사용자 기록을 남긴다.
+  // 화면처럼 좌석 화면은 잡기에 성공해 넘어갈 때도 떠남을 보내고, 대기열 화면은 입장하지 못하고 떠날 때만 보낸다
   def booking(perf: String, pauseMin: FiniteDuration, pauseMax: FiniteDuration, maxWait: FiniteDuration,
               maxRetries: Int, stopWhenSoldOut: Boolean, userLog: UserLog): ChainBuilder =
     exec(login)
@@ -185,8 +222,12 @@ object BookingSteps {
                 waitForAdmission(perf, pauseMin, pauseMax, maxWait)
               }
           }
-          .doIf(admitted _) {
-            exec(seatAttempts(perf, maxRetries, stopWhenSoldOut)).exec(pay)
+          .doIfOrElse(admitted _) {
+            exec(seatAttempts(perf, maxRetries, stopWhenSoldOut)).exec(leave(perf)).exec(pay)
+          } {
+            doIf(_.contains("queueToken")) {
+              leave(perf)
+            }
           }
       }
       .exec(userLog.record)

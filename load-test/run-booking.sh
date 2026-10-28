@@ -12,10 +12,11 @@
 #
 # 사용법: MYSQL_PWD=<비밀번호> load-test/run-booking.sh <S1|S2|S3|S4> [on|off] [runs]
 # 환경 변수: USERS·RAMP_SECONDS(시나리오 기본값을 덮는다) MAX_WAIT_SECONDS(S2 입장 대기 한도, 120)
+#           HEARTBEAT_MS(좌석 화면 생존 신호 간격, 40000 = 앱 processing-idle-timeout 2분의 1/3) REDIS_DB(0)
 #           BASE_URL(http://localhost:8080) BASE_URL2(S4, http://localhost:8081) MYSQL_USER(root) MYSQL_DB(ticketing)
 #           SETTLE_SECONDS(11) DRAIN_SECONDS(120) MAX_LOAD(3.0) LOAD_WAIT_SECONDS(2400) PERF_OPEN_MINUTES(30)
 #           APP_LOGS(앱 로그 경로, 공백 구분. 주면 회차 구간의 WARN·ERROR·커넥션 고갈 건수를 센다) RESULTS_DIR(load-test/results)
-# 결과: RESULTS_DIR/<시나리오>-<gate>-<시각>/ 회차 폴더. summary.txt가 결과 한 줄이다.
+# 결과: RESULTS_DIR/<시나리오>-<gate>-<시각>/ 회차 폴더. summary.txt가 결과 한 줄이다. queue.txt는 1초마다 잰 처리열·대기열 크기다.
 set -euo pipefail
 
 SCENARIO="${1:-}"
@@ -42,6 +43,8 @@ MAX_LOAD="${MAX_LOAD:-3.0}"
 LOAD_WAIT_SECONDS="${LOAD_WAIT_SECONDS:-2400}"
 PERF_OPEN_MINUTES="${PERF_OPEN_MINUTES:-30}"
 MAX_WAIT_SECONDS="${MAX_WAIT_SECONDS:-120}"
+HEARTBEAT_MS="${HEARTBEAT_MS:-40000}"
+REDIS_DB="${REDIS_DB:-0}"
 APP_LOGS="${APP_LOGS:-}"
 MYSQL_USER="${MYSQL_USER:-root}"
 MYSQL_DB="${MYSQL_DB:-ticketing}"
@@ -56,7 +59,7 @@ esac
 APP_URLS=("$BASE_URL")
 [[ "$SCENARIO" == "S4" ]] && APP_URLS+=("$BASE_URL2")
 
-for cmd in curl jq mysql mvn python3 redis-cli; do
+for cmd in curl git jq mysql mvn python3 redis-cli; do
   command -v "$cmd" >/dev/null || { echo "$cmd 가 필요하다" >&2; exit 2; }
 done
 mkdir -p "$RESULTS_DIR"
@@ -138,6 +141,18 @@ sample_hikari() {
       echo "$(now_ms) $url ${pending:-NA} ${active:-NA}"
     done
     sleep 0.5
+  done
+}
+
+# 1초마다 처리열 ZCARD, 그중 만료 전 토큰 수, 대기열 ZCARD를 남긴다. 만료 비교는 Redis 서버 시각(ms)으로 한다
+QUEUE_SAMPLE_LUA="local t = redis.call('TIME')
+local now = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
+return {now, redis.call('ZCARD', KEYS[1]), redis.call('ZCOUNT', KEYS[1], '(' .. now, '+inf'), redis.call('ZCARD', KEYS[2])}"
+
+sample_queue() {
+  while :; do
+    redis-cli -n "$REDIS_DB" EVAL "$QUEUE_SAMPLE_LUA" 2 "bq:{p:$1}:processing" "bq:{p:$1}:waiting" 2>&1 | paste -sd' ' -
+    sleep 1
   done
 }
 
@@ -232,7 +247,7 @@ run_gatling() {
   urls="$(IFS=,; echo "${APP_URLS[*]}")"
   (cd "$GATLING_DIR" && mvn -B gatling:test -Dgatling.simulationClass="$SIMULATION" \
     -DPERFORMANCE_ID="$1" -DUSERS="$USERS" -DRAMP_SECONDS="$RAMP_SECONDS" -DBASE_URLS="$urls" \
-    -DMAX_WAIT_SECONDS="$MAX_WAIT_SECONDS" -DUSER_LOG="$2/users.csv") >"$2/gatling.log" 2>&1
+    -DMAX_WAIT_SECONDS="$MAX_WAIT_SECONDS" -DHEARTBEAT_MS="$HEARTBEAT_MS" -DUSER_LOG="$2/users.csv") >"$2/gatling.log" 2>&1
 }
 
 latest_simulation_dir() {
@@ -258,7 +273,8 @@ gate_check() {
 run_once() {
   local run="$1" stamp dir pid waited start_load idle u0 s0 w0 t0 u1 s1 w1 t1 su0 ss0 sw0 st0
   local start_ms end_ms gatling_exit sim_dir client drain_out drain_s drain_left before after counters_diff
-  local db_hold check inv hik0 hik1 lines0 lines1 applog mon_pid hik_pid contaminated hik_max summary
+  local db_hold check inv hik0 hik1 lines0 lines1 applog mon_pid hik_pid q_pid contaminated hik_max q_max summary
+  local q_proc q_live q_wait q_n
 
   stamp="$(date +%Y%m%d-%H%M%S)"
   dir="$RESULTS_DIR/$SCENARIO-$GATE-$run-$stamp"
@@ -283,6 +299,8 @@ run_once() {
   mon_pid=$!
   sample_hikari >"$dir/hikari.txt" 2>&1 &
   hik_pid=$!
+  sample_queue "$pid" >"$dir/queue.txt" 2>&1 &
+  q_pid=$!
 
   echo ">>> gatling $SIMULATION users=$USERS ramp=${RAMP_SECONDS}s"
   start_ms="$(now_ms)"
@@ -293,8 +311,8 @@ run_once() {
 
   drain_out="$(drain "$pid")"
   read -r drain_s drain_left <<<"$drain_out"
-  kill "$mon_pid" "$hik_pid" 2>/dev/null || true
-  wait "$mon_pid" "$hik_pid" 2>/dev/null || true
+  kill "$mon_pid" "$hik_pid" "$q_pid" 2>/dev/null || true
+  wait "$mon_pid" "$hik_pid" "$q_pid" 2>/dev/null || true
 
   awk '/---- Global Information/ {p=1} p {print} p && /^====/ {exit}' "$dir/gatling.log" >"$dir/gatling-summary.txt"
   if [[ $gatling_exit -ne 0 ]]; then
@@ -324,6 +342,9 @@ run_once() {
 
   contaminated="$(contamination "$dir/monitor.txt")"
   hik_max="$(awk '$3 != "NA" && $3+0 > m {m = $3+0} END {print m+0}' "$dir/hikari.txt")"
+  # 숫자 넷인 줄만 센다. "처리열 최댓값 만료 전 최댓값 대기열 최댓값 샘플 수"
+  q_max="$(awk 'NF == 4 && $1 ~ /^[0-9]+$/ {n++; if ($2 > p) p = $2; if ($3 > l) l = $3; if ($4 > w) w = $4}
+    END {print p+0, l+0, w+0, n+0}' "$dir/queue.txt")"
 
   summary="scenario=$SCENARIO gate=$GATE gate_check=$check users=$USERS pid=$pid $client"
   summary+=" confirmed=$(sed -nE 's/.*confirmed_bookings=([0-9]+).*/\1/p' <<<"$inv")"
@@ -331,6 +352,8 @@ run_once() {
   summary+=" violations=$(sed -nE 's/.*violations=([^ ]+).*/\1/p' <<<"$inv")"
   summary+=" db_hold=$db_hold com_update=$((u1 - u0)) com_select=$((s1 - s0)) row_lock_waits=$((w1 - w0)) row_lock_time_ms=$((t1 - t0))"
   summary+=" $idle hikari_pending_max=$hik_max hikari_timeout=$(python3 -c "print(int($hik1 - $hik0))") $applog"
+  read -r q_proc q_live q_wait q_n <<<"$q_max"
+  summary+=" queue_processing_max=$q_proc queue_live_max=$q_live queue_waiting_max=$q_wait queue_samples=$q_n"
   summary+=" drain_s=$drain_s drain_left=$drain_left wall_s=$(python3 -c "print(round(($end_ms - $start_ms) / 1000, 1))")"
   summary+=" start_load1=$start_load max_load1=$(max_load1 "$dir/monitor.txt") load_waited_s=$waited contaminated=${contaminated:-none}"
   {
@@ -338,6 +361,9 @@ run_once() {
     echo "end_ms=$end_ms"
     echo "simulation_dir=$sim_dir"
     echo "app_urls=${APP_URLS[*]}"
+    echo "code_commit=$(git -C "$REPO" rev-parse --short HEAD)"
+    echo "app_code_dirty=$(git -C "$REPO" status --porcelain -- src | wc -l | tr -d ' ')"
+    echo "load_test_dirty=$(git -C "$REPO" status --porcelain -- load-test | wc -l | tr -d ' ')"
   } >"$dir/meta.txt"
 
   echo ">>> invariants: $inv"

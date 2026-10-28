@@ -26,4 +26,6 @@ object RequestNames {
   val SeatMapRetry: String = name("seatmap_retry")
   val HoldRetry: String    = name("hold_retry")
   val Payment: String      = name("payment")
+  val Heartbeat: String    = name("heartbeat")
+  val Leave: String        = name("leave")
 }

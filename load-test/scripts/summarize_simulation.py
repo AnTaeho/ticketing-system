@@ -3,6 +3,7 @@
 사용법: python3 load-test/scripts/summarize_simulation.py <simulation.log> [--users users.csv] [--json out.json]
 출력: "키=값" 한 줄. 백분위는 nearest-rank다. --json을 주면 단계별 분포와 초당 시계열을 파일로 남긴다.
 pay_ok는 Gatling이 OK로 센 결제(200 또는 202)다. 확정 200과 결과 대기 202는 사용자 기록이 있을 때 pay_200·pay_202로 가른다.
+heartbeat(생존 신호, 200 기대)와 leave(떠남, 204 기대)도 단계별 응답 시간과 상태 코드에 들어간다.
 """
 import argparse
 import csv
@@ -173,13 +174,23 @@ def summarize(reqs, user_events, names, users):
     out["pay_402"] = pay_codes.get("402", 0)
     out["pay_409"] = pay_codes.get("409", 0)
     out["pay_other"] = sum(v for k, v in pay_codes.items() if k not in ("2xx", "402", "409"))
+    heartbeats = reqs.get(names["heartbeat"], [])
+    leaves = reqs.get(names["leave"], [])
+    out["heartbeat_req"] = len(heartbeats)
+    out["heartbeat_ko"] = sum(1 for r in heartbeats if r[2] != "OK")
+    out["heartbeat_p99_ms"] = pct([e - s for s, e, _, _ in heartbeats], 99)
+    out["leave_req"] = len(leaves)
+    out["leave_ko"] = sum(1 for r in leaves if r[2] != "OK")
+    out["leave_p99_ms"] = pct([e - s for s, e, _, _ in leaves], 99)
 
     detail = {
         "steps": {key: step_stats(reqs.get(names[key], [])) for key in
-                  ("login", "queue_enter", "queue_poll", "seatmap", "seatmap_retry", "hold", "hold_retry",
-                   "payment")},
+                  ("login", "queue_enter", "queue_poll", "heartbeat", "seatmap", "seatmap_retry", "hold",
+                   "hold_retry", "leave", "payment")},
         "hold_codes": count_codes(holds, "201"),
         "pay_codes": pay_codes,
+        "heartbeat_codes": count_codes(heartbeats, "200"),
+        "leave_codes": count_codes(leaves, "204"),
         "first_request_ms": min(starts) if starts else None,
         "last_response_ms": max(ends) if ends else None,
         "timeseries": timeseries(reqs, user_events, names, min(starts)) if starts else None,
@@ -191,6 +202,11 @@ def summarize(reqs, user_events, names, users):
         detail["users"] = len(users)
         detail["outcomes"] = dict(sorted(outcomes.items()))
         detail["admission_wait"] = admission_waits(users)
+        if users and "heartbeats" in users[0]:
+            per_user = {}
+            for u in users:
+                per_user[u["heartbeats"]] = per_user.get(u["heartbeats"], 0) + 1
+            detail["heartbeats_per_user"] = dict(sorted(per_user.items(), key=lambda kv: int(kv[0])))
     return out, detail
 
 
