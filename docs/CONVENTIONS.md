@@ -4,24 +4,32 @@
 
 ## 1. 패키지
 
-기능별 패키지를 `com.example.ticketing` 바로 아래에 둔다. 기능 안은 네 층으로 나눈다.
+기능별 패키지를 `com.example.ticketing` 바로 아래에 두고, 기능 안은 역할별 하위 패키지로 나눈다.
 
 ```
 com.example.ticketing
-├── common/            여러 기능이 함께 쓰는 것 (error, web, redis, jdbc, time, metrics, lease, config)
+├── common/            여러 기능이 함께 쓰는 것 (error, web, redis, jdbc, time, metrics, log, config)
 ├── user/  show/  seat/  queue/  hold/  payment/  booking/  outbox/  notification/  ops/
-├── fakepg/            앱 안에 둔 가짜 결제사 (외부 시스템 흉내)
-└── web/               화면 컨트롤러
+│   ├── controller/    HTTP 진입점
+│   ├── dto/           계층 사이를 오가는 record
+│   ├── service/       흐름과 트랜잭션
+│   ├── repository/    DB·Redis 접근
+│   ├── domain/        엔티티, 상태 enum, 순수 규칙
+│   └── client/        외부 시스템 호출 (payment만)
+├── fakepg/            앱 안에 둔 가짜 결제사 (같은 하위 구조)
+└── web/controller/    화면 컨트롤러
 ```
 
-| 층 | 들어가는 것 | 의존해도 되는 곳 |
+| 하위 패키지 | 들어가는 것 | 의존해도 되는 곳 |
 |---|---|---|
-| `api` | `*Controller`, `*Request`, `*Response` | 같은 기능의 `application`, `common` |
-| `application` | `*Service`, `*Transaction`, `*Reader`, `*Scheduler`, `*Command`, `*Result`, 흐름 안에서 오가는 record | 같은 기능의 `domain`·`infra`, 다른 기능의 `application`, `common` |
+| `controller` | `*Controller`, 컨트롤러 전용 변환기 | 같은 기능의 `service`·`dto`, `common` |
+| `dto` | `*Request`, `*Command`, `*Result`, `*Response`, 흐름 결과 record | 같은 기능의 `domain`, `common` |
+| `service` | `*Service`, `*Transaction`, `*Reader`, `*Scheduler`, `*Handler` | 같은 기능의 `repository`·`domain`·`dto`·`client`, 다른 기능의 `service`·`dto`, `common` |
+| `repository` | `*Repository`(JPA), `*JdbcRepository`(JDBC), `*RedisStore`(Redis) | 같은 기능의 `domain`, `common` |
 | `domain` | 엔티티, 상태 enum, 값 record, 순수 규칙 | `common`만 |
-| `infra` | `*Repository`(JPA), `*JdbcRepository`(JDBC), `*RedisStore`(Redis), 외부 클라이언트 | 같은 기능의 `domain`, `common` |
+| `client` | 외부 시스템 클라이언트와 그 결과 타입 | `common` |
 
-- 다른 기능의 `api`나 `infra`를 직접 부르지 않는다. 필요하면 그 기능의 `application`을 부른다.
+- 다른 기능의 `controller`나 `repository`를 직접 부르지 않는다. 필요하면 그 기능의 `service`를 부른다.
 - 두 기능이 서로를 부르면(순환) 한쪽으로 몰거나 공통 개념을 `common`으로 뺀다.
 
 ## 2. 클래스 역할과 이름
@@ -48,21 +56,21 @@ com.example.ticketing
 
 | 경계 | 타입 | 위치 |
 |---|---|---|
-| HTTP → Controller | `*Request` (Bean Validation, `toCommand()`) | `api` |
-| Controller → Service | `*Command` (값이 둘 이상일 때. id 하나는 그대로 넘긴다) | `application` |
-| Service → Controller | `*Result` | `application` |
-| Controller → HTTP | `*Response` (`from(result)`) | `api` |
-| `*Transaction` → `*Service` | 결과를 뜻하는 이름의 record (예: `HoldPlacement`, `PaymentConclusion`) | `application` |
-| Outbox 작업 | 작업 종류별 payload record | `outbox/application` |
+| HTTP → Controller | `*Request` (Bean Validation, `toCommand()`) | `dto` |
+| Controller → Service | `*Command` (값이 둘 이상일 때. id 하나는 그대로 넘긴다) | `dto` |
+| Service → Controller | `*Result` | `dto` |
+| Controller → HTTP | `*Response` (`from(result)`) | `dto` |
+| `*Transaction` → `*Service` | 결과를 뜻하는 이름의 record (예: `HoldPlacement`, `PaymentConclusion`) | `dto` |
+| Outbox 작업 | 작업 종류별 payload record | `outbox/dto` |
 
-- 엔티티는 `application` 밖으로 나가지 않는다. 엔티티에서 DTO를 만들 때는 `*Result.from(entity)` 한 곳에서만 한다.
+- 엔티티는 `service` 밖으로 나가지 않는다. 엔티티에서 DTO를 만들 때는 `*Result.from(entity)` 한 곳에서만 한다.
 - `Map`은 오류 `detail`에만 쓴다. JSON을 문자열 키로 읽고 쓰지 않는다.
 - 같은 값은 같은 이름으로 부른다. (대기열 토큰은 어디서나 `queueToken`)
 
 ## 4. 트랜잭션과 정합성
 
 - 좌석 배정의 최종 판정은 DB 조건부 UPDATE의 영향 행 수다. Redis는 DB 앞의 게이트다.
-- 상태 전이는 `infra`의 native 조건부 UPDATE로만 한다. 엔티티 변경 감지로 상태를 바꾸지 않는다. 그래서 엔티티에는 setter와 상태 변경 메서드가 없다. 상태에 대한 판정(예: "결제가 아직 열려 있나")은 상태 enum에 둔다.
+- 상태 전이는 `repository`의 native 조건부 UPDATE로만 한다. 엔티티 변경 감지로 상태를 바꾸지 않는다. 그래서 엔티티에는 setter와 상태 변경 메서드가 없다. 상태에 대한 판정(예: "결제가 아직 열려 있나")은 상태 enum에 둔다.
 - 영향 행 수는 `RowCounts`로 확인한다. 기대와 다르면 업무 실패는 `ApiException`, 불변식 위반은 `IllegalStateException`이다.
 - 상태를 바꾸는 트랜잭션은 `READ_COMMITTED`다. 락 순서는 부모 행(app_user → seat_hold/booking) → 좌석(id 오름차순)이다.
 - `SKIP LOCKED` 집기는 상태 변경과 같은 트랜잭션에서 한다.
@@ -85,7 +93,7 @@ com.example.ticketing
 - 사용자에게 돌려줄 실패는 `ApiException(ErrorCode, detail)`이다. 화면에 보일 문장은 `ErrorCode`에만 쓴다.
 - `detail`의 `reason`은 영문 대문자 코드다 (`COUNT`, `DUPLICATE`).
 - 결과 값을 예외로 바꾸는 일은 `*Service`에서 한다. `*Transaction`과 `*Client`는 결과 값을 돌려준다.
-- 입력 형식 검증은 `*Request`의 Bean Validation과 `toCommand()`에서 한다. 업무 규칙 검증은 `application`에서 한다.
+- 입력 형식 검증은 `*Request`의 Bean Validation과 `toCommand()`에서 한다. 업무 규칙 검증은 `service`에서 한다.
 
 ## 8. 설정
 
