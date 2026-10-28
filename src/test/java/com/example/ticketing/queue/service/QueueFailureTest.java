@@ -38,7 +38,7 @@ class QueueFailureTest {
     }
 
     @Test
-    @DisplayName("Redis가 죽으면 진입·조회는 503 QUEUE_UNAVAILABLE로 막는다")
+    @DisplayName("Redis가 죽으면 진입·조회·생존 신호·떠남 신호는 503 QUEUE_UNAVAILABLE로 막는다")
     void enterAndStatusFailClosed() {
         long pid = fixtures.newPerformance(1, 1, 1);
 
@@ -47,6 +47,14 @@ class QueueFailureTest {
                 .extracting(e -> ((ApiException) e).getCode())
                 .isEqualTo(ErrorCode.QUEUE_UNAVAILABLE);
         assertThatThrownBy(() -> deadService.status(USER, pid, USER + ".token"))
+                .isInstanceOf(ApiException.class)
+                .extracting(e -> ((ApiException) e).getCode())
+                .isEqualTo(ErrorCode.QUEUE_UNAVAILABLE);
+        assertThatThrownBy(() -> deadService.heartbeat(USER, pid, USER + ".token"))
+                .isInstanceOf(ApiException.class)
+                .extracting(e -> ((ApiException) e).getCode())
+                .isEqualTo(ErrorCode.QUEUE_UNAVAILABLE);
+        assertThatThrownBy(() -> deadService.leave(USER, pid, USER + ".token"))
                 .isInstanceOf(ApiException.class)
                 .extracting(e -> ((ApiException) e).getCode())
                 .isEqualTo(ErrorCode.QUEUE_UNAVAILABLE);

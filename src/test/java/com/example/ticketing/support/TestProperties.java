@@ -79,15 +79,15 @@ public final class TestProperties {
 
     public TestProperties queueCapacity(int capacity) {
         Queue q = queue;
-        this.queue = new Queue(capacity, q.processingTokenTtl(), q.waitingTokenTtl(), q.promoteEnabled(),
-                q.promoteIntervalMs(), q.required());
+        this.queue = new Queue(capacity, q.processingMaxSession(), q.processingIdleTimeout(),
+                q.processingLeaveGrace(), q.waitingTokenTtl(), q.promoteEnabled(), q.promoteIntervalMs(), q.required());
         return this;
     }
 
     public TestProperties queueRequired(boolean required) {
         Queue q = queue;
-        this.queue = new Queue(q.capacity(), q.processingTokenTtl(), q.waitingTokenTtl(), q.promoteEnabled(),
-                q.promoteIntervalMs(), required);
+        this.queue = new Queue(q.capacity(), q.processingMaxSession(), q.processingIdleTimeout(),
+                q.processingLeaveGrace(), q.waitingTokenTtl(), q.promoteEnabled(), q.promoteIntervalMs(), required);
         return this;
     }
 

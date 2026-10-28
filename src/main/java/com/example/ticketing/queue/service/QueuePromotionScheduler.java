@@ -27,7 +27,8 @@ public class QueuePromotionScheduler {
     private final SeatCatalog seatCatalog;
     private final Clock clock;
     private final int capacity;
-    private final long processingTtlMs;
+    private final long idleTimeoutMs;
+    private final long maxSessionMs;
     private final long waitingTtlMs;
     private final double intervalSeconds;
     private final Duration leaseTtl;
@@ -39,7 +40,8 @@ public class QueuePromotionScheduler {
         this.seatCatalog = seatCatalog;
         this.clock = clock;
         this.capacity = properties.queue().capacity();
-        this.processingTtlMs = properties.queue().processingTokenTtl().toMillis();
+        this.idleTimeoutMs = properties.queue().processingIdleTimeout().toMillis();
+        this.maxSessionMs = properties.queue().processingMaxSession().toMillis();
         this.waitingTtlMs = properties.queue().waitingTokenTtl().toMillis();
         long intervalMs = properties.queue().promoteIntervalMs();
         this.intervalSeconds = intervalMs / 1000.0;
@@ -68,8 +70,8 @@ public class QueuePromotionScheduler {
     // 만료를 먼저 치워야 빈 자리가 승격에 잡힌다. 점수가 진입 때 쓴 서버 벽시계(ms)라 같은 시계로 비교한다
     long promoteOne(long performanceId) {
         long now = clock.millis();
-        store.purgeExpired(performanceId, now, waitingTtlMs);
-        long moved = store.promote(performanceId, now + processingTtlMs, capacity);
+        store.purgeExpired(performanceId, now, waitingTtlMs, maxSessionMs);
+        long moved = store.promote(performanceId, now, now + Math.min(idleTimeoutMs, maxSessionMs), capacity);
         double rate = 0.8 * store.rate(performanceId) + 0.2 * moved / intervalSeconds;
         store.saveRate(performanceId, rate, RATE_TTL);
         return moved;

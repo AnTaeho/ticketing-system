@@ -54,7 +54,9 @@ public record TicketingProperties(
 
     public record Queue(
             int capacity,
-            Duration processingTokenTtl,
+            Duration processingMaxSession,
+            Duration processingIdleTimeout,
+            Duration processingLeaveGrace,
             Duration waitingTokenTtl,
             boolean promoteEnabled,
             long promoteIntervalMs,

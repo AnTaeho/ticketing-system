@@ -13,6 +13,7 @@ import com.example.ticketing.common.time.DbClock;
 import com.example.ticketing.queue.domain.QueueEntry;
 import com.example.ticketing.queue.domain.QueuePlacement;
 import com.example.ticketing.queue.dto.QueueEnterResult;
+import com.example.ticketing.queue.dto.QueueHeartbeatResult;
 import com.example.ticketing.queue.dto.QueueStatusResult;
 import com.example.ticketing.queue.repository.QueueRedisStore;
 import com.example.ticketing.seat.service.SeatCatalog;
@@ -37,7 +38,9 @@ public class QueueService {
     private final DbClock dbClock;
     private final Clock clock;
     private final int capacity;
-    private final long processingTtlMs;
+    private final long idleTimeoutMs;
+    private final long maxSessionMs;
+    private final long leaveGraceMs;
     private final long waitingTtlMs;
     private final Counter consumeFailure;
     private final ThrottledWarn unavailableWarn;
@@ -52,7 +55,9 @@ public class QueueService {
         this.unavailableWarn = new ThrottledWarn(log, nanoClock);
         this.consumeWarn = new ThrottledWarn(log, nanoClock);
         this.capacity = properties.queue().capacity();
-        this.processingTtlMs = properties.queue().processingTokenTtl().toMillis();
+        this.idleTimeoutMs = properties.queue().processingIdleTimeout().toMillis();
+        this.maxSessionMs = properties.queue().processingMaxSession().toMillis();
+        this.leaveGraceMs = properties.queue().processingLeaveGrace().toMillis();
         this.waitingTtlMs = properties.queue().waitingTokenTtl().toMillis();
         this.consumeFailure = meterRegistry.counter(Metrics.REDIS_REFLECT_FAILURE, Tag.OP, ReflectOp.QUEUE_CONSUME);
     }
@@ -64,7 +69,7 @@ public class QueueService {
         long now = clock.millis();
         try {
             QueuePlacement placed = store.enter(new QueueEntry(userId, performanceId, queueToken, now,
-                    now + processingTtlMs, capacity, waitingTtlMs));
+                    now + Math.min(idleTimeoutMs, maxSessionMs), capacity, waitingTtlMs));
             return new QueueEnterResult(placed.queueToken(), placed.status());
         } catch (RedisUnavailableException e) {
             throw unavailable("enter", performanceId, e);
@@ -80,6 +85,35 @@ public class QueueService {
             return lookUp(performanceId, queueToken, clock.millis());
         } catch (RedisUnavailableException e) {
             throw unavailable("status", performanceId, e);
+        }
+    }
+
+    // 좌석 화면이 열려 있는 동안 처리열 자리를 붙잡는다. 입장 시각 + 최대 세션 길이를 넘겨 늘리지 않는다
+    public QueueHeartbeatResult heartbeat(long userId, long performanceId, String queueToken) {
+        if (!ownedBy(queueToken, userId)) {
+            throw new ApiException(ErrorCode.QUEUE_TOKEN_NOT_FOUND);
+        }
+        long remainingMs;
+        try {
+            remainingMs = store.heartbeat(performanceId, queueToken, clock.millis(), idleTimeoutMs, maxSessionMs);
+        } catch (RedisUnavailableException e) {
+            throw unavailable("heartbeat", performanceId, e);
+        }
+        if (remainingMs <= 0) {
+            throw new ApiException(ErrorCode.NOT_ADMITTED);
+        }
+        return QueueHeartbeatResult.processing(remainingMs);
+    }
+
+    // 화면을 떠날 때 자리를 잠깐만 더 남긴다. 소모·만료됐거나 대기 중인 토큰에는 아무 일도 하지 않는다
+    public void leave(long userId, long performanceId, String queueToken) {
+        if (!ownedBy(queueToken, userId)) {
+            throw new ApiException(ErrorCode.QUEUE_TOKEN_NOT_FOUND);
+        }
+        try {
+            store.leave(performanceId, queueToken, clock.millis(), leaveGraceMs);
+        } catch (RedisUnavailableException e) {
+            throw unavailable("leave", performanceId, e);
         }
     }
 

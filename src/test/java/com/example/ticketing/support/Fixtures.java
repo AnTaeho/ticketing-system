@@ -99,8 +99,11 @@ public class Fixtures {
     // 정원을 넘겨 입장시킨다(동시성 테스트용). 부를 때마다 새 토큰을 처리열에 직접 넣는다
     public String forceAdmit(long performanceId, long userId) {
         String queueToken = userId + "." + UUID.randomUUID();
-        long expireAt = System.currentTimeMillis() + properties.queue().processingTokenTtl().toMillis();
+        long now = System.currentTimeMillis();
+        long expireAt = now + Math.min(properties.queue().processingIdleTimeout().toMillis(),
+                properties.queue().processingMaxSession().toMillis());
         testRedis.template().opsForZSet().add(RedisKeys.queueProcessing(performanceId), queueToken, expireAt);
+        testRedis.template().opsForZSet().add(RedisKeys.queueAdmitted(performanceId), queueToken, now);
         testRedis.template().opsForValue().set(RedisKeys.queueUser(userId, performanceId), queueToken,
                 properties.queue().waitingTokenTtl());
         return queueToken;

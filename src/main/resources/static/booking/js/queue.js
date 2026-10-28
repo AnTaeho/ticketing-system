@@ -23,7 +23,10 @@
   var arrived = !!token;
   var firstPosition = null;
 
-  var poller = bk.poller({ interval: POLL_MS, run: step, onData: stepDone, onError: stepFailed });
+  // 숨은 탭에서도 차례를 놓치지 않게 계속 묻는다. 차례가 되면 숨은 채로 좌석 화면으로 넘어간다
+  var poller = bk.poller({ interval: POLL_MS, run: step, onData: stepDone, onError: stepFailed, keepWhenHidden: true });
+  // 좌석 화면으로 넘어갈 때는 자리를 줄이면 안 되므로 떠남 신호를 보내지 않는다
+  var toSeats = false;
 
   function showNote(message) {
     note.textContent = message || '';
@@ -57,7 +60,7 @@
   // 표가 없으면 줄을 서고, 있으면 순서를 묻는다
   function step() {
     if (token) {
-      return bk.get('/api/performances/' + pid + '/queue/tokens/' + encodeURIComponent(token))
+      return bk.get(bk.queueTokenPath(pid, token))
         .then(function (status) { return { status: status }; });
     }
     showNote('');
@@ -91,6 +94,7 @@
     poller.stop();
     showNote('');
     showState('차례가 됐어요', '자리 고르는 화면으로 넘어가요.');
+    toSeats = true;
     // 뒤로 가기가 이 화면에 다시 걸리지 않게 기록을 바꿔 넘어간다
     location.replace(bk.links.seats(pid, showId));
   }
@@ -141,5 +145,6 @@
     sub.textContent = bk.dateTime(found.performance.startsAt) + ' 회차 줄이에요';
     sub.hidden = false;
   });
+  window.addEventListener('pagehide', function () { if (!toSeats) bk.leaveQueue(pid); });
   poller.now();
 })();

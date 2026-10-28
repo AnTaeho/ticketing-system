@@ -25,6 +25,8 @@ class QueueApiControllerTest {
 
     private static final String TOKENS = "/api/performances/{pid}/queue/tokens";
     private static final String TOKEN = "/api/performances/{pid}/queue/tokens/{token}";
+    private static final String HEARTBEAT = TOKEN + "/heartbeat";
+    private static final String LEAVE = TOKEN + "/leave";
 
     @Autowired
     private TestMvc testMvc;
@@ -109,12 +111,65 @@ class QueueApiControllerTest {
     }
 
     @Test
+    @DisplayName("생존 신호는 살아 있으면 남은 시간을, 만료면 403, 남의 토큰이면 404로 답한다")
+    void heartbeat() throws Exception {
+        long pid = openPerformance();
+        long owner = fixtures.newUser();
+        long stranger = fixtures.newUser();
+        String token = testMvc.body(mockMvc.perform(post(TOKENS, pid).header(USER, owner)).andReturn())
+                .get("token").asString();
+
+        mockMvc.perform(post(HEARTBEAT, pid, token).header(USER, owner))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("PROCESSING"))
+                .andExpect(jsonPath("$.expiresInMs").value(120_000));
+
+        mockMvc.perform(post(HEARTBEAT, pid, token).header(USER, stranger))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("QUEUE_TOKEN_NOT_FOUND"));
+
+        testRedis.template().opsForZSet().add(RedisKeys.queueProcessing(pid), token, System.currentTimeMillis() - 1);
+        mockMvc.perform(post(HEARTBEAT, pid, token).header(USER, owner))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("NOT_ADMITTED"));
+    }
+
+    @Test
+    @DisplayName("떠남 신호는 본문 없이 받아 204로 답하고, 남의 토큰이면 404다")
+    void leave() throws Exception {
+        long pid = openPerformance();
+        long owner = fixtures.newUser();
+        long stranger = fixtures.newUser();
+        String token = testMvc.body(mockMvc.perform(post(TOKENS, pid).header(USER, owner)).andReturn())
+                .get("token").asString();
+
+        mockMvc.perform(post(LEAVE, pid, token).header(USER, stranger))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("QUEUE_TOKEN_NOT_FOUND"));
+        long before = System.currentTimeMillis();
+        mockMvc.perform(post(LEAVE, pid, token).header(USER, owner))
+                .andExpect(status().isNoContent());
+        long after = System.currentTimeMillis();
+
+        assertThat(testRedis.template().opsForZSet().score(RedisKeys.queueProcessing(pid), token))
+                .isBetween(before + 10_000.0, after + 10_000.0);
+        mockMvc.perform(post(LEAVE, pid, owner + ".no-such-token").header(USER, owner))
+                .andExpect(status().isNoContent());
+    }
+
+    @Test
     @DisplayName("사용자 식별이 없으면 진입·조회 모두 401 LOGIN_REQUIRED로 답한다")
     void loginRequired() throws Exception {
         mockMvc.perform(post(TOKENS, 1L))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.code").value("LOGIN_REQUIRED"));
         mockMvc.perform(get(TOKEN, 1L, "1.abc"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("LOGIN_REQUIRED"));
+        mockMvc.perform(post(HEARTBEAT, 1L, "1.abc"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("LOGIN_REQUIRED"));
+        mockMvc.perform(post(LEAVE, 1L, "1.abc"))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.code").value("LOGIN_REQUIRED"));
     }

@@ -5,7 +5,8 @@
   <link rel="stylesheet" th:href="@{/booking/css/seats.css}">
   <script th:src="@{/booking/js/seats.js}" defer></script>
 </head>
-<body class="seats-page" th:data-performance-id="${performanceId}" th:data-max-seats="${maxSeats}">
+<body class="seats-page" th:data-performance-id="${performanceId}" th:data-max-seats="${maxSeats}"
+      th:data-heartbeat-ms="${heartbeatMs}">
 <header th:replace="~{booking/layout :: top('자리 고르기', null, @{/booking/shows}, null, null)}"></header>
 <main class="wrap">
   <div class="map">

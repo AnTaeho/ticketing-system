@@ -193,6 +193,87 @@ class QueuePromotionSchedulerTest {
         assertThat(redis.hasKey(LEASE_KEY)).isFalse();
     }
 
+    @Test
+    @DisplayName("생존 신호가 끊긴 처리열 토큰은 입장 시각과 함께 정리되고 그 자리로 대기자가 올라간다")
+    void lapsedHeartbeatFreesSlotWithAdmittedAt() {
+        long pid = openPerformance();
+        QueueService service = service(2);
+        QueuePromotionScheduler scheduler = scheduler(2, seatCatalog);
+        long idle = properties.queue().processingIdleTimeout().toMillis();
+        String lapsed = service.enter(USER_BASE + 1, pid).queueToken();
+        String alive = service.enter(USER_BASE + 2, pid).queueToken();
+        String next = service.enter(USER_BASE + 3, pid).queueToken();
+        redis.opsForZSet().add(RedisKeys.queueProcessing(pid), lapsed, System.currentTimeMillis() - 1);
+
+        long before = System.currentTimeMillis();
+        assertThat(scheduler.promoteOne(pid)).isEqualTo(1);
+        long after = System.currentTimeMillis();
+
+        assertThat(admittedAt(pid, lapsed)).isNull();
+        assertThat(admittedAt(pid, alive)).isNotNull();
+        double nextAdmittedAt = admittedAt(pid, next);
+        assertThat(nextAdmittedAt).isBetween((double) before, (double) after);
+        assertThat(queueRedisStore.processingScore(pid, next)).isEqualTo(nextAdmittedAt + idle);
+        assertThat(redis.opsForZSet().zCard(RedisKeys.queueAdmitted(pid))).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("처리열에 짝이 없는 입장 시각은 최대 세션 길이가 지나면 정리된다")
+    void orphanAdmittedAtIsPurgedAfterMaxSession() {
+        long pid = openPerformance();
+        QueueService service = service(2);
+        QueuePromotionScheduler scheduler = scheduler(2, seatCatalog);
+        long maxSession = properties.queue().processingMaxSession().toMillis();
+        String alive = service.enter(USER_BASE + 1, pid).queueToken();
+        long now = System.currentTimeMillis();
+        redis.opsForZSet().add(RedisKeys.queueAdmitted(pid), "orphan.old", now - maxSession - 1);
+
+        scheduler.promoteOne(pid);
+
+        assertThat(admittedAt(pid, "orphan.old")).isNull();
+        assertThat(admittedAt(pid, alive)).isNotNull();
+        assertThat(service.isAdmitted(USER_BASE + 1, pid, alive)).isTrue();
+    }
+
+    @Test
+    @DisplayName("정원 200이 찬 뒤 30명이 신호를 끊으면 대기자 30명이 올라오고 정원은 넘지 않는다")
+    void lapsedHeartbeatsAdmitSameNumberWithinCapacity() {
+        long pid = openPerformance();
+        int capacity = properties.queue().capacity();
+        assertThat(capacity).isEqualTo(200);
+        QueueService service = service(capacity);
+        QueuePromotionScheduler scheduler = scheduler(capacity, seatCatalog);
+        List<String> admitted = new ArrayList<>();
+        for (int i = 0; i < capacity; i++) {
+            admitted.add(service.enter(USER_BASE + i, pid).queueToken());
+        }
+        List<String> waiting = new ArrayList<>();
+        for (int i = 0; i < 50; i++) {
+            waiting.add(service.enter(USER_BASE + 1_000 + i, pid).queueToken());
+        }
+        long past = System.currentTimeMillis() - 1;
+        for (int i = 0; i < 30; i++) {
+            redis.opsForZSet().add(RedisKeys.queueProcessing(pid), admitted.get(i), past);
+        }
+
+        assertThat(scheduler.promoteOne(pid)).isEqualTo(30);
+
+        assertThat(redis.opsForZSet().zCard(RedisKeys.queueProcessing(pid))).isEqualTo(capacity);
+        assertThat(redis.opsForZSet().zCard(RedisKeys.queueAdmitted(pid))).isEqualTo(capacity);
+        assertThat(redis.opsForZSet().zCard(RedisKeys.queueWaiting(pid))).isEqualTo(20);
+        for (int i = 0; i < 30; i++) {
+            assertThat(service.isAdmitted(USER_BASE + i, pid, admitted.get(i))).isFalse();
+            assertThat(service.isAdmitted(USER_BASE + 1_000 + i, pid, waiting.get(i))).isTrue();
+        }
+        assertThat(service.status(USER_BASE + 1_030, pid, waiting.get(30)).position()).isEqualTo(1);
+        assertThat(scheduler.promoteOne(pid)).isZero();
+        assertThat(redis.opsForZSet().zCard(RedisKeys.queueProcessing(pid))).isEqualTo(capacity);
+    }
+
+    private Double admittedAt(long pid, String token) {
+        return redis.opsForZSet().score(RedisKeys.queueAdmitted(pid), token);
+    }
+
     private QueueService service(int capacity) {
         return services.queueService().properties(withCapacity(capacity)).build();
     }

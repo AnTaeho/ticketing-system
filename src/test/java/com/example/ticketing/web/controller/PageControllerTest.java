@@ -16,6 +16,7 @@ import com.example.ticketing.common.error.ApiExceptionHandler;
 import com.example.ticketing.common.web.DemoMode;
 import com.example.ticketing.support.IntegrationTest;
 import com.example.ticketing.support.TestMvc;
+import com.example.ticketing.support.TestProperties;
 import com.example.ticketing.web.PageExceptionHandler;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -97,14 +98,16 @@ class PageControllerTest {
     }
 
     @Test
-    @DisplayName("좌석 화면은 회차 번호와 최대 좌석 수를 넘기고 좌석 전용 스타일을 공통 스타일 뒤에 붙인다")
+    @DisplayName("좌석 화면은 회차 번호·최대 좌석 수·생존 신호 간격을 넘기고 좌석 전용 스타일을 공통 스타일 뒤에 붙인다")
     void seatsPassesPerformanceIdAndStyle() throws Exception {
         String html = mockMvc.perform(get("/booking/performances/9/seats").param("show", "3"))
                 .andExpect(status().isOk())
                 .andExpect(model().attribute("performanceId", 9L))
                 .andExpect(model().attribute("maxSeats", 4))
+                .andExpect(model().attribute("heartbeatMs", 40_000L))
                 .andExpect(content().string(containsString("data-performance-id=\"9\"")))
                 .andExpect(content().string(containsString("data-max-seats=\"4\"")))
+                .andExpect(content().string(containsString("data-heartbeat-ms=\"40000\"")))
                 .andExpect(content().string(containsString("id=\"seats-grid\"")))
                 .andExpect(content().string(containsString("id=\"seats-pick-submit\"")))
                 .andReturn().getResponse().getContentAsString();
@@ -150,6 +153,25 @@ class PageControllerTest {
                 .andExpect(content().string(containsString("data-demo-pg=\"false\"")))
                 .andExpect(content().string(containsString("id=\"co-pay\"")))
                 .andExpect(content().string(not(containsString("name=\"scenario\""))));
+    }
+
+    @Test
+    @DisplayName("줄을 세우지 않는 설정이면 좌석 화면에 생존 신호 간격 0을 넘긴다")
+    void seatsSkipsHeartbeatWhenQueueNotRequired() throws Exception {
+        TicketingProperties noQueue = TestProperties.from(context.getBean(TicketingProperties.class))
+                .queueRequired(false).build();
+        ThymeleafViewResolver resolver = new ThymeleafViewResolver();
+        resolver.setTemplateEngine(context.getBean(ISpringTemplateEngine.class));
+        resolver.setCharacterEncoding("UTF-8");
+        MockMvc noQueueMvc = MockMvcBuilders
+                .standaloneSetup(new PageController(noQueue, new DemoMode(new MockEnvironment())))
+                .setViewResolvers(resolver)
+                .build();
+
+        noQueueMvc.perform(get("/booking/performances/9/seats"))
+                .andExpect(status().isOk())
+                .andExpect(model().attribute("heartbeatMs", 0L))
+                .andExpect(content().string(containsString("data-heartbeat-ms=\"0\"")));
     }
 
     @Test
@@ -255,6 +277,25 @@ class PageControllerTest {
         mockMvc.perform(get("/booking"))
                 .andExpect(status().is3xxRedirection())
                 .andExpect(redirectedUrl("/booking/shows"));
+    }
+
+    @Test
+    @DisplayName("대기열·좌석 화면은 떠남 신호 주소에 쓸 회차 번호를 받고, 떠날 때 비컨으로 신호를 보낸다")
+    void queueAndSeatsSendLeaveBeacon() throws Exception {
+        mockMvc.perform(get("/booking/performances/9/queue"))
+                .andExpect(content().string(containsString("data-performance-id=\"9\"")));
+        mockMvc.perform(get("/booking/performances/9/seats"))
+                .andExpect(content().string(containsString("data-performance-id=\"9\"")));
+
+        mockMvc.perform(get("/booking/js/api.js"))
+                .andExpect(content().string(containsString("sendBeacon(queueTokenPath(performanceId, queueToken) + '/leave')")))
+                .andExpect(content().string(containsString("'/api/performances/' + performanceId + '/queue/tokens/'")));
+        for (String script : new String[]{"/booking/js/queue.js", "/booking/js/seats.js"}) {
+            mockMvc.perform(get(script))
+                    .andExpect(content().string(containsString("addEventListener('pagehide'")))
+                    .andExpect(content().string(containsString("bk.leaveQueue(pid)")))
+                    .andExpect(content().string(containsString("keepWhenHidden: true")));
+        }
     }
 
     @ParameterizedTest(name = "{0}")

@@ -43,6 +43,11 @@ public final class RedisKeys {
         return "bq:" + tag(performanceId) + ":processing";
     }
 
+    // 처리열 토큰의 입장 시각(ms). 생존 신호가 최대 세션 길이를 넘겨 늘리지 못하게 한다
+    public static String queueAdmitted(long performanceId) {
+        return "bq:" + tag(performanceId) + ":admitted";
+    }
+
     public static String queueUser(long userId, long performanceId) {
         return "bq:" + tag(performanceId) + ":user:" + userId;
     }

@@ -27,7 +27,7 @@ public class QueueRedisStore {
         long pid = entry.performanceId();
         List<?> reply = RedisFailures.translate(() -> redis.execute(RedisScripts.QUEUE_ENTER,
                 List.of(RedisKeys.queueProcessing(pid), RedisKeys.queueWaiting(pid),
-                        RedisKeys.queueUser(entry.userId(), pid)),
+                        RedisKeys.queueUser(entry.userId(), pid), RedisKeys.queueAdmitted(pid)),
                 entry.queueToken(), String.valueOf(entry.enteredAtMs()), String.valueOf(entry.processingExpireAtMs()),
                 String.valueOf(entry.enteredAtMs()), String.valueOf(entry.capacity()),
                 String.valueOf(entry.waitingTtlMs())));
@@ -38,11 +38,12 @@ public class QueueRedisStore {
                 String.valueOf(reply.get(1)));
     }
 
-    // 반환: 승격한 수
-    public long promote(long performanceId, long processingExpireAtMs, int capacity) {
+    // 반환: 승격한 수. 승격 토큰의 입장 시각은 nowMs다
+    public long promote(long performanceId, long nowMs, long processingExpireAtMs, int capacity) {
         Long moved = RedisFailures.translate(() -> redis.execute(RedisScripts.QUEUE_PROMOTE,
-                List.of(RedisKeys.queueProcessing(performanceId), RedisKeys.queueWaiting(performanceId)),
-                String.valueOf(processingExpireAtMs), String.valueOf(capacity)));
+                List.of(RedisKeys.queueProcessing(performanceId), RedisKeys.queueWaiting(performanceId),
+                        RedisKeys.queueAdmitted(performanceId)),
+                String.valueOf(processingExpireAtMs), String.valueOf(capacity), String.valueOf(nowMs)));
         return moved == null ? 0 : moved;
     }
 
@@ -65,20 +66,35 @@ public class QueueRedisStore {
     // 반환: processing에서 지운 수
     public long consume(long userId, long performanceId, String queueToken) {
         Long removed = RedisFailures.translate(() -> redis.execute(RedisScripts.QUEUE_CONSUME,
-                List.of(RedisKeys.queueProcessing(performanceId), RedisKeys.queueUser(userId, performanceId)),
+                List.of(RedisKeys.queueProcessing(performanceId), RedisKeys.queueUser(userId, performanceId),
+                        RedisKeys.queueAdmitted(performanceId)),
                 queueToken));
         return removed == null ? 0 : removed;
     }
 
-    // 반환: 두 열에서 지운 수의 합
-    public long purgeExpired(long performanceId, long nowMs, long waitingTtlMs) {
-        return RedisFailures.translate(() -> {
-            Long processing = redis.opsForZSet().removeRangeByScore(
-                    RedisKeys.queueProcessing(performanceId), Double.NEGATIVE_INFINITY, nowMs);
-            Long waiting = redis.opsForZSet().removeRangeByScore(
-                    RedisKeys.queueWaiting(performanceId), Double.NEGATIVE_INFINITY, nowMs - waitingTtlMs);
-            return (processing == null ? 0 : processing) + (waiting == null ? 0 : waiting);
-        });
+    // 반환: 늘린 뒤 남은 시간(ms). 만료됐거나 처리열에 없으면 0
+    public long heartbeat(long performanceId, String queueToken, long nowMs, long idleTimeoutMs, long maxSessionMs) {
+        Long remaining = RedisFailures.translate(() -> redis.execute(RedisScripts.QUEUE_HEARTBEAT,
+                List.of(RedisKeys.queueProcessing(performanceId), RedisKeys.queueAdmitted(performanceId)),
+                queueToken, String.valueOf(nowMs), String.valueOf(idleTimeoutMs), String.valueOf(maxSessionMs)));
+        return remaining == null ? 0 : remaining;
+    }
+
+    // 반환: 점수를 줄였는지. 처리열에 없거나 만료됐거나 이미 짧으면 false
+    public boolean leave(long performanceId, String queueToken, long nowMs, long graceMs) {
+        Long shortened = RedisFailures.translate(() -> redis.execute(RedisScripts.QUEUE_LEAVE,
+                List.of(RedisKeys.queueProcessing(performanceId)),
+                queueToken, String.valueOf(nowMs), String.valueOf(graceMs)));
+        return shortened != null && shortened > 0;
+    }
+
+    // 반환: 두 열에서 지운 수의 합. 처리열에서 빠진 토큰은 입장 시각도 함께 지운다
+    public long purgeExpired(long performanceId, long nowMs, long waitingTtlMs, long maxSessionMs) {
+        Long removed = RedisFailures.translate(() -> redis.execute(RedisScripts.QUEUE_PURGE,
+                List.of(RedisKeys.queueProcessing(performanceId), RedisKeys.queueWaiting(performanceId),
+                        RedisKeys.queueAdmitted(performanceId)),
+                String.valueOf(nowMs), String.valueOf(waitingTtlMs), String.valueOf(maxSessionMs)));
+        return removed == null ? 0 : removed;
     }
 
     // 명/초. 기록이 없으면 0

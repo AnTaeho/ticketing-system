@@ -5,6 +5,7 @@
   var RETRY_MS = 3000;
   var FLASH_MS = 1000;
   var NOTE_MS = 5000;
+  var HEARTBEAT_RECHECK_MS = 3000;
   var MAP_FAILS_BEFORE_NOTE = 3;
   var TAKEN_MESSAGE = '방금 다른 분이 고른 자리예요. 다른 자리를 골라 주세요';
   var BUSY_MESSAGE = bk.WORDS.busy + '. 잠시 뒤 다시 눌러 주세요';
@@ -12,6 +13,8 @@
   var body = document.body;
   var pid = body.dataset.performanceId;
   var maxSeats = Number(body.dataset.maxSeats) || 4;
+  // 0이면 줄을 세우지 않는 설정이라 신호를 보내지 않는다
+  var heartbeatMs = Number(body.dataset.heartbeatMs) || 0;
   var showId = bk.positiveId(bk.query('show'));
   var tokenKey = bk.keys.queueToken(pid);
   var el = bk.el;
@@ -43,6 +46,7 @@
     failures: 0,        // 좌석맵을 이어서 못 받은 횟수
     afterMap: null,     // 다음 좌석맵을 그린 뒤 한 번 할 일
     submitting: false,
+    heartbeats: 0,      // 보낸 생존 신호 수
     leaving: false,
     stopped: false
   };
@@ -54,6 +58,18 @@
     run: function () { return bk.get('/api/performances/' + pid + '/seats'); },
     onData: mapLoaded,
     onError: mapFailed
+  });
+
+  // 이 화면이 열려 있는 동안 입장 자리를 지킨다. 신호가 끊기면 서버가 자리를 다음 사람에게 넘긴다
+  // 숨은 탭에서도 보낸다. 새로고침 직후에는 앞 화면의 떠남 신호가 늦게 닿아 자리를 줄일 수 있어 한 번 더 빨리 보낸다
+  var heartbeat = bk.poller({
+    interval: function () { return state.heartbeats === 1 ? HEARTBEAT_RECHECK_MS : heartbeatMs; },
+    run: function () {
+      state.heartbeats++;
+      return bk.post(bk.queueTokenPath(pid, bk.session.get(tokenKey)) + '/heartbeat');
+    },
+    onError: heartbeatFailed,
+    keepWhenHidden: true
   });
 
   // ---- 알림 ----
@@ -78,6 +94,7 @@
 
   function showStop(title, text, button) {
     state.stopped = true;
+    heartbeat.stop();
     note.clear();
     stop.show(title, text, button);
     ui.pick.hidden = true;
@@ -488,6 +505,14 @@
       } });
   }
 
+  // 자리를 잃었을 때만 멈춘다. 연결 문제와 503은 다음 차례에 다시 보낸다.
+  // 잡기 요청 중에는 성공하면 토큰이 소모돼 신호가 403을 받으므로 잡기 결과를 따른다
+  function heartbeatFailed(e) {
+    if (e.code !== 'NOT_ADMITTED' && e.code !== 'QUEUE_TOKEN_NOT_FOUND') return;
+    if (state.submitting || state.leaving || state.stopped) return;
+    showNotAdmitted();
+  }
+
   // DB는 어느 자리인지 알려 주지 않으므로 새 좌석맵에서 잡힌 자리를 찾는다. 못 찾으면 보낸 자리를 모두 뺀다
   function retakeChanged(sent) {
     reloadMap(function () {
@@ -532,6 +557,7 @@
     }).then(function (r) {
       state.leaving = true;
       mapPoller.stop();
+      heartbeat.stop();
       bk.local.set(bk.keys.seatsHint, 'done');
       // 뒤로 가기로 이미 잡은 자리를 다시 고르는 화면에 오지 않게 기록을 바꾼다
       location.replace(bk.links.checkout(r.holdId, showId));
@@ -549,4 +575,11 @@
   bk.syncBar(ui.bar);
   bk.loadPerformanceHeader(showId, pid);
   mapPoller.now();
+  if (heartbeatMs > 0 && bk.session.get(tokenKey)) {
+    heartbeat.now();
+    // 잡기에 성공해 넘어갈 때도 보내지만 토큰이 이미 소모돼 서버는 아무 일도 하지 않는다
+    window.addEventListener('pagehide', function () { bk.leaveQueue(pid); });
+    // 뒤로 가기로 저장된 화면이 되살아나면 떠남 신호로 줄어든 자리를 곧바로 되돌린다
+    window.addEventListener('pageshow', function (e) { if (e.persisted && !state.stopped && !state.leaving) heartbeat.now(); });
+  }
 })();

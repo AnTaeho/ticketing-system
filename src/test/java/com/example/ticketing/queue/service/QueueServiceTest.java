@@ -10,6 +10,7 @@ import com.example.ticketing.common.redis.RedisKeys;
 import com.example.ticketing.common.time.TestDbClock;
 import com.example.ticketing.queue.domain.QueueTokenStatus;
 import com.example.ticketing.queue.dto.QueueEnterResult;
+import com.example.ticketing.queue.dto.QueueHeartbeatResult;
 import com.example.ticketing.queue.dto.QueueStatusResult;
 import com.example.ticketing.queue.repository.QueueRedisStore;
 import com.example.ticketing.support.Concurrently;
@@ -168,6 +169,7 @@ class QueueServiceTest {
         assertThat(renewedProcessing.queueToken()).isNotEqualTo(oldProcessing.queueToken());
         assertThat(renewedProcessing.status()).isEqualTo(QueueTokenStatus.WAITING);
         assertThat(queueRedisStore.processingScore(pid, oldProcessing.queueToken())).isNull();
+        assertThat(admittedAt(pid, oldProcessing.queueToken())).isNull();
         assertThat(redis.opsForZSet().zCard(RedisKeys.queueProcessing(pid))).isZero();
         assertThat(service.status(waitingUser, pid, renewedWaiting.queueToken()).position()).isEqualTo(1);
         assertThat(service.status(processingUser, pid, renewedProcessing.queueToken()).position()).isEqualTo(2);
@@ -269,10 +271,12 @@ class QueueServiceTest {
 
         assertThat(queueService.consume(USER_BASE + 2, pid, token)).isFalse();
         assertThat(queueService.isAdmitted(owner, pid, token)).isTrue();
+        assertThat(admittedAt(pid, token)).isNotNull();
 
         assertThat(queueService.consume(owner, pid, token)).isTrue();
         assertThat(queueService.isAdmitted(owner, pid, token)).isFalse();
         assertThat(redis.hasKey(RedisKeys.queueUser(owner, pid))).isFalse();
+        assertThat(admittedAt(pid, token)).isNull();
         assertThat(queueService.consume(owner, pid, token)).isFalse();
 
         QueueEnterResult again = queueService.enter(owner, pid);
@@ -294,6 +298,192 @@ class QueueServiceTest {
 
         assertThat(redis.opsForValue().get(RedisKeys.queueUser(owner, pid))).isEqualTo(renewed);
         assertThat(queueService.isAdmitted(owner, pid, renewed)).isTrue();
+    }
+
+    @Test
+    @DisplayName("입장하면 처리열 점수는 지금 + 무응답 한도이고 입장 시각을 따로 적는다")
+    void enterScoresIdleTimeoutAndRecordsAdmittedAt() {
+        long pid = openPerformance();
+        long idle = properties.queue().processingIdleTimeout().toMillis();
+        long maxSession = properties.queue().processingMaxSession().toMillis();
+        assertThat(idle).isEqualTo(120_000L);
+        assertThat(maxSession).isEqualTo(600_000L);
+
+        long before = System.currentTimeMillis();
+        String token = queueService.enter(USER_BASE + 1, pid).queueToken();
+        long after = System.currentTimeMillis();
+
+        double admittedAt = admittedAt(pid, token);
+        double expireAt = queueRedisStore.processingScore(pid, token);
+        assertThat(admittedAt).isBetween((double) before, (double) after);
+        assertThat(expireAt).isEqualTo(admittedAt + idle);
+        assertThat(expireAt).isLessThanOrEqualTo(admittedAt + maxSession);
+    }
+
+    @Test
+    @DisplayName("생존 신호를 보내면 처리열 점수가 지금 + 무응답 한도로 늘어난다")
+    void heartbeatExtendsScore() {
+        long pid = openPerformance();
+        long owner = USER_BASE + 1;
+        long idle = properties.queue().processingIdleTimeout().toMillis();
+        String token = queueService.enter(owner, pid).queueToken();
+        redis.opsForZSet().add(RedisKeys.queueProcessing(pid), token, System.currentTimeMillis() + 1_000);
+
+        long before = System.currentTimeMillis();
+        QueueHeartbeatResult result = queueService.heartbeat(owner, pid, token);
+        long after = System.currentTimeMillis();
+
+        assertThat(result.status()).isEqualTo(QueueTokenStatus.PROCESSING);
+        assertThat(result.expiresInMs()).isEqualTo(idle);
+        assertThat(queueRedisStore.processingScore(pid, token))
+                .isBetween((double) before + idle, (double) after + idle);
+        assertThat(queueService.isAdmitted(owner, pid, token)).isTrue();
+    }
+
+    @Test
+    @DisplayName("생존 신호를 보내도 처리열 점수는 입장 시각 + 최대 세션 길이를 넘지 않는다")
+    void heartbeatIsCappedByMaxSession() {
+        long pid = openPerformance();
+        long owner = USER_BASE + 1;
+        long maxSession = properties.queue().processingMaxSession().toMillis();
+        String token = queueService.enter(owner, pid).queueToken();
+        long admittedAt = System.currentTimeMillis() - maxSession + 5_000;
+        redis.opsForZSet().add(RedisKeys.queueAdmitted(pid), token, admittedAt);
+
+        QueueHeartbeatResult result = queueService.heartbeat(owner, pid, token);
+
+        assertThat(result.expiresInMs()).isPositive().isLessThanOrEqualTo(5_000L);
+        assertThat(queueRedisStore.processingScore(pid, token)).isEqualTo((double) admittedAt + maxSession);
+    }
+
+    @Test
+    @DisplayName("만료됐거나 처리열에 없는 토큰의 생존 신호는 403 NOT_ADMITTED이고 남의 토큰은 404다")
+    void heartbeatRejectsExpiredAndForeignTokens() {
+        long pid = openPerformance();
+        QueueService service = serviceWithCapacity(1);
+        long owner = USER_BASE + 1;
+        long waiter = USER_BASE + 2;
+        long maxSession = properties.queue().processingMaxSession().toMillis();
+        String admitted = service.enter(owner, pid).queueToken();
+        String waiting = service.enter(waiter, pid).queueToken();
+
+        assertThatThrownBy(() -> service.heartbeat(waiter, pid, admitted))
+                .isInstanceOf(ApiException.class)
+                .extracting(e -> ((ApiException) e).getCode())
+                .isEqualTo(ErrorCode.QUEUE_TOKEN_NOT_FOUND);
+        for (String token : new String[]{waiting, waiter + ".no-such-token"}) {
+            assertThatThrownBy(() -> service.heartbeat(waiter, pid, token))
+                    .as("token=%s", token)
+                    .isInstanceOf(ApiException.class)
+                    .extracting(e -> ((ApiException) e).getCode())
+                    .isEqualTo(ErrorCode.NOT_ADMITTED);
+        }
+
+        long now = System.currentTimeMillis();
+        redis.opsForZSet().add(RedisKeys.queueAdmitted(pid), admitted, now - maxSession - 1);
+        assertThatThrownBy(() -> service.heartbeat(owner, pid, admitted))
+                .isInstanceOf(ApiException.class)
+                .extracting(e -> ((ApiException) e).getCode())
+                .isEqualTo(ErrorCode.NOT_ADMITTED);
+
+        redis.opsForZSet().add(RedisKeys.queueAdmitted(pid), admitted, now);
+        redis.opsForZSet().add(RedisKeys.queueProcessing(pid), admitted, now - 1);
+        assertThatThrownBy(() -> service.heartbeat(owner, pid, admitted))
+                .isInstanceOf(ApiException.class)
+                .extracting(e -> ((ApiException) e).getCode())
+                .isEqualTo(ErrorCode.NOT_ADMITTED);
+        assertThat(queueRedisStore.processingScore(pid, admitted)).isEqualTo((double) now - 1);
+    }
+
+    @Test
+    @DisplayName("입장 시각이 없는 처리열 토큰은 생존 신호로 늘리지 않고 남은 시간만 돌려준다")
+    void heartbeatKeepsScoreWithoutAdmittedAt() {
+        long pid = openPerformance();
+        long owner = USER_BASE + 1;
+        String token = queueService.enter(owner, pid).queueToken();
+        long expireAt = System.currentTimeMillis() + 5_000;
+        redis.opsForZSet().add(RedisKeys.queueProcessing(pid), token, expireAt);
+        redis.opsForZSet().remove(RedisKeys.queueAdmitted(pid), token);
+
+        QueueHeartbeatResult result = queueService.heartbeat(owner, pid, token);
+
+        assertThat(result.expiresInMs()).isPositive().isLessThanOrEqualTo(5_000L);
+        assertThat(queueRedisStore.processingScore(pid, token)).isEqualTo((double) expireAt);
+    }
+
+    @Test
+    @DisplayName("떠남 신호를 받으면 처리열 점수를 지금 + 떠남 유예로 줄이고, 다시 생존 신호가 오면 무응답 한도만큼 되돌린다")
+    void leaveShortensAndHeartbeatRestores() {
+        long pid = openPerformance();
+        long owner = USER_BASE + 1;
+        long idle = properties.queue().processingIdleTimeout().toMillis();
+        long grace = properties.queue().processingLeaveGrace().toMillis();
+        assertThat(grace).isEqualTo(10_000L);
+        String token = queueService.enter(owner, pid).queueToken();
+
+        long before = System.currentTimeMillis();
+        queueService.leave(owner, pid, token);
+        long after = System.currentTimeMillis();
+
+        assertThat(queueRedisStore.processingScore(pid, token))
+                .isBetween((double) before + grace, (double) after + grace);
+        assertThat(queueService.isAdmitted(owner, pid, token)).isTrue();
+        assertThat(admittedAt(pid, token)).isNotNull();
+
+        QueueHeartbeatResult reopened = queueService.heartbeat(owner, pid, token);
+
+        assertThat(reopened.expiresInMs()).isEqualTo(idle);
+        assertThat(queueRedisStore.processingScore(pid, token)).isGreaterThan((double) after + grace);
+    }
+
+    @Test
+    @DisplayName("남은 시간이 떠남 유예보다 짧으면 떠남 신호가 점수를 바꾸지 않는다")
+    void leaveKeepsShorterScore() {
+        long pid = openPerformance();
+        long owner = USER_BASE + 1;
+        String token = queueService.enter(owner, pid).queueToken();
+        long expireAt = System.currentTimeMillis() + 3_000;
+        redis.opsForZSet().add(RedisKeys.queueProcessing(pid), token, expireAt);
+
+        queueService.leave(owner, pid, token);
+
+        assertThat(queueRedisStore.processingScore(pid, token)).isEqualTo((double) expireAt);
+    }
+
+    @Test
+    @DisplayName("소모·만료됐거나 대기 중인 토큰의 떠남 신호는 아무것도 바꾸지 않고, 남의 토큰은 404다")
+    void leaveIgnoresConsumedExpiredAndWaitingTokens() {
+        long pid = openPerformance();
+        QueueService service = serviceWithCapacity(2);
+        long consumedUser = USER_BASE + 1;
+        long expiredUser = USER_BASE + 2;
+        long waiter = USER_BASE + 3;
+        String consumed = service.enter(consumedUser, pid).queueToken();
+        String expired = service.enter(expiredUser, pid).queueToken();
+        String waiting = service.enter(waiter, pid).queueToken();
+        service.consume(consumedUser, pid, consumed);
+        long past = System.currentTimeMillis() - 1;
+        redis.opsForZSet().add(RedisKeys.queueProcessing(pid), expired, past);
+        Double waitingScore = queueRedisStore.waitingScore(pid, waiting);
+
+        service.leave(consumedUser, pid, consumed);
+        service.leave(expiredUser, pid, expired);
+        service.leave(waiter, pid, waiting);
+
+        assertThat(queueRedisStore.processingScore(pid, consumed)).isNull();
+        assertThat(queueRedisStore.processingScore(pid, expired)).isEqualTo((double) past);
+        assertThat(queueRedisStore.processingScore(pid, waiting)).isNull();
+        assertThat(queueRedisStore.waitingScore(pid, waiting)).isEqualTo(waitingScore);
+        assertThat(service.status(waiter, pid, waiting).position()).isEqualTo(1);
+        assertThatThrownBy(() -> service.leave(waiter, pid, expired))
+                .isInstanceOf(ApiException.class)
+                .extracting(e -> ((ApiException) e).getCode())
+                .isEqualTo(ErrorCode.QUEUE_TOKEN_NOT_FOUND);
+        assertThat(queueRedisStore.processingScore(pid, expired)).isEqualTo((double) past);
+    }
+
+    private Double admittedAt(long pid, String token) {
+        return redis.opsForZSet().score(RedisKeys.queueAdmitted(pid), token);
     }
 
     private QueueService serviceWithCapacity(int capacity) {

@@ -63,7 +63,9 @@ ticketing:
     fallback-max-concurrency: 8      # Hikari 풀(10)보다 작게
   queue:
     capacity: 200
-    processing-token-ttl: 10m
+    processing-max-session: 10m      # 입장 뒤 좌석 화면에 머물 수 있는 최대 시간. 생존 신호를 보내도 이보다 길어지지 않는다
+    processing-idle-timeout: 2m      # 좌석 화면의 생존 신호가 이만큼 끊기면 자리를 넘긴다. 브라우저가 숨은 탭의 타이머를 1분에 한 번까지 늦춰도 버티게 한다
+    processing-leave-grace: 10s      # 화면을 떠나면 자리를 이만큼만 더 남긴다. 새로고침이면 다시 열린 화면의 신호가 되돌린다
     waiting-token-ttl: 60m
     promote-enabled: true
     promote-interval-ms: 1000

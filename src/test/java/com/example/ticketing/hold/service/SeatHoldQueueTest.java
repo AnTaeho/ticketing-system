@@ -140,6 +140,7 @@ class SeatHoldQueueTest {
 
         assertThat(processingScore(pid, token)).isNull();
         assertThat(redis.hasKey(RedisKeys.queueUser(userId, pid))).isFalse();
+        assertThat(redis.opsForZSet().score(RedisKeys.queueAdmitted(pid), token)).isNull();
 
         seatHoldService.release(userId, hold.holdId());
         double gateBefore = counters.sum(Metrics.HOLD_GATE);
@@ -239,6 +240,36 @@ class SeatHoldQueueTest {
 
         assertThat(processingScore(pid, token)).isNull();
         verifyNoInteractions(offGate);
+    }
+
+    @Test
+    @DisplayName("생존 신호가 끊긴 토큰은 정리 전에도 403이고, 정리되면 그 자리로 올라온 대기자가 잡는다")
+    void lapsedHeartbeatBlocksHoldAndAdmitsNext() {
+        long pid = fixtures.newPerformance(1, 1, 4);
+        List<Long> target = db.seatIds(pid).subList(0, 1);
+        long leaver = fixtures.newUser();
+        long waiter = fixtures.newUser();
+        TicketingProperties single = TestProperties.from(properties).queueCapacity(1).build();
+        QueueService queue = services.queueService().properties(single).build();
+        String leaverToken = queue.enter(leaver, pid).queueToken();
+        String waiterToken = queue.enter(waiter, pid).queueToken();
+        redis.opsForZSet().add(RedisKeys.queueProcessing(pid), leaverToken, System.currentTimeMillis() - 1);
+
+        assertThatThrownBy(() -> seatHoldService.hold(new CreateHoldCommand(leaver, pid, target, leaverToken)))
+                .extracting("code").isEqualTo(ErrorCode.NOT_ADMITTED);
+        assertThatThrownBy(() -> seatHoldService.hold(new CreateHoldCommand(waiter, pid, target, waiterToken)))
+                .extracting("code").isEqualTo(ErrorCode.NOT_ADMITTED);
+
+        services.queuePromotionScheduler(single, services.catalogOf(List.of(pid))).run();
+        assertThat(queue.isAdmitted(waiter, pid, waiterToken)).isTrue();
+        CreateHoldResult hold = seatHoldService.hold(new CreateHoldCommand(waiter, pid, target, waiterToken));
+
+        assertThat(hold.holdId()).isPositive();
+        assertThat(processingScore(pid, leaverToken)).isNull();
+        assertThat(processingScore(pid, waiterToken)).isNull();
+        assertThat(redis.opsForZSet().zCard(RedisKeys.queueAdmitted(pid))).isZero();
+        assertThatThrownBy(() -> seatHoldService.hold(new CreateHoldCommand(leaver, pid, target, leaverToken)))
+                .extracting("code").isEqualTo(ErrorCode.NOT_ADMITTED);
     }
 
     private Double processingScore(long pid, String token) {

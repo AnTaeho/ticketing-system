@@ -19,6 +19,9 @@ public final class RedisScripts {
     public static final RedisScript<List> QUEUE_ENTER = load("queue_enter.lua", List.class);
     public static final RedisScript<Long> QUEUE_PROMOTE = load("queue_promote.lua", Long.class);
     public static final RedisScript<Long> QUEUE_CONSUME = load("queue_consume.lua", Long.class);
+    public static final RedisScript<Long> QUEUE_HEARTBEAT = load("queue_heartbeat.lua", Long.class);
+    public static final RedisScript<Long> QUEUE_LEAVE = load("queue_leave.lua", Long.class);
+    public static final RedisScript<Long> QUEUE_PURGE = load("queue_purge.lua", Long.class);
     public static final RedisScript<Long> SEATMAP_LEASE = load("seatmap_lease.lua", Long.class);
 
     private RedisScripts() {

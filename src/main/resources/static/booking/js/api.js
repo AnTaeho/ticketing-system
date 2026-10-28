@@ -94,13 +94,17 @@
     });
   }
 
-  // 같은 요청을 주기마다 보낸다. 늦게 온 응답은 버리고, 탭이 숨으면 멈췄다가 다시 보이면 곧바로 한 번 보낸다.
+  // 같은 요청을 주기마다 보낸다. 늦게 온 응답은 버리고, 탭이 숨으면 멈췄다가(keepWhenHidden이면 계속) 다시 보이면 곧바로 한 번 보낸다.
   // interval은 ms나 ms를 돌려주는 함수(null이면 다음 차례를 잡지 않는다). 처리기가 다음 차례를 정하지 않으면 interval 뒤에 다시 한다
   function poller(opts) {
     var timer = null;
     var seq = 0;
     var active = false;
     var decided = false;
+
+    function awake() {
+      return opts.keepWhenHidden || !document.hidden;
+    }
 
     function nextDelay() {
       return typeof opts.interval === 'function' ? opts.interval() : opts.interval;
@@ -110,7 +114,7 @@
       clearTimeout(timer);
       timer = null;
       decided = true;
-      if (active && !document.hidden && ms != null) timer = setTimeout(run, ms);
+      if (active && awake() && ms != null) timer = setTimeout(run, ms);
     }
 
     function finish(mine, handler, value) {
@@ -123,7 +127,7 @@
     function run() {
       clearTimeout(timer);
       timer = null;
-      if (!active || document.hidden) return;
+      if (!active || !awake()) return;
       var mine = ++seq;
       opts.run().then(function (value) { finish(mine, opts.onData, value); },
         function (e) { finish(mine, opts.onError, e); });
@@ -131,6 +135,7 @@
 
     document.addEventListener('visibilitychange', function () {
       if (document.hidden) {
+        if (opts.keepWhenHidden) return;
         clearTimeout(timer);
         timer = null;
         seq++;
@@ -320,6 +325,19 @@
     return /^[1-9]\d{0,17}$/.test(raw || '') ? raw : null;
   }
 
+  // ---- 대기열 표 ----
+
+  function queueTokenPath(performanceId, queueToken) {
+    return '/api/performances/' + performanceId + '/queue/tokens/' + encodeURIComponent(queueToken);
+  }
+
+  // 화면을 떠날 때 처리열 자리를 잠깐만 더 두라고 알린다. 쿠키로 사용자를 알리고 응답은 기다리지 않는다
+  function leaveQueue(performanceId) {
+    var queueToken = storage('session').get(keys.queueToken(performanceId));
+    if (!queueToken || !navigator.sendBeacon) return;
+    try { navigator.sendBeacon(queueTokenPath(performanceId, queueToken) + '/leave'); } catch (e) { /* 못 보내면 생존 신호가 끊겨 자리가 풀린다 */ }
+  }
+
   window.bk = {
     ApiError: ApiError,
     WORDS: WORDS,
@@ -350,6 +368,8 @@
     query: query,
     safePath: safePath,
     positiveId: positiveId,
+    queueTokenPath: queueTokenPath,
+    leaveQueue: leaveQueue,
     loginUrl: loginUrl
   };
 })();
