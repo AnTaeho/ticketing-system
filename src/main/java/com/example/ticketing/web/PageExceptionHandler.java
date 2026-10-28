@@ -26,7 +26,7 @@ public class PageExceptionHandler {
 
     @ExceptionHandler(Exception.class)
     public ModelAndView failed(Exception e) {
-        log.warn("[booking page] 화면을 그리지 못했다: {}", e.toString());
+        log.warn("[page] 화면을 그리지 못했다", e);
         return page(HttpStatus.INTERNAL_SERVER_ERROR, "화면을 열지 못했어요", "잠시 뒤 다시 열어 주세요.");
     }
 

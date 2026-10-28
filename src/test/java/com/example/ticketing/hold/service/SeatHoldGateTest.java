@@ -138,7 +138,7 @@ class SeatHoldGateTest {
         HoldExpiryScheduler scheduler = new HoldExpiryScheduler(expiryTransaction, gateReflector, holdMetrics,
                 properties);
         for (int i = 0; i < 20 && !"EXPIRED".equals(holdStatus(holdA.holdId())); i++) {
-            scheduler.scan();
+            scheduler.run();
         }
 
         assertThat(holdStatus(holdA.holdId())).isEqualTo("EXPIRED");

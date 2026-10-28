@@ -19,7 +19,7 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-// 예매 예외 처리기에 걸리지 않게 예외를 던지지 않고 응답을 직접 만든다
+// 검증 실패는 예외를 던지지 않고 PG 형식으로 직접 답한다. 본문을 읽지 못한 요청만 ApiExceptionHandler가 예매 형식 400으로 답한다
 @Profile("!prod")
 @RestController
 @RequestMapping("/fake-pg/payments")

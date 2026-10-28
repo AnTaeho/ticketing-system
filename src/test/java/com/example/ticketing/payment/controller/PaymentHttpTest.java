@@ -140,7 +140,7 @@ class PaymentHttpTest {
             PaymentDb db = new PaymentDb(jdbcTemplate);
             db.parkUnsettledPayments();
             db.makeDue(paymentId);
-            reconcileScheduler().scan();
+            reconcileScheduler().run();
 
             ResponseEntity<String> view = client.get()
                     .uri("/api/payments/{paymentId}", paymentId)
@@ -176,7 +176,7 @@ class PaymentHttpTest {
             db.ageCreatedAt(started.paymentId(), 60);
             db.makeDue(started.paymentId());
 
-            reconcileScheduler().scan();
+            reconcileScheduler().run();
 
             assertThat(jdbcTemplate.queryForList("SELECT status, amount FROM fake_pg_transaction WHERE order_id = ?",
                     started.orderId())).singleElement()

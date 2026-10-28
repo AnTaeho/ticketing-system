@@ -58,14 +58,14 @@ public class PaymentReconcileScheduler {
     }
 
     @Scheduled(fixedDelayString = "${ticketing.payment.reconcile-scan-ms}")
-    public void scan() {
+    public void run() {
         List<ClaimedPayment> claimed = reconcileTransaction.claim(batchSize);
         for (ClaimedPayment payment : claimed) {
             try {
                 reconcile(payment);
             } catch (RuntimeException e) {
                 // 집기에서 다음 확인 시각을 미뤄 두었으므로 이 건은 다음 주기에 다시 집힌다
-                log.warn("[booking reconcile] 결제 {} 대사 실패, 다음 건으로 넘어간다", payment.paymentId(), e);
+                log.warn("[reconcile] 결제 대사 실패, 다음 건으로 넘어간다 paymentId={}", payment.paymentId(), e);
             }
         }
     }
@@ -102,7 +102,7 @@ public class PaymentReconcileScheduler {
     private void settle(PaymentSettlement settlement) {
         PaymentResult result = settlement.result();
         if (!settlement.changedSeats()) {
-            log.debug("[booking reconcile] 결제 {}는 이미 {}", result.paymentId(), result.outcome());
+            log.debug("[reconcile] 결제는 이미 결론이 났다 paymentId={} outcome={}", result.paymentId(), result.outcome());
             return;
         }
         reflector.reflect(settlement);
@@ -114,7 +114,7 @@ public class PaymentReconcileScheduler {
             default -> {
             }
         }
-        log.info("[booking reconcile] 결제 {} → {}", result.paymentId(), result.outcome());
+        log.info("[reconcile] 결제 결론을 반영했다 paymentId={} outcome={}", result.paymentId(), result.outcome());
     }
 
     private void recheck(ClaimedPayment payment, Duration delay, String lastError, Counter result) {

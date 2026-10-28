@@ -2,6 +2,7 @@ package com.example.ticketing.payment.service;
 
 import com.example.ticketing.common.config.TicketingProperties;
 import com.example.ticketing.common.jdbc.RowCounts;
+import com.example.ticketing.common.jdbc.SqlIntervals;
 import com.example.ticketing.common.text.Texts;
 import com.example.ticketing.common.time.DbClock;
 import com.example.ticketing.payment.domain.DuePayment;
@@ -34,7 +35,7 @@ public class PaymentReconcileTransaction {
         this.paymentRepository = paymentRepository;
         this.dbClock = dbClock;
         this.notFoundCancelAfter = properties.payment().notFoundCancelAfter();
-        this.claimLeaseMicros = micros(properties.payment().reconcileClaimLease());
+        this.claimLeaseMicros = SqlIntervals.micros(properties.payment().reconcileClaimLease());
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
@@ -55,11 +56,7 @@ public class PaymentReconcileTransaction {
     // 끝난 결제는 건드리지 않는다. 바꿨으면 true
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public boolean reschedule(long paymentId, Duration delay, String lastError) {
-        return RowCounts.changedOne(paymentRepository.reschedule(paymentId, micros(delay),
+        return RowCounts.changedOne(paymentRepository.reschedule(paymentId, SqlIntervals.micros(delay),
                 Texts.abbreviate(lastError, Payment.MAX_LAST_ERROR)));
-    }
-
-    private static long micros(Duration duration) {
-        return duration.toNanos() / 1_000;
     }
 }

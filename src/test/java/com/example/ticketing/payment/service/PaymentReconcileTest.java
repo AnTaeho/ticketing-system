@@ -46,7 +46,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
-// 스케줄러 빈은 꺼져 있다. 같은 빈들로 스케줄러를 직접 만들어 scan()을 부른다
+// 스케줄러 빈은 꺼져 있다. 같은 빈들로 스케줄러를 직접 만들어 run()을 부른다
 @IntegrationTest
 @Import(StubPgTestConfig.class)
 class PaymentReconcileTest {
@@ -111,7 +111,7 @@ class PaymentReconcileTest {
         double before = count("confirmed");
         db.makeDue(paymentId);
 
-        scheduler.scan();
+        scheduler.run();
 
         Map<String, Object> payment = db.payment(paymentId);
         assertThat(payment).containsEntry("status", "APPROVED").containsEntry("pg_tx_id", "pg-late-1")
@@ -146,7 +146,7 @@ class PaymentReconcileTest {
         double before = count("waiting");
         db.makeDue(paymentId);
 
-        scheduler.scan();
+        scheduler.run();
 
         assertThat(db.payment(paymentId)).containsEntry("status", "REQUESTED");
         assertThat(db.recheckMs(paymentId)).isBetween(10_000L - TOLERANCE_MS, 10_000L);
@@ -168,7 +168,7 @@ class PaymentReconcileTest {
         db.ageCreatedAt(paymentId, 60);
         db.makeDue(paymentId);
 
-        scheduler.scan();
+        scheduler.run();
 
         assertThat(db.payment(paymentId)).containsEntry("status", "CANCELLED").containsEntry("next_check_at", null);
         assertThat(db.holdStatus(f.holdId)).isEqualTo("RELEASED");
@@ -188,7 +188,7 @@ class PaymentReconcileTest {
         db.ageCreatedAt(paymentId, 60);
         db.makeDue(paymentId);
 
-        scheduler.scan();
+        scheduler.run();
 
         Map<String, Object> payment = db.payment(paymentId);
         assertThat(payment).containsEntry("status", "REQUESTED");
@@ -217,7 +217,7 @@ class PaymentReconcileTest {
         double before = count("seat_lost");
         db.makeDue(paymentId);
 
-        scheduler.scan();
+        scheduler.run();
 
         assertThat(db.holdStatus(f.holdId)).isEqualTo("REFUNDING");
         assertThat(db.seat(kept)).containsEntry("status", "AVAILABLE").containsEntry("hold_id", null);
@@ -233,7 +233,7 @@ class PaymentReconcileTest {
     }
 
     @Test
-    @DisplayName("대사 2스레드 동시 scan(): 한쪽만 집고(PG 조회 1회) 확정은 한 번, booking 1")
+    @DisplayName("대사 2스레드 동시 run(): 한쪽만 집고(PG 조회 1회) 확정은 한 번, booking 1")
     void concurrentScansConfirmOnce() throws Exception {
         Fixture f = newHold(2);
         long paymentId = unknownPayment(f);
@@ -241,7 +241,7 @@ class PaymentReconcileTest {
         double before = count("confirmed");
         db.makeDue(paymentId);
 
-        runTogether(2, scheduler::scan);
+        runTogether(2, scheduler::run);
 
         assertThat(stubPg.queryCalls()).isEqualTo(1);
         assertThat(db.bookingCountOfHold(f.holdId)).isEqualTo(1);
@@ -321,7 +321,7 @@ class PaymentReconcileTest {
         double before = count("query_failed");
         db.makeDue(paymentId);
 
-        scheduler.scan();
+        scheduler.run();
 
         Map<String, Object> payment = db.payment(paymentId);
         assertThat(payment).containsEntry("status", "UNKNOWN");
@@ -339,7 +339,7 @@ class PaymentReconcileTest {
         stubPg.queryWith(PgResult.of(PgStatus.PROCESSING, null));
         db.makeDue(paymentId);
 
-        scheduler.scan();
+        scheduler.run();
 
         assertThat(db.payment(paymentId)).containsEntry("status", "UNKNOWN");
         assertThat(db.recheckMs(paymentId)).isBetween(3_000L, 5_000L);
@@ -355,7 +355,7 @@ class PaymentReconcileTest {
         double before = count("declined");
         db.makeDue(paymentId);
 
-        scheduler.scan();
+        scheduler.run();
 
         assertThat(db.payment(paymentId)).containsEntry("status", "DECLINED").containsEntry("next_check_at", null);
         assertThat(db.holdStatus(f.holdId)).isEqualTo("RELEASED");
@@ -379,7 +379,7 @@ class PaymentReconcileTest {
         db.makeDue(declinedId);
 
         assertThat(reconcileTransaction.claim(20)).isEmpty();
-        scheduler.scan();
+        scheduler.run();
 
         assertThat(stubPg.queryCalls()).isZero();
         assertThat(db.payment(approvedId)).containsEntry("status", "APPROVED");
@@ -396,7 +396,7 @@ class PaymentReconcileTest {
         stubPg.queryWith(PgResult.of(PgStatus.APPROVED, "pg-orphan-ok"));
         db.makeDue(paymentId);
 
-        scheduler.scan();
+        scheduler.run();
 
         assertThat(db.payment(paymentId)).containsEntry("status", "APPROVED").containsEntry("next_check_at", null);
         assertThat(db.holdStatus(f.holdId)).isEqualTo("CONFIRMED");
@@ -412,7 +412,7 @@ class PaymentReconcileTest {
         stubPg.queryWith(PgResult.of(PgStatus.DECLINED, null));
         db.makeDue(paymentId);
 
-        scheduler.scan();
+        scheduler.run();
 
         assertThat(db.payment(paymentId)).containsEntry("status", "DECLINED").containsEntry("next_check_at", null);
         assertThat(db.holdStatus(f.holdId)).isEqualTo("RELEASED");
@@ -427,7 +427,7 @@ class PaymentReconcileTest {
         stubPg.queryWith(PgResult.of(PgStatus.CANCELLED, null));
         db.makeDue(paymentId);
 
-        scheduler.scan();
+        scheduler.run();
 
         assertThat(db.payment(paymentId)).containsEntry("status", "CANCELLED").containsEntry("next_check_at", null);
         assertThat(db.holdStatus(f.holdId)).isEqualTo("RELEASED");
@@ -445,7 +445,7 @@ class PaymentReconcileTest {
         db.ageCreatedAt(paymentId, 60);
         db.makeDue(paymentId);
 
-        scheduler.scan();
+        scheduler.run();
 
         assertThat(stubPg.cancelCalls()).isEqualTo(1);
         assertThat(db.payment(paymentId)).containsEntry("status", "CANCELLED").containsEntry("next_check_at", null);

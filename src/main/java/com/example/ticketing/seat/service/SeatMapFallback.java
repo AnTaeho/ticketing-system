@@ -35,7 +35,7 @@ final class SeatMapFallback {
 
     // 로컬 캐시가 오래됐으면 회차별로 한 요청만 DB를 읽고 나머지는 그 결과를 기다린다. 빌드가 실패하면 오래된 캐시를 쓴다
     String read(long performanceId, RedisUnavailableException cause) {
-        log.debug("[booking seatmap] 회차 {} Redis 실패, 로컬 캐시·DB로 넘어간다: {}", performanceId,
+        log.debug("[seatmap] Redis 실패, 로컬 캐시·DB로 넘어간다 performanceId={} cause={}", performanceId,
                 RedisFailures.describe(cause));
         Entry stale = localCache.get(performanceId);
         if (localCache.isFresh(stale)) {

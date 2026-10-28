@@ -9,14 +9,18 @@ import com.example.ticketing.common.metrics.Metrics.Tag;
 import com.example.ticketing.hold.dto.CreateHoldCommand;
 import com.example.ticketing.hold.dto.CreateHoldResult;
 import com.example.ticketing.hold.service.SeatHoldService;
+import com.example.ticketing.notification.service.TicketIssuedHandler;
 import com.example.ticketing.outbox.domain.OutboxTaskType;
 import com.example.ticketing.outbox.dto.ClaimedOutboxTask;
+import com.example.ticketing.outbox.dto.RefundRequestedPayload;
+import com.example.ticketing.outbox.dto.TicketIssuedPayload;
 import com.example.ticketing.payment.client.PgResult;
 import com.example.ticketing.payment.client.PgStatus;
 import com.example.ticketing.payment.dto.PayCommand;
 import com.example.ticketing.payment.dto.PaymentStart.Started;
 import com.example.ticketing.payment.service.PaymentService;
 import com.example.ticketing.payment.service.PaymentTransaction;
+import com.example.ticketing.payment.service.RefundRequestedHandler;
 import com.example.ticketing.support.Fixtures;
 import com.example.ticketing.support.IntegrationTest;
 import com.example.ticketing.support.PaymentDb;
@@ -43,16 +47,17 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
+import tools.jackson.databind.json.JsonMapper;
 
-// 워커 빈은 꺼져 있다. 같은 빈들로 워커를 직접 만들어 scan()을 부른다
+// 스케줄러 빈은 꺼져 있다. 같은 빈들로 스케줄러를 직접 만들어 run()을 부른다
 @IntegrationTest
 @Import(StubPgTestConfig.class)
-class OutboxWorkerTest {
+class OutboxDispatchSchedulerTest {
 
     private static final long TOLERANCE_MS = 1_500;
 
     @Autowired
-    private OutboxClaimTransaction claimTransaction;
+    private OutboxTaskTransaction claimTransaction;
     @Autowired
     private TicketIssuedHandler ticketIssuedHandler;
     @Autowired
@@ -75,10 +80,12 @@ class OutboxWorkerTest {
     private TicketingProperties properties;
     @Autowired
     private MeterRegistry meterRegistry;
+    @Autowired
+    private JsonMapper jsonMapper;
 
     private final List<Long> performances = new ArrayList<>();
     private PaymentDb db;
-    private OutboxWorker worker;
+    private OutboxDispatchScheduler worker;
 
     @BeforeEach
     void setUp() {
@@ -114,7 +121,7 @@ class OutboxWorkerTest {
         Confirmed c = confirmed(3);
         double before = count("TICKET_ISSUED", "done");
 
-        worker.scan();
+        worker.run();
 
         assertThat(task("TICKET_ISSUED", c.bookingId)).containsEntry("status", "DONE")
                 .containsEntry("attempt", 0).containsEntry("locked_until", null);
@@ -139,7 +146,7 @@ class OutboxWorkerTest {
     void singleSeatHasNoOthers() {
         Confirmed c = confirmed(1);
 
-        worker.scan();
+        worker.run();
 
         assertThat(notificationMessage(c.bookingId)).contains(" A구역 1열 1번 예매가 확정됐어요.").doesNotContain("외");
     }
@@ -154,16 +161,16 @@ class OutboxWorkerTest {
         assertThat(claimed).extracting(ClaimedOutboxTask::id).containsExactly(taskId);
         assertThat(task("TICKET_ISSUED", c.bookingId)).containsEntry("status", "PROCESSING");
 
-        worker.scan();
+        worker.run();
         assertThat(task("TICKET_ISSUED", c.bookingId)).containsEntry("status", "PROCESSING");
         assertThat(notificationCount(c.bookingId)).isZero();
 
         // 핸들러는 끝났지만 DONE을 쓰기 전에 서버가 죽었다
-        ticketIssuedHandler.handle(claimed.get(0));
+        ticketIssuedHandler.handle(payloadOf(claimed.get(0)));
         assertThat(notificationCount(c.bookingId)).isEqualTo(1);
         expireLock(taskId);
 
-        worker.scan();
+        worker.run();
 
         assertThat(task("TICKET_ISSUED", c.bookingId)).containsEntry("status", "DONE");
         assertThat(notificationCount(c.bookingId)).isEqualTo(1);
@@ -173,11 +180,11 @@ class OutboxWorkerTest {
     @DisplayName("같은 TICKET_ISSUED를 핸들러로 두 번 처리해도 알림 1건(두 번째는 예외 없이 성공)")
     void ticketIssuedIsIdempotent() {
         Confirmed c = confirmed(2);
-        ClaimedOutboxTask task = claimTransaction.claim(50).get(0);
+        TicketIssuedPayload payload = payloadOf(claimTransaction.claim(50).get(0));
 
-        ticketIssuedHandler.handle(task);
+        ticketIssuedHandler.handle(payload);
         String first = notificationMessage(c.bookingId);
-        ticketIssuedHandler.handle(task);
+        ticketIssuedHandler.handle(payload);
 
         assertThat(notificationCount(c.bookingId)).isEqualTo(1);
         assertThat(notificationMessage(c.bookingId)).isEqualTo(first);
@@ -187,9 +194,9 @@ class OutboxWorkerTest {
     @DisplayName("같은 TICKET_ISSUED를 5스레드가 동시에 처리해도 알림 1건, 유니크 위반은 성공으로 끝난다(예외 없음)")
     void concurrentSameTicketIssuedWritesOnce() throws Exception {
         Confirmed c = confirmed(2);
-        ClaimedOutboxTask task = claimTransaction.claim(50).get(0);
+        TicketIssuedPayload payload = payloadOf(claimTransaction.claim(50).get(0));
 
-        runTogether(5, () -> ticketIssuedHandler.handle(task));
+        runTogether(5, () -> ticketIssuedHandler.handle(payload));
 
         assertThat(notificationCount(c.bookingId)).isEqualTo(1);
     }
@@ -221,7 +228,7 @@ class OutboxWorkerTest {
         Refund r = seatLostRefund();
         double before = count("REFUND_REQUESTED", "done");
 
-        worker.scan();
+        worker.run();
 
         assertThat(stubPg.cancelCalls()).isEqualTo(1);
         assertThat(db.payment(r.paymentId)).containsEntry("status", "CANCELLED");
@@ -230,8 +237,7 @@ class OutboxWorkerTest {
         assertThat(count("REFUND_REQUESTED", "done") - before).isEqualTo(1);
 
         // 다시 처리돼도(재전달) 바뀌는 행 없이 성공한다
-        refundRequestedHandler.handle(new ClaimedOutboxTask(r.taskId, "REFUND_REQUESTED", r.paymentId,
-                r.payload, 0, null));
+        refundRequestedHandler.handle(jsonMapper.readValue(r.payload, RefundRequestedPayload.class));
         assertThat(db.payment(r.paymentId)).containsEntry("status", "CANCELLED");
         assertThat(db.holdStatus(r.holdId)).isEqualTo("RELEASED");
     }
@@ -242,7 +248,7 @@ class OutboxWorkerTest {
         Refund r = seatLostRefund();
         stubPg.cancelWith(PgResult.of(PgStatus.DECLINED, null));
 
-        worker.scan();
+        worker.run();
 
         assertThat(db.payment(r.paymentId)).containsEntry("status", "CANCELLED");
         assertThat(db.holdStatus(r.holdId)).isEqualTo("RELEASED");
@@ -258,7 +264,7 @@ class OutboxWorkerTest {
         double retryBefore = count("REFUND_REQUESTED", "retry");
         double failedBefore = count("REFUND_REQUESTED", "failed");
 
-        worker.scan();
+        worker.run();
 
         Map<String, Object> first = task("REFUND_REQUESTED", r.paymentId);
         assertThat(first).containsEntry("status", "PENDING").containsEntry("attempt", 1)
@@ -268,12 +274,12 @@ class OutboxWorkerTest {
         assertThat(db.payment(r.paymentId)).containsEntry("status", "APPROVED");
         assertThat(db.holdStatus(r.holdId)).isEqualTo("REFUNDING");
 
-        worker.scan();
+        worker.run();
         assertThat(task("REFUND_REQUESTED", r.paymentId)).containsEntry("attempt", 1);
 
         for (int attempt = 2; attempt <= 4; attempt++) {
             makeDue(r.taskId);
-            worker.scan();
+            worker.run();
             assertThat(task("REFUND_REQUESTED", r.paymentId)).containsEntry("status", "PENDING")
                     .containsEntry("attempt", attempt);
             long expectedMs = (1L << attempt) * 1_000;
@@ -281,12 +287,12 @@ class OutboxWorkerTest {
         }
 
         makeDue(r.taskId);
-        worker.scan();
+        worker.run();
 
         assertThat(task("REFUND_REQUESTED", r.paymentId)).containsEntry("status", "FAILED")
                 .containsEntry("attempt", properties.outbox().maxAttempts()).containsEntry("locked_until", null);
         makeDue(r.taskId);
-        worker.scan();
+        worker.run();
         assertThat(stubPg.cancelCalls()).isEqualTo(5);
         assertThat(count("REFUND_REQUESTED", "retry") - retryBefore).isEqualTo(4);
         assertThat(count("REFUND_REQUESTED", "failed") - failedBefore).isEqualTo(1);
@@ -297,10 +303,10 @@ class OutboxWorkerTest {
     void backoffIsCapped() {
         long max = properties.outbox().maxBackoff().toSeconds();
         assertThat(max).isEqualTo(60);
-        assertThat(OutboxClaimTransaction.backoffSeconds(1, max)).isEqualTo(2);
-        assertThat(OutboxClaimTransaction.backoffSeconds(5, max)).isEqualTo(32);
-        assertThat(OutboxClaimTransaction.backoffSeconds(6, max)).isEqualTo(60);
-        assertThat(OutboxClaimTransaction.backoffSeconds(40, max)).isEqualTo(60);
+        assertThat(OutboxTaskTransaction.backoffSeconds(1, max)).isEqualTo(2);
+        assertThat(OutboxTaskTransaction.backoffSeconds(5, max)).isEqualTo(32);
+        assertThat(OutboxTaskTransaction.backoffSeconds(6, max)).isEqualTo(60);
+        assertThat(OutboxTaskTransaction.backoffSeconds(40, max)).isEqualTo(60);
     }
 
     @Test
@@ -311,7 +317,7 @@ class OutboxWorkerTest {
         Confirmed c = confirmed(1);
         assertThat(r.taskId).isLessThan(taskId("TICKET_ISSUED", c.bookingId));
 
-        worker.scan();
+        worker.run();
 
         assertThat(task("REFUND_REQUESTED", r.paymentId)).containsEntry("status", "PENDING")
                 .containsEntry("attempt", 1);
@@ -325,9 +331,9 @@ class OutboxWorkerTest {
     void missingHandlerIsFailedAttempt() {
         Refund r = seatLostRefund();
         Confirmed c = confirmed(1);
-        OutboxWorker ticketOnly = newWorker(List.of(ticketIssuedHandler), properties.outbox().batchSize());
+        OutboxDispatchScheduler ticketOnly = newWorker(List.of(ticketIssuedHandler), properties.outbox().batchSize());
 
-        ticketOnly.scan();
+        ticketOnly.run();
 
         Map<String, Object> refund = task("REFUND_REQUESTED", r.paymentId);
         assertThat(refund).containsEntry("status", "PENDING").containsEntry("attempt", 1);
@@ -342,24 +348,30 @@ class OutboxWorkerTest {
         int tasks = 30;
         List<Long> bookingIds = confirmedMany(tasks);
         Map<Long, AtomicInteger> handled = new ConcurrentHashMap<>();
-        OutboxHandler counting = new OutboxHandler() {
+        // 예매 하나에 TICKET_ISSUED 작업 하나라 예매 ID로 작업을 센다
+        OutboxHandler<TicketIssuedPayload> counting = new OutboxHandler<>() {
             @Override
             public OutboxTaskType type() {
                 return OutboxTaskType.TICKET_ISSUED;
             }
 
             @Override
-            public void handle(ClaimedOutboxTask task) {
-                handled.computeIfAbsent(task.id(), id -> new AtomicInteger()).incrementAndGet();
-                ticketIssuedHandler.handle(task);
+            public Class<TicketIssuedPayload> payloadType() {
+                return TicketIssuedPayload.class;
+            }
+
+            @Override
+            public void handle(TicketIssuedPayload payload) {
+                handled.computeIfAbsent(payload.bookingId(), id -> new AtomicInteger()).incrementAndGet();
+                ticketIssuedHandler.handle(payload);
             }
         };
-        OutboxWorker smallBatch = newWorker(List.of(counting, refundRequestedHandler), 5);
+        OutboxDispatchScheduler smallBatch = newWorker(List.of(counting, refundRequestedHandler), 5);
         double before = count("TICKET_ISSUED", "done");
 
         runTogether(3, () -> {
             for (int round = 0; round < 20 && pendingCount(bookingIds) > 0; round++) {
-                smallBatch.scan();
+                smallBatch.run();
             }
         });
 
@@ -394,13 +406,14 @@ class OutboxWorkerTest {
                 .containsEntry("attempt", 0).containsEntry("last_error", null);
     }
 
-    private OutboxWorker newWorker(List<OutboxHandler> handlers, int batchSize) {
+    private OutboxDispatchScheduler newWorker(List<OutboxHandler<?>> handlers, int batchSize) {
         Outbox outbox = properties.outbox();
         TicketingProperties p = properties;
         TicketingProperties withBatch = new TicketingProperties(p.seed(), p.redis(), p.hold(), p.payment(), p.gate(),
                 p.queue(), p.seatmap(), new Outbox(outbox.workerEnabled(), outbox.pollIntervalMs(), batchSize,
                 outbox.lockDuration(), outbox.maxAttempts(), outbox.maxBackoff()), p.ops(), p.pg(), p.fakePg());
-        return new OutboxWorker(claimTransaction, handlers, withBatch, meterRegistry);
+        return new OutboxDispatchScheduler(claimTransaction, handlers, jsonMapper, System::nanoTime, withBatch,
+                meterRegistry);
     }
 
     // 결제 승인까지 마친 예매. 좌석은 A구역 1열 1번부터 seatCount석
@@ -450,6 +463,10 @@ class OutboxWorkerTest {
         Map<String, Object> task = task("REFUND_REQUESTED", paymentId);
         assertThat(task).containsEntry("status", "PENDING");
         return new Refund(paymentId, hold.holdId(), taskId("REFUND_REQUESTED", paymentId), (String) task.get("payload"));
+    }
+
+    private TicketIssuedPayload payloadOf(ClaimedOutboxTask task) {
+        return jsonMapper.readValue(task.payload(), TicketIssuedPayload.class);
     }
 
     private long newPerformance(int sections, int rows, int seatsPerRow) {

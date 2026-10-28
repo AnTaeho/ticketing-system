@@ -15,6 +15,8 @@ import com.example.ticketing.common.redis.TicketingRedis;
 import com.example.ticketing.ops.dto.OpsSummary;
 import com.example.ticketing.ops.dto.OpsSummary.FailedTask;
 import com.example.ticketing.ops.dto.OpsSummary.StalePayment;
+import com.example.ticketing.ops.repository.OpsJdbcRepository;
+import com.example.ticketing.ops.repository.OpsRedisStore;
 import com.example.ticketing.support.Fixtures;
 import com.example.ticketing.support.IntegrationTest;
 import com.example.ticketing.support.RedisKeyCleaner;
@@ -33,6 +35,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.jdbc.support.KeyHolder;
 
@@ -149,7 +152,8 @@ class OpsSummaryServiceTest {
         meters.counter(Metrics.HOLD_GATE, Tag.RESULT, "seat_taken").increment();
         meters.counter(Metrics.HOLD_EXPIRED).increment(2);
         meters.counter(Metrics.OUTBOX_TASK, Tag.TYPE, "TICKET_ISSUED", Tag.RESULT, OutboxResult.DONE).increment(4);
-        OpsSummaryService broken = new OpsSummaryService(jdbc, deadRedis, meters, props);
+        OpsSummaryService broken = new OpsSummaryService(new OpsJdbcRepository(new NamedParameterJdbcTemplate(jdbc)),
+                new OpsRedisStore(deadRedis), new OpsMetricsReader(meters), System::nanoTime, props);
 
         OpsSummary summary = broken.summarize(s.pid);
 

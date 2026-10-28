@@ -17,7 +17,7 @@ import lombok.NoArgsConstructor;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
-// 행은 OutboxWriter의 native INSERT로 쓰고, 상태는 워커의 조건부 UPDATE로만 바꾼다
+// 행은 OutboxTaskJdbcRepository의 native INSERT와 조건부 UPDATE로만 쓴다
 @Entity
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
@@ -40,7 +40,7 @@ public class OutboxTask {
     @Column(name = "aggregate_id", nullable = false)
     private Long aggregateId;
 
-    // 워커만 읽는 JSON이라 JSON 타입 매핑 없이 문자열로 둔다
+    // Outbox 스케줄러만 읽는 JSON이라 JSON 타입 매핑 없이 문자열로 둔다
     @Column(nullable = false, columnDefinition = "text")
     private String payload;
 

@@ -7,6 +7,7 @@ import com.example.ticketing.common.config.TicketingProperties;
 import com.example.ticketing.common.error.ApiException;
 import com.example.ticketing.common.error.ErrorCode;
 import com.example.ticketing.common.jdbc.RowCounts;
+import com.example.ticketing.common.jdbc.SqlIntervals;
 import com.example.ticketing.common.text.Texts;
 import com.example.ticketing.common.time.DbClock;
 import com.example.ticketing.hold.domain.GateHold;
@@ -14,6 +15,7 @@ import com.example.ticketing.hold.domain.HoldStatus;
 import com.example.ticketing.hold.domain.SeatHold;
 import com.example.ticketing.hold.repository.SeatHoldRepository;
 import com.example.ticketing.outbox.domain.OutboxTaskType;
+import com.example.ticketing.outbox.dto.RefundRequestedPayload;
 import com.example.ticketing.outbox.service.OutboxWriter;
 import com.example.ticketing.payment.domain.Payment;
 import com.example.ticketing.payment.domain.PaymentStatus;
@@ -37,7 +39,6 @@ import java.util.UUID;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
-import tools.jackson.databind.json.JsonMapper;
 
 // 락 순서: seat_hold → seat. 이 안에서는 PG·Redis를 부르지 않는다
 @Component
@@ -52,7 +53,6 @@ public class PaymentTransaction {
     private final OutboxWriter outboxWriter;
     private final DbClock dbClock;
     private final Clock clock;
-    private final JsonMapper jsonMapper;
     private final Duration payDeadline;
     private final Duration requestedRecheckAfter;
     private final long unknownRecheckMicros;
@@ -60,7 +60,7 @@ public class PaymentTransaction {
     public PaymentTransaction(PaymentRepository paymentRepository, PaymentReader paymentReader,
                               SeatHoldRepository seatHoldRepository, SeatRepository seatRepository,
                               SeatCatalog seatCatalog, BookingIssuer bookingIssuer, OutboxWriter outboxWriter,
-                              DbClock dbClock, Clock clock, JsonMapper jsonMapper, TicketingProperties properties) {
+                              DbClock dbClock, Clock clock, TicketingProperties properties) {
         this.paymentRepository = paymentRepository;
         this.paymentReader = paymentReader;
         this.seatHoldRepository = seatHoldRepository;
@@ -70,10 +70,9 @@ public class PaymentTransaction {
         this.outboxWriter = outboxWriter;
         this.dbClock = dbClock;
         this.clock = clock;
-        this.jsonMapper = jsonMapper;
         this.payDeadline = properties.payment().payDeadline();
         this.requestedRecheckAfter = properties.payment().requestedRecheckAfter();
-        this.unknownRecheckMicros = properties.payment().unknownRecheckAfter().toNanos() / 1_000;
+        this.unknownRecheckMicros = SqlIntervals.micros(properties.payment().unknownRecheckAfter());
     }
 
     // hold 행 락이 같은 hold의 결제 시작을 줄 세운다. READ_COMMITTED라 기다린 동안 커밋된 결제가 3단계에서 보인다
@@ -153,7 +152,7 @@ public class PaymentTransaction {
         return PaymentSettlement.seatsUnchanged(paymentReader.resultOf(payment));
     }
 
-    // PG 환불 확정 뒤 Outbox 워커가 부른다. 다시 불려도 조건부 전이라 두 번째는 바꾸는 행이 없다
+    // PG 환불 확정 뒤 RefundRequestedHandler가 부른다. 다시 불려도 조건부 전이라 두 번째는 바꾸는 행이 없다
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public boolean completeRefund(long paymentId) {
         long holdId = paymentRepository.findHoldIdById(paymentId).orElseThrow(() -> paymentNotFound(paymentId));
@@ -195,7 +194,8 @@ public class PaymentTransaction {
         RowCounts.requireExactly(seatRepository.releaseHeldSeats(holdId), seatIds.size(), "seat AVAILABLE");
         RowCounts.requireExactly(seatHoldRepository.markRefunding(holdId), 1, "hold REFUNDING");
         RowCounts.requireExactly(paymentRepository.markApproved(paymentId, pgTxId), 1, "payment APPROVED");
-        outboxWriter.write(OutboxTaskType.REFUND_REQUESTED, paymentId, refundPayload(paymentId, payment.getOrderId()));
+        outboxWriter.write(OutboxTaskType.REFUND_REQUESTED, paymentId,
+                new RefundRequestedPayload(paymentId, payment.getOrderId()));
         return PaymentSettlement.seatsChanged(new PaymentResult(paymentId, PaymentOutcome.SEAT_LOST,
                 PaymentStatus.APPROVED, HoldStatus.REFUNDING, null, null), gateOf(hold, seatIds), null);
     }
@@ -230,13 +230,6 @@ public class PaymentTransaction {
 
     private static GateHold gateOf(SeatHold hold, List<Long> seatIds) {
         return new GateHold(hold.getUserId(), hold.getPerformanceId(), hold.getHoldToken(), seatIds);
-    }
-
-    // 예매 취소 쪽 환불과 같은 모양이다. 키 순서까지 맞춘다
-    private String refundPayload(long paymentId, String orderId) {
-        return jsonMapper.writeValueAsString(jsonMapper.createObjectNode()
-                .put("paymentId", paymentId)
-                .put("orderId", orderId));
     }
 
     private static ApiException paymentNotFound(long paymentId) {

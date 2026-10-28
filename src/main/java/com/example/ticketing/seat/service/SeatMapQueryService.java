@@ -117,14 +117,14 @@ public class SeatMapQueryService {
             try {
                 store.put(performanceId, json, snapshotTtl);
             } catch (RedisUnavailableException e) {
-                log.debug("[booking seatmap] 회차 {} 스냅샷 저장 실패: {}", performanceId, RedisFailures.describe(e));
+                log.debug("[seatmap] 스냅샷 저장 실패 performanceId={} cause={}", performanceId, RedisFailures.describe(e));
             }
             return localCache.put(performanceId, json);
         } finally {
             try {
                 store.releaseLease(performanceId, owner);
             } catch (RedisUnavailableException e) {
-                log.debug("[booking seatmap] 회차 {} 리스 해제 실패, TTL로 풀린다: {}", performanceId,
+                log.debug("[seatmap] 리스 해제 실패, TTL로 풀린다 performanceId={} cause={}", performanceId,
                         RedisFailures.describe(e));
             }
         }

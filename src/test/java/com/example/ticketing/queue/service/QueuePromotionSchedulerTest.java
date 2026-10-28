@@ -184,7 +184,7 @@ class QueuePromotionSchedulerTest {
     }
 
     @Test
-    @DisplayName("promote()는 리스를 잡았을 때만 돈다. 남이 잡고 있으면 건너뛰고, 끝나면 리스를 푼다")
+    @DisplayName("run()은 리스를 잡았을 때만 돈다. 남이 잡고 있으면 건너뛰고, 끝나면 리스를 푼다")
     void promoteRunsUnderLease() {
         long pid = openPerformance();
         QueueService service = service(1);
@@ -194,11 +194,11 @@ class QueuePromotionSchedulerTest {
         service.consume(USER_BASE + 1, pid, first);
 
         redis().opsForValue().set(LEASE_KEY, "other-instance", java.time.Duration.ofSeconds(5));
-        scheduler.promote();
+        scheduler.run();
         assertThat(service.isAdmitted(USER_BASE + 2, pid, second)).isFalse();
 
         redis().delete(LEASE_KEY);
-        scheduler.promote();
+        scheduler.run();
         assertThat(service.isAdmitted(USER_BASE + 2, pid, second)).isTrue();
         assertThat(redis().hasKey(LEASE_KEY)).isFalse();
     }

@@ -2,6 +2,7 @@ package com.example.ticketing.queue.service;
 
 import com.example.ticketing.common.config.TicketingProperties;
 import com.example.ticketing.common.redis.RedisFailures;
+import com.example.ticketing.common.redis.RedisUnavailableException;
 import com.example.ticketing.common.redis.SchedulerLease;
 import com.example.ticketing.queue.repository.QueueRedisStore;
 import com.example.ticketing.seat.service.SeatCatalog;
@@ -46,7 +47,7 @@ public class QueuePromotionScheduler {
     }
 
     @Scheduled(fixedDelayString = "${ticketing.queue.promote-interval-ms}")
-    public void promote() {
+    public void run() {
         lease.runIfLeader(LEASE, leaseTtl, this::promoteAll);
     }
 
@@ -54,10 +55,12 @@ public class QueuePromotionScheduler {
         for (long performanceId : seatCatalog.openPerformanceIds()) {
             try {
                 promoteOne(performanceId);
-            } catch (RuntimeException e) {
-                // 회차 하나의 실패가 나머지 회차의 승격을 막지 않게 한다
-                log.warn("[booking queue] 회차 {} 승격 실패, 다음 회차로 넘어간다: {}", performanceId,
+            } catch (RedisUnavailableException e) {
+                // 회차 하나의 실패가 나머지 회차의 승격을 막지 않게 한다. Redis가 통째로 죽으면 리스에서 주기가 멈춘다
+                log.warn("[queue] 승격 실패, 다음 회차로 넘어간다 performanceId={} cause={}", performanceId,
                         RedisFailures.describe(e));
+            } catch (RuntimeException e) {
+                log.warn("[queue] 승격 실패, 다음 회차로 넘어간다 performanceId={}", performanceId, e);
             }
         }
     }

@@ -22,10 +22,10 @@ import com.example.ticketing.hold.dto.CreateHoldResult;
 import com.example.ticketing.hold.repository.SeatGateRedisStore;
 import com.example.ticketing.hold.service.SeatGateReflector;
 import com.example.ticketing.hold.service.SeatHoldService;
-import com.example.ticketing.outbox.service.OutboxClaimTransaction;
-import com.example.ticketing.outbox.service.OutboxWorker;
-import com.example.ticketing.outbox.service.RefundRequestedHandler;
-import com.example.ticketing.outbox.service.TicketIssuedHandler;
+import com.example.ticketing.notification.service.TicketIssuedHandler;
+import com.example.ticketing.outbox.service.OutboxDispatchScheduler;
+import com.example.ticketing.outbox.service.OutboxTaskTransaction;
+import com.example.ticketing.payment.service.RefundRequestedHandler;
 import com.example.ticketing.payment.client.PgResult;
 import com.example.ticketing.payment.client.PgStatus;
 import com.example.ticketing.payment.dto.PayCommand;
@@ -80,7 +80,7 @@ class BookingCancelTest {
     @Autowired
     private SeatCatalog seatCatalog;
     @Autowired
-    private OutboxClaimTransaction claimTransaction;
+    private OutboxTaskTransaction taskTransaction;
     @Autowired
     private TicketIssuedHandler ticketIssuedHandler;
     @Autowired
@@ -254,10 +254,11 @@ class BookingCancelTest {
         assertThat(bookingService.detail(c.userId, c.bookingId).refund()).isEqualTo(RefundStatus.REQUESTED);
         parkOtherTasks(c);
         stubPg.cancelWith(PgResult.of(PgStatus.CANCELLED, null));
-        OutboxWorker worker = new OutboxWorker(claimTransaction, List.of(ticketIssuedHandler, refundRequestedHandler),
-                properties, meterRegistry);
+        OutboxDispatchScheduler worker = new OutboxDispatchScheduler(taskTransaction,
+                List.of(ticketIssuedHandler, refundRequestedHandler), jsonMapper, System::nanoTime, properties,
+                meterRegistry);
 
-        worker.scan();
+        worker.run();
 
         assertThat(stubPg.cancelCalls()).isEqualTo(1);
         assertThat(db.payment(c.paymentId)).containsEntry("status", "CANCELLED");

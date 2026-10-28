@@ -9,6 +9,10 @@ import com.example.ticketing.booking.repository.BookingSeatRepository;
 import com.example.ticketing.hold.domain.HoldStatus;
 import com.example.ticketing.hold.repository.SeatHoldJdbcRepository;
 import com.example.ticketing.hold.repository.SeatHoldRepository;
+import com.example.ticketing.ops.repository.OpsJdbcRepository;
+import com.example.ticketing.outbox.domain.OutboxTaskStatus;
+import com.example.ticketing.outbox.domain.OutboxTaskType;
+import com.example.ticketing.outbox.repository.OutboxTaskJdbcRepository;
 import com.example.ticketing.payment.domain.PaymentStatus;
 import com.example.ticketing.payment.repository.PaymentJdbcRepository;
 import com.example.ticketing.payment.repository.PaymentRepository;
@@ -37,10 +41,13 @@ class SqlStatusLiteralTest {
     private static final Pattern LITERAL = Pattern.compile("'([A-Z_]+)'");
 
     @Test
-    @DisplayName("hold·seat·payment·booking 저장소 SQL의 상태 리터럴은 모두 그 테이블 상태 enum의 이름이다")
+    @DisplayName("hold·seat·payment·booking·outbox 저장소 SQL의 상태 리터럴은 모두 그 테이블 상태 enum의 이름이다")
     void statusLiteralsAreEnumNames() {
         assertLiterals(sqlOf(SeatHoldRepository.class), HoldStatus.class);
-        assertLiterals(sqlOf(SeatHoldJdbcRepository.class), HoldStatus.class);
+        // 게이트 키 대사는 별칭 s로 좌석 상태를 읽는다
+        List<String> holdJdbc = sqlOf(SeatHoldJdbcRepository.class);
+        assertEnumNames(literals(holdJdbc, Pattern.compile("(?<!s\\.)\\bstatus" + STATUS_LIST)), HoldStatus.class);
+        assertEnumNames(literals(holdJdbc, Pattern.compile("\\bs\\.status" + STATUS_LIST)), SeatStatus.class);
         assertLiterals(sqlOf(SeatRepository.class), SeatStatus.class);
         assertLiterals(sqlOf(SeatJdbcRepository.class), SeatStatus.class);
         assertLiterals(sqlOf(PaymentRepository.class), PaymentStatus.class);
@@ -52,15 +59,30 @@ class SqlStatusLiteralTest {
                 PaymentStatus.class);
         assertThat(literals(sqlOf(BookingJdbcRepository.class), Pattern.compile("(?<!bp\\.)\\bstatus" + STATUS_LIST)))
                 .as("BookingJdbcRepository의 별칭 없는 상태 비교").isEmpty();
+        assertLiterals(sqlOf(OutboxTaskJdbcRepository.class), OutboxTaskStatus.class);
     }
 
     @Test
-    @DisplayName("결제 저장소 SQL의 상태 IN 목록은 모두 PaymentStatus.isOpen()인 상태와 같다")
+    @DisplayName("운영 집계 SQL의 상태·작업 종류 리터럴은 별칭이 가리키는 테이블의 enum 이름이다")
+    void opsLiteralsAreEnumNames() {
+        List<String> sqls = sqlOf(OpsJdbcRepository.class);
+
+        assertEnumNames(literals(sqls, Pattern.compile("\\bbp\\.status" + STATUS_LIST)), PaymentStatus.class);
+        assertEnumNames(literals(sqls, Pattern.compile("\\bh\\.status" + STATUS_LIST)), HoldStatus.class);
+        assertEnumNames(literals(sqls, Pattern.compile("\\bo\\.status" + STATUS_LIST)), OutboxTaskStatus.class);
+        assertEnumNames(literals(sqls, Pattern.compile("\\bo\\.task_type" + STATUS_LIST)), OutboxTaskType.class);
+        assertThat(literals(sqls, Pattern.compile("(?<![a-z]\\.)\\bstatus" + STATUS_LIST)))
+                .as("OpsJdbcRepository의 별칭 없는 상태 비교").isEmpty();
+    }
+
+    @Test
+    @DisplayName("결제 저장소와 운영 집계 SQL의 결제 상태 IN 목록은 모두 PaymentStatus.isOpen()인 상태와 같다")
     void openPaymentStatusListsMatchEnum() {
         List<String> open = Arrays.stream(PaymentStatus.values()).filter(PaymentStatus::isOpen).map(Enum::name)
                 .toList();
         List<String> sqls = new ArrayList<>(sqlOf(PaymentRepository.class));
         sqls.addAll(sqlOf(PaymentJdbcRepository.class));
+        sqls.addAll(sqlOf(OpsJdbcRepository.class));
         List<List<String>> inLists = new ArrayList<>();
         for (String sql : sqls) {
             Matcher clause = IN_LIST.matcher(sql);

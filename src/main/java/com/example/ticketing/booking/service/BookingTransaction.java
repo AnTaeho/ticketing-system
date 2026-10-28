@@ -14,6 +14,7 @@ import com.example.ticketing.hold.domain.GateHold;
 import com.example.ticketing.hold.domain.SeatHold;
 import com.example.ticketing.hold.repository.SeatHoldRepository;
 import com.example.ticketing.outbox.domain.OutboxTaskType;
+import com.example.ticketing.outbox.dto.RefundRequestedPayload;
 import com.example.ticketing.outbox.service.OutboxWriter;
 import com.example.ticketing.seat.repository.SeatRepository;
 import com.example.ticketing.show.repository.PerformanceRepository;
@@ -23,7 +24,6 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
-import tools.jackson.databind.json.JsonMapper;
 
 // 락 순서: booking → seat(id 오름차순). 확정된 hold를 바꾸는 경로가 없어 hold 행은 잠그지 않는다. 이 안에서는 Redis·PG를 부르지 않는다
 @Component
@@ -36,7 +36,6 @@ public class BookingTransaction {
     private final SeatRepository seatRepository;
     private final PerformanceRepository performanceRepository;
     private final OutboxWriter outboxWriter;
-    private final JsonMapper jsonMapper;
 
     // booking 락이 같은 예매의 취소를 줄 세운다. 뒤에 온 쪽은 CANCELLED를 보고 아무것도 바꾸지 않으므로 환불 작업은 하나다
     @Transactional(isolation = Isolation.READ_COMMITTED)
@@ -60,15 +59,9 @@ public class BookingTransaction {
         // 게이트 키를 지울 좌석 ID는 hold_id를 비우기 전에 읽어 둔다
         List<Long> seatIds = seatRepository.lockSoldSeatIds(hold.getId());
         RowCounts.requireExactly(seatRepository.releaseSoldSeats(hold.getId()), seatIds.size(), "seat AVAILABLE");
-        outboxWriter.write(OutboxTaskType.REFUND_REQUESTED, payment.paymentId(), refundPayload(payment));
+        outboxWriter.write(OutboxTaskType.REFUND_REQUESTED, payment.paymentId(),
+                new RefundRequestedPayload(payment.paymentId(), payment.orderId()));
         return BookingCancellation.cancelled(bookingId,
                 new GateHold(booking.getUserId(), booking.getPerformanceId(), hold.getHoldToken(), seatIds));
-    }
-
-    // 결제 쪽 좌석 상실 환불과 같은 모양이다. 키 순서까지 맞춘다
-    private String refundPayload(BookingPayment payment) {
-        return jsonMapper.writeValueAsString(jsonMapper.createObjectNode()
-                .put("paymentId", payment.paymentId())
-                .put("orderId", payment.orderId()));
     }
 }

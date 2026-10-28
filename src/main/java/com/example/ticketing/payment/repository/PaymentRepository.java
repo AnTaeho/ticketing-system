@@ -21,9 +21,6 @@ public interface PaymentRepository extends JpaRepository<Payment, Long> {
     @Query(value = "SELECT hold_id FROM booking_payment WHERE id = :id", nativeQuery = true)
     Optional<Long> findHoldIdById(@Param("id") long id);
 
-    @Query(value = "SELECT id FROM booking_payment WHERE hold_id = :holdId", nativeQuery = true)
-    Optional<Long> findIdByHoldId(@Param("holdId") long holdId);
-
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query(value = """
             UPDATE booking_payment

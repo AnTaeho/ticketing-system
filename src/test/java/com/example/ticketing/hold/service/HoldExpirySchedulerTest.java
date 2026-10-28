@@ -50,7 +50,7 @@ class HoldExpirySchedulerTest {
         when(expiryTransaction.claimAndExpire(BATCH))
                 .thenReturn(List.of(new HoldExpiry(1L, withSeats), new HoldExpiry(2L, seatsTaken)));
 
-        scheduler.scan();
+        scheduler.run();
 
         verify(gate).release(withSeats);
         verify(gate).setReholdCooldown(withSeats, COOLDOWN);
@@ -64,7 +64,7 @@ class HoldExpirySchedulerTest {
         scheduler = scheduler(false);
         when(expiryTransaction.claimAndExpire(BATCH)).thenReturn(holds(2));
 
-        scheduler.scan();
+        scheduler.run();
 
         verifyNoInteractions(gate);
         assertThat(expiredCount()).isEqualTo(2);
@@ -76,7 +76,7 @@ class HoldExpirySchedulerTest {
     void repeatsWhileFull() {
         when(expiryTransaction.claimAndExpire(BATCH)).thenReturn(holds(BATCH), holds(BATCH), holds(1));
 
-        scheduler.scan();
+        scheduler.run();
 
         verify(expiryTransaction, times(3)).claimAndExpire(BATCH);
         assertThat(expiredCount()).isEqualTo(BATCH * 2 + 1);
@@ -87,7 +87,7 @@ class HoldExpirySchedulerTest {
     void stopsAtMaxRounds() {
         when(expiryTransaction.claimAndExpire(BATCH)).thenReturn(holds(BATCH));
 
-        scheduler.scan();
+        scheduler.run();
 
         verify(expiryTransaction, times(HoldExpiryScheduler.MAX_ROUNDS)).claimAndExpire(BATCH);
         assertThat(expiredCount()).isEqualTo(BATCH * HoldExpiryScheduler.MAX_ROUNDS);
@@ -98,7 +98,7 @@ class HoldExpirySchedulerTest {
     void emptyRunsOnce() {
         when(expiryTransaction.claimAndExpire(BATCH)).thenReturn(List.of());
 
-        scheduler.scan();
+        scheduler.run();
 
         verify(expiryTransaction, times(1)).claimAndExpire(BATCH);
         assertThat(expiredCount()).isZero();

@@ -26,7 +26,7 @@ public class SchedulerLease {
         try {
             acquired = RedisFailures.translate(() -> redis.opsForValue().setIfAbsent(key, instanceId, ttl));
         } catch (RedisUnavailableException e) {
-            log.debug("[booking lease] {} 리스 획득 실패, 이번 주기는 건너뛴다: {}", name, RedisFailures.describe(e));
+            log.debug("[lease] 리스 획득 실패, 이번 주기는 건너뛴다 name={} cause={}", name, RedisFailures.describe(e));
             return false;
         }
         if (!Boolean.TRUE.equals(acquired)) {
@@ -45,7 +45,7 @@ public class SchedulerLease {
         try {
             RedisFailures.translate(() -> redis.execute(RedisScripts.RELEASE, List.of(key), instanceId));
         } catch (RedisUnavailableException e) {
-            log.debug("[booking lease] {} 리스 해제 실패, TTL로 풀린다: {}", name, RedisFailures.describe(e));
+            log.debug("[lease] 리스 해제 실패, TTL로 풀린다 name={} cause={}", name, RedisFailures.describe(e));
         }
     }
 }

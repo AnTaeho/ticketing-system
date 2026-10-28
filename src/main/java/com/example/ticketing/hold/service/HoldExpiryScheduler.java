@@ -30,7 +30,7 @@ public class HoldExpiryScheduler {
     }
 
     @Scheduled(fixedDelayString = "${ticketing.hold.expiry-scan-ms}")
-    public void scan() {
+    public void run() {
         int total = 0;
         for (int round = 0; round < MAX_ROUNDS; round++) {
             List<HoldExpiry> expired = expiryTransaction.claimAndExpire(batchSize);
@@ -41,7 +41,7 @@ public class HoldExpiryScheduler {
             }
         }
         if (total > 0) {
-            log.debug("[booking expiry] 만료 처리 {}건", total);
+            log.debug("[expiry] 만료 처리 count={}", total);
         }
     }
 

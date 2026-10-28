@@ -9,8 +9,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.example.ticketing.hold.dto.CreateHoldCommand;
 import com.example.ticketing.hold.dto.CreateHoldResult;
 import com.example.ticketing.hold.service.SeatHoldService;
-import com.example.ticketing.outbox.dto.ClaimedOutboxTask;
-import com.example.ticketing.outbox.service.TicketIssuedHandler;
+import com.example.ticketing.notification.service.TicketIssuedHandler;
+import com.example.ticketing.outbox.dto.TicketIssuedPayload;
 import com.example.ticketing.payment.dto.PayCommand;
 import com.example.ticketing.payment.dto.PaymentOutcome;
 import com.example.ticketing.payment.dto.PaymentResult;
@@ -23,7 +23,6 @@ import com.example.ticketing.support.StubPgClient;
 import com.example.ticketing.support.StubPgTestConfig;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
@@ -213,10 +212,9 @@ class BookingApiControllerTest {
 
     // 워커 대신 발권 핸들러를 바로 불러 알림을 만든다
     private void issueTicket(long bookingId) {
-        Map<String, Object> task = jdbcTemplate.queryForMap("SELECT id, payload FROM outbox_task "
-                + "WHERE task_type = 'TICKET_ISSUED' AND aggregate_id = ?", bookingId);
-        ticketIssuedHandler.handle(new ClaimedOutboxTask(((Number) task.get("id")).longValue(), "TICKET_ISSUED",
-                bookingId, (String) task.get("payload"), 0, null));
+        String payload = jdbcTemplate.queryForObject("SELECT payload FROM outbox_task "
+                + "WHERE task_type = 'TICKET_ISSUED' AND aggregate_id = ?", String.class, bookingId);
+        ticketIssuedHandler.handle(jsonMapper.readValue(payload, TicketIssuedPayload.class));
     }
 
     private JsonNode body(MvcResult result) throws Exception {

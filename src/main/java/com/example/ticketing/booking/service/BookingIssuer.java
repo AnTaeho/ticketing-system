@@ -8,14 +8,13 @@ import com.example.ticketing.booking.repository.BookingRepository;
 import com.example.ticketing.booking.repository.BookingSeatRepository;
 import com.example.ticketing.common.jdbc.RowCounts;
 import com.example.ticketing.outbox.domain.OutboxTaskType;
+import com.example.ticketing.outbox.dto.TicketIssuedPayload;
 import com.example.ticketing.outbox.service.OutboxWriter;
-import java.util.Map;
 import java.util.Optional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
-import tools.jackson.databind.json.JsonMapper;
 
 // 결제 기능이 부르는 예매 발급 창구. 예매 기능은 결제 기능을 부르지 않는다
 @Component
@@ -25,7 +24,6 @@ public class BookingIssuer {
     private final BookingRepository bookingRepository;
     private final BookingSeatRepository bookingSeatRepository;
     private final OutboxWriter outboxWriter;
-    private final JsonMapper jsonMapper;
 
     // 좌석 SOLD 전이와 같은 트랜잭션이어야 좌석 사본과 발권 작업이 확정과 함께 남는다
     @Transactional(propagation = Propagation.MANDATORY)
@@ -35,8 +33,7 @@ public class BookingIssuer {
                 command.totalAmount()));
         RowCounts.requireExactly(bookingSeatRepository.copySoldSeats(booking.getId(), command.holdId()),
                 command.seatCount(), "booking_seat");
-        outboxWriter.write(OutboxTaskType.TICKET_ISSUED, booking.getId(),
-                jsonMapper.writeValueAsString(Map.of("bookingId", booking.getId())));
+        outboxWriter.write(OutboxTaskType.TICKET_ISSUED, booking.getId(), new TicketIssuedPayload(booking.getId()));
         return new IssuedBooking(booking.getId(), booking.getBookingNumber());
     }
 

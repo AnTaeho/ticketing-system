@@ -82,7 +82,7 @@ public class SeatGateReflector {
             call.run();
         } catch (RedisUnavailableException e) {
             failure.increment();
-            failureWarn.warn("[booking gate] Redis 반영 실패 op={}, performanceId={}: {}", op, hold.performanceId(),
+            failureWarn.warn("[gate] Redis 반영 실패 op={} performanceId={} cause={}", op, hold.performanceId(),
                     RedisFailures.describe(e));
         }
     }

@@ -1,4 +1,4 @@
-package com.example.ticketing.ops.service;
+package com.example.ticketing.hold.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -19,16 +19,12 @@ import com.example.ticketing.common.time.DbClock;
 import com.example.ticketing.hold.dto.CreateHoldCommand;
 import com.example.ticketing.hold.dto.CreateHoldResult;
 import com.example.ticketing.hold.repository.SeatGateRedisStore;
+import com.example.ticketing.hold.repository.SeatHoldJdbcRepository;
 import com.example.ticketing.hold.repository.SeatHoldRepository;
-import com.example.ticketing.hold.service.HoldMetrics;
-import com.example.ticketing.hold.service.SeatGateReflector;
-import com.example.ticketing.hold.service.SeatHoldService;
-import com.example.ticketing.hold.service.SeatHoldTransaction;
 import com.example.ticketing.payment.client.PgResult;
 import com.example.ticketing.payment.dto.PayCommand;
 import com.example.ticketing.payment.dto.PaymentOutcome;
 import com.example.ticketing.payment.dto.PaymentResult;
-import com.example.ticketing.payment.repository.PaymentRepository;
 import com.example.ticketing.payment.service.PaymentService;
 import com.example.ticketing.queue.service.QueueService;
 import com.example.ticketing.seat.repository.SeatJdbcRepository;
@@ -71,9 +67,9 @@ import org.springframework.jdbc.core.namedparam.SqlParameterSource;
 // 대사 빈은 테스트에서 꺼져 있어 new로 만들고 대상 메서드를 직접 부른다. 막 생긴 키로 보이지 않게 키 TTL을 당겨 둔다
 @IntegrationTest
 @Import(StubPgTestConfig.class)
-class OrphanGateKeyReconcilerTest {
+class GateKeyReconcileSchedulerTest {
 
-    private static final String LEASE_KEY = "sched:lease:" + OrphanGateKeyReconciler.LEASE;
+    private static final String LEASE_KEY = "sched:lease:" + GateKeyReconcileScheduler.LEASE;
 
     @Autowired
     private SeatJdbcRepository seatJdbcRepository;
@@ -102,7 +98,7 @@ class OrphanGateKeyReconcilerTest {
     @Autowired
     private SeatRepository seatRepository;
     @Autowired
-    private PaymentRepository paymentRepository;
+    private SeatHoldJdbcRepository seatHoldJdbcRepository;
     @Autowired
     private QueueService queueService;
     @Autowired
@@ -152,9 +148,9 @@ class OrphanGateKeyReconcilerTest {
         double seatBefore = removedCount("seat");
         double userHoldBefore = removedCount("userhold");
 
-        OrphanGateKeyReconciler.Removed removed = reconciler().reconcileOne(pid);
+        GateKeyReconcileScheduler.Removed removed = reconciler().reconcileOne(pid);
 
-        assertThat(removed).isEqualTo(new OrphanGateKeyReconciler.Removed(1, 1));
+        assertThat(removed).isEqualTo(new GateKeyReconcileScheduler.Removed(1, 1));
         assertThat(redis.hasKey(seatKey)).isFalse();
         assertThat(redis.hasKey(userHoldKey)).isFalse();
         assertThat(redis.hasKey(lookalike)).isTrue();
@@ -175,7 +171,7 @@ class OrphanGateKeyReconcilerTest {
         assertThat(paid.outcome()).isEqualTo(PaymentOutcome.CONFIRMED);
         String token = holdToken(hold.holdId());
 
-        assertThat(reconciler().reconcileOne(pid)).isEqualTo(new OrphanGateKeyReconciler.Removed(0, 0));
+        assertThat(reconciler().reconcileOne(pid)).isEqualTo(new GateKeyReconcileScheduler.Removed(0, 0));
         seats.forEach(seatId -> assertThat(redis.opsForValue().get(RedisKeys.seat(pid, seatId))).isEqualTo(token));
 
         // 취소 뒤 좌석 키 해제가 실패한 상황: 반영 빈을 목으로 바꿔 삼킨다
@@ -183,7 +179,7 @@ class OrphanGateKeyReconcilerTest {
                 .cancel(userId, paid.bookingId());
         seats.forEach(seatId -> assertThat(redis.hasKey(RedisKeys.seat(pid, seatId))).isTrue());
 
-        assertThat(reconciler().reconcileOne(pid)).isEqualTo(new OrphanGateKeyReconciler.Removed(2, 0));
+        assertThat(reconciler().reconcileOne(pid)).isEqualTo(new GateKeyReconcileScheduler.Removed(2, 0));
         assertThat(cleaner.gateKeys(pid)).isEmpty();
     }
 
@@ -210,7 +206,7 @@ class OrphanGateKeyReconcilerTest {
                 RedisKeys.seat(pid, ids.get(1))).forEach(this::age);
         double skippedBefore = skippedCount();
 
-        assertThat(reconciler().reconcileOne(pid)).isEqualTo(new OrphanGateKeyReconciler.Removed(0, 0));
+        assertThat(reconciler().reconcileOne(pid)).isEqualTo(new GateKeyReconcileScheduler.Removed(0, 0));
 
         assertThat(skippedCount() - skippedBefore).isZero();
         assertThat(cleaner.gateKeys(pid)).containsExactlyInAnyOrderElementsOf(keys);
@@ -242,7 +238,7 @@ class OrphanGateKeyReconcilerTest {
         String stale = RedisKeys.seat(pid, target.get(1));
 
         // 대사가 키를 읽은 뒤 DB를 보기 전에 B의 선점 키가 같은 이름으로 들어온 상황
-        OrphanGateKeyReconciler.Removed removed = reconciler(hooked((sql, queriedPid) -> {
+        GateKeyReconcileScheduler.Removed removed = reconciler(hooked((sql, queriedPid) -> {
             if (sql.contains("JOIN seat s")) {
                 setAged(raced, tokenB);
             }
@@ -270,7 +266,7 @@ class OrphanGateKeyReconcilerTest {
         redis.opsForValue().set(longer, UUID.randomUUID().toString(), holdTtl.plusMinutes(1));
         double skippedBefore = skippedCount();
 
-        assertThat(reconciler().reconcileOne(pid)).isEqualTo(new OrphanGateKeyReconciler.Removed(2, 0));
+        assertThat(reconciler().reconcileOne(pid)).isEqualTo(new GateKeyReconcileScheduler.Removed(2, 0));
 
         assertThat(skippedCount() - skippedBefore).isEqualTo(1);
         assertThat(redis.hasKey(fresh)).isTrue();
@@ -298,7 +294,7 @@ class OrphanGateKeyReconcilerTest {
         assertThat(holdStatus(released.holdId())).isEqualTo("RELEASED");
         assertThat(cleaner.gateKeys(pid)).hasSize(4);
 
-        assertThat(reconciler().reconcileOne(pid)).isEqualTo(new OrphanGateKeyReconciler.Removed(2, 2));
+        assertThat(reconciler().reconcileOne(pid)).isEqualTo(new GateKeyReconcileScheduler.Removed(2, 2));
         assertThat(cleaner.gateKeys(pid)).isEmpty();
     }
 
@@ -315,17 +311,17 @@ class OrphanGateKeyReconcilerTest {
                 sleep(300);
             }
         });
-        List<OrphanGateKeyReconciler> instances = List.of(
+        List<GateKeyReconcileScheduler> instances = List.of(
                 reconciler(new SchedulerLease(bookingRedis, new InstanceId()), slow, catalogOf(List.of(pid))),
                 reconciler(new SchedulerLease(bookingRedis, new InstanceId()), slow, catalogOf(List.of(pid))));
         ExecutorService pool = Executors.newFixedThreadPool(instances.size());
         CountDownLatch start = new CountDownLatch(1);
         try {
             List<Future<?>> futures = new ArrayList<>();
-            for (OrphanGateKeyReconciler instance : instances) {
+            for (GateKeyReconcileScheduler instance : instances) {
                 futures.add(pool.submit(() -> {
                     start.await();
-                    instance.reconcile();
+                    instance.run();
                     return null;
                 }));
             }
@@ -362,7 +358,7 @@ class OrphanGateKeyReconcilerTest {
             }
         };
 
-        reconciler(namedJdbc, freshCatalog).reconcile();
+        reconciler(namedJdbc, freshCatalog).run();
 
         assertThat(redis.hasKey(openKey)).isFalse();
         assertThat(redis.hasKey(notOpenKey)).isTrue();
@@ -395,26 +391,28 @@ class OrphanGateKeyReconcilerTest {
         long pid = newPerformance();
         TicketingRedis dead = TestTicketingRedis.connectTo("localhost", closedPort(), properties);
         try {
-            OrphanGateKeyReconciler reconciler = new OrphanGateKeyReconciler(lease, dead, namedJdbc,
-                    catalogOf(List.of(pid, pid)), properties, meterRegistry);
-            assertThatCode(reconciler::reconcile).doesNotThrowAnyException();
+            GateKeyReconcileScheduler reconciler = new GateKeyReconcileScheduler(lease, new SeatGateRedisStore(dead),
+                    new SeatHoldJdbcRepository(namedJdbc), catalogOf(List.of(pid, pid)), System::nanoTime, properties,
+                    meterRegistry);
+            assertThatCode(reconciler::run).doesNotThrowAnyException();
         } finally {
             dead.destroy();
         }
         assertThat(redis.hasKey(LEASE_KEY)).isFalse();
     }
 
-    private OrphanGateKeyReconciler reconciler() {
+    private GateKeyReconcileScheduler reconciler() {
         return reconciler(namedJdbc, seatCatalog);
     }
 
-    private OrphanGateKeyReconciler reconciler(NamedParameterJdbcTemplate jdbc, SeatCatalog catalog) {
+    private GateKeyReconcileScheduler reconciler(NamedParameterJdbcTemplate jdbc, SeatCatalog catalog) {
         return reconciler(lease, jdbc, catalog);
     }
 
-    private OrphanGateKeyReconciler reconciler(SchedulerLease schedulerLease, NamedParameterJdbcTemplate jdbc,
-                                               SeatCatalog catalog) {
-        return new OrphanGateKeyReconciler(schedulerLease, bookingRedis, jdbc, catalog, properties, meterRegistry);
+    private GateKeyReconcileScheduler reconciler(SchedulerLease schedulerLease, NamedParameterJdbcTemplate jdbc,
+                                                 SeatCatalog catalog) {
+        return new GateKeyReconcileScheduler(schedulerLease, new SeatGateRedisStore(bookingRedis),
+                new SeatHoldJdbcRepository(jdbc), catalog, System::nanoTime, properties, meterRegistry);
     }
 
     // 대사의 DB 조회 직전에 끼어들 지점. 두 번째 인자는 조회하는 회차 ID다
@@ -451,7 +449,7 @@ class OrphanGateKeyReconcilerTest {
                 p.outbox(), p.ops(), p.pg(), p.fakePg());
         SeatGateRedisStore offGate = mock(SeatGateRedisStore.class);
         return new SeatHoldService(seatCatalog, seatHoldTransaction, seatHoldRepository, seatRepository,
-                paymentRepository, dbClock, offGate, new SeatGateReflector(offGate, gateOff, meterRegistry,
+                seatHoldJdbcRepository, dbClock, offGate, new SeatGateReflector(offGate, gateOff, meterRegistry,
                 System::nanoTime), queueService, new HoldMetrics(meterRegistry), System::nanoTime, gateOff);
     }
 

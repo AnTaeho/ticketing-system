@@ -5,6 +5,7 @@ import com.example.ticketing.common.log.ThrottledWarn;
 import com.example.ticketing.common.metrics.Metrics.RebuildSource;
 import com.example.ticketing.common.redis.InstanceId;
 import com.example.ticketing.common.redis.RedisFailures;
+import com.example.ticketing.common.redis.RedisUnavailableException;
 import com.example.ticketing.seat.repository.SeatMapRedisStore;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -46,14 +47,16 @@ public class SeatMapSnapshotScheduler {
     }
 
     @Scheduled(fixedDelayString = "${ticketing.seatmap.snapshot-interval-ms}")
-    public void snapshot() {
+    public void run() {
         for (long performanceId : seatCatalog.openPerformanceIds()) {
             try {
                 snapshotOne(performanceId);
-            } catch (RuntimeException e) {
+            } catch (RedisUnavailableException e) {
                 // 회차 하나의 실패가 나머지 회차의 스냅샷을 막지 않게 한다
-                failureWarn.warn("[booking seatmap] 회차 {} 스냅샷 실패, 다음 회차로 넘어간다: {}", performanceId,
+                failureWarn.warn("[seatmap] 스냅샷 실패, 다음 회차로 넘어간다 performanceId={} cause={}", performanceId,
                         RedisFailures.describe(e));
+            } catch (RuntimeException e) {
+                log.warn("[seatmap] 스냅샷 실패, 다음 회차로 넘어간다 performanceId={}", performanceId, e);
             }
         }
     }

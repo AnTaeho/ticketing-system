@@ -97,7 +97,7 @@ public class HttpPgClient implements PgClient {
             result = PgResult.unknown(describe(e));
         }
         long elapsedMs = (nanoClock.getAsLong() - started) / 1_000_000;
-        log.debug("PG {} orderId={} result={} pgTxId={} elapsedMs={} detail={}",
+        log.debug("[pg] 호출 결과 op={} orderId={} result={} pgTxId={} elapsedMs={} detail={}",
                 operation, orderId, result.status(), result.pgTxId(), elapsedMs, result.detail());
         return result;
     }

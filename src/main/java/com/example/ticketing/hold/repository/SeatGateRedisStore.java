@@ -5,11 +5,18 @@ import com.example.ticketing.common.redis.RedisKeys;
 import com.example.ticketing.common.redis.RedisScripts;
 import com.example.ticketing.common.redis.TicketingRedis;
 import com.example.ticketing.hold.domain.GateHold;
+import com.example.ticketing.hold.domain.GateKeyEntry;
 import com.example.ticketing.hold.domain.GateResult;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
+import org.springframework.data.redis.core.Cursor;
+import org.springframework.data.redis.core.RedisCallback;
+import org.springframework.data.redis.core.ScanOptions;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 
@@ -17,6 +24,9 @@ import org.springframework.stereotype.Component;
 // Redis 장애는 RedisUnavailableException으로 던진다. 장애 정책은 호출자와 SeatGateReflector가 정한다
 @Component
 public class SeatGateRedisStore {
+
+    private static final long SCAN_COUNT = 200;
+    private static final int PIPELINE_BATCH = 200;
 
     private final StringRedisTemplate redis;
 
@@ -72,6 +82,43 @@ public class SeatGateRedisStore {
                         cooldown);
             }
         });
+    }
+
+    // 패턴에 맞는 키를 SCAN으로 모으고 값·PTTL을 파이프라인으로 읽는다. 그사이 사라진 키는 뺀다
+    public List<GateKeyEntry> scan(String pattern) {
+        return RedisFailures.translate(() -> {
+            Set<String> names = new LinkedHashSet<>();
+            try (Cursor<String> cursor = redis.scan(
+                    ScanOptions.scanOptions().match(pattern).count(SCAN_COUNT).build())) {
+                cursor.forEachRemaining(names::add);
+            }
+            List<String> all = List.copyOf(names);
+            List<GateKeyEntry> entries = new ArrayList<>();
+            for (int from = 0; from < all.size(); from += PIPELINE_BATCH) {
+                List<String> batch = all.subList(from, Math.min(from + PIPELINE_BATCH, all.size()));
+                List<Object> replies = redis.executePipelined((RedisCallback<Object>) connection -> {
+                    for (String name : batch) {
+                        byte[] raw = name.getBytes(StandardCharsets.UTF_8);
+                        connection.stringCommands().get(raw);
+                        connection.keyCommands().pTtl(raw);
+                    }
+                    return null;
+                });
+                for (int i = 0; i < batch.size(); i++) {
+                    String token = (String) replies.get(2 * i);
+                    if (token != null) {
+                        entries.add(new GateKeyEntry(batch.get(i), token, (Long) replies.get(2 * i + 1)));
+                    }
+                }
+            }
+            return entries;
+        });
+    }
+
+    // 값이 holdToken인 키만 지운다. 반환: 지운 키 수
+    public long releaseIfOwned(String holdToken, List<String> keys) {
+        Long removed = RedisFailures.translate(() -> redis.execute(RedisScripts.RELEASE, keys, holdToken));
+        return removed == null ? 0 : removed;
     }
 
     private static List<String> userHoldAndSeatKeys(GateHold hold) {

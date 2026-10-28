@@ -85,7 +85,7 @@ public class PaymentService {
             if (!sameKey && !ConstraintViolations.matches(e, Payment.UK_HOLD)) {
                 throw e;
             }
-            log.info("[booking payment] 결제 시작 유니크 위반 constraint={}, holdId={}",
+            log.info("[payment] 결제 시작 유니크 위반 constraint={} holdId={}",
                     sameKey ? Payment.UK_IDEMPOTENCY : Payment.UK_HOLD, holdId);
             Optional<PaymentStart> found = sameKey
                     ? paymentReader.findSameKeyAfterDuplicate(userId, key)

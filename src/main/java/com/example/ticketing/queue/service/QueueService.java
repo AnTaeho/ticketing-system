@@ -106,7 +106,7 @@ public class QueueService {
             consume(userId, performanceId, queueToken);
         } catch (RedisUnavailableException e) {
             consumeFailure.increment();
-            consumeWarn.warn("[booking queue] Redis 반영 실패 op={}, performanceId={}: {}",
+            consumeWarn.warn("[queue] Redis 반영 실패 op={} performanceId={} cause={}",
                     ReflectOp.QUEUE_CONSUME, performanceId, RedisFailures.describe(e));
         }
     }
@@ -138,7 +138,7 @@ public class QueueService {
     }
 
     private ApiException unavailable(String op, long performanceId, RedisUnavailableException e) {
-        unavailableWarn.warn("[booking queue] Redis 실패로 대기열을 막는다 op={}, performanceId={}: {}",
+        unavailableWarn.warn("[queue] Redis 실패로 대기열을 막는다 op={} performanceId={} cause={}",
                 op, performanceId, RedisFailures.describe(e));
         return new ApiException(ErrorCode.QUEUE_UNAVAILABLE);
     }

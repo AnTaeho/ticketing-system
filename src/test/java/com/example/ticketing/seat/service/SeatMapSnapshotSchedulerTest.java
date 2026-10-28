@@ -75,7 +75,7 @@ class SeatMapSnapshotSchedulerTest {
         SeatMapSnapshotScheduler b = scheduler(instanceB, catalogOf(List.of(pid)));
         double before = rebuilds();
 
-        a.snapshot();
+        a.run();
         assertThat(rebuilds() - before).isEqualTo(1.0);
         String first = store.get(pid);
         assertThat(jsonMapper.readTree(first).get("performanceId").asLong()).isEqualTo(pid);
@@ -83,18 +83,18 @@ class SeatMapSnapshotSchedulerTest {
         assertThat(redis().getExpire(RedisKeys.seatMap(pid), TimeUnit.MILLISECONDS))
                 .isPositive().isLessThanOrEqualTo(props.seatmap().snapshotTtl().toMillis());
 
-        b.snapshot();
+        b.run();
         assertThat(rebuilds() - before).isEqualTo(1.0);
         assertThat(store.get(pid)).isEqualTo(first);
 
-        a.snapshot();
+        a.run();
         assertThat(rebuilds() - before).isEqualTo(2.0);
         assertThat(redis().getExpire(RedisKeys.seatMapLease(pid), TimeUnit.MILLISECONDS))
                 .isPositive().isLessThanOrEqualTo(props.seatmap().leaseTtl().toMillis());
 
         // 리더가 멈춰 리스가 풀리면 다른 인스턴스가 이어받는다
         redis().delete(RedisKeys.seatMapLease(pid));
-        b.snapshot();
+        b.run();
         assertThat(rebuilds() - before).isEqualTo(3.0);
         assertThat(redis().opsForValue().get(RedisKeys.seatMapLease(pid))).isEqualTo(instanceB.value());
     }
@@ -115,7 +115,7 @@ class SeatMapSnapshotSchedulerTest {
             }
         };
 
-        scheduler(new InstanceId(), fresh).snapshot();
+        scheduler(new InstanceId(), fresh).run();
 
         assertThat(store.get(open)).isNotNull();
         assertThat(store.get(notYetOpen)).isNull();
@@ -131,7 +131,7 @@ class SeatMapSnapshotSchedulerTest {
         long healthy = openPerformance();
         redis().opsForHash().put(RedisKeys.seatMapLease(broken), "not", "a-string");
 
-        scheduler(new InstanceId(), catalogOf(List.of(broken, healthy))).snapshot();
+        scheduler(new InstanceId(), catalogOf(List.of(broken, healthy))).run();
 
         assertThat(store.get(broken)).isNull();
         assertThat(store.get(healthy)).isNotNull();
@@ -145,11 +145,12 @@ class SeatMapSnapshotSchedulerTest {
                 new SeatMapRedisStore(dead), new InstanceId(), System::nanoTime, props, meterRegistry);
         try (CapturedLogs logs = CapturedLogs.of(SeatMapSnapshotScheduler.class)) {
             for (int cycle = 0; cycle < 3; cycle++) {
-                scheduler.snapshot();
+                scheduler.run();
             }
 
             assertThat(logs.warnings()).hasSize(1);
-            assertThat(logs.warnings().get(0)).contains("회차 1 스냅샷 실패").contains("앞서 생략 0건");
+            assertThat(logs.warnings().get(0)).contains("스냅샷 실패").contains("performanceId=1")
+                    .contains("앞서 생략 0건");
         } finally {
             dead.destroy();
         }

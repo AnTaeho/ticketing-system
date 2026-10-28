@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.example.ticketing.outbox.domain.OutboxTaskType;
+import com.example.ticketing.outbox.dto.RefundRequestedPayload;
+import com.example.ticketing.outbox.dto.TicketIssuedPayload;
 import com.example.ticketing.support.IntegrationTest;
 import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
@@ -30,7 +32,8 @@ class OutboxWriterTest {
     void outsideTransactionFails() {
         long aggregateId = randomAggregateId();
 
-        assertThatThrownBy(() -> outboxWriter.write(OutboxTaskType.TICKET_ISSUED, aggregateId, "{}"))
+        assertThatThrownBy(() -> outboxWriter.write(OutboxTaskType.TICKET_ISSUED, aggregateId,
+                new TicketIssuedPayload(aggregateId)))
                 .isInstanceOf(IllegalTransactionStateException.class);
         assertThat(count(aggregateId)).isZero();
     }
@@ -42,19 +45,20 @@ class OutboxWriterTest {
         TransactionTemplate tx = new TransactionTemplate(transactionManager);
 
         Long id = tx.execute(s -> outboxWriter.write(OutboxTaskType.REFUND_REQUESTED, aggregateId,
-                "{\"paymentId\":" + aggregateId + "}"));
+                new RefundRequestedPayload(aggregateId, "order-1")));
 
         Map<String, Object> row = jdbcTemplate.queryForMap("SELECT task_type, aggregate_id, payload, status, attempt, "
                 + "locked_until, last_error, TIMESTAMPDIFF(MICROSECOND, next_attempt_at, NOW(6)) AS age_us "
                 + "FROM outbox_task WHERE id = ?", id);
         assertThat(row).containsEntry("task_type", "REFUND_REQUESTED").containsEntry("aggregate_id", aggregateId)
-                .containsEntry("payload", "{\"paymentId\":" + aggregateId + "}").containsEntry("status", "PENDING")
+                .containsEntry("payload", "{\"paymentId\":" + aggregateId + ",\"orderId\":\"order-1\"}")
+                .containsEntry("status", "PENDING")
                 .containsEntry("attempt", 0).containsEntry("locked_until", null).containsEntry("last_error", null);
         assertThat(((Number) row.get("age_us")).longValue()).isBetween(0L, 5_000_000L);
 
         long rolledBack = randomAggregateId();
         tx.executeWithoutResult(s -> {
-            outboxWriter.write(OutboxTaskType.TICKET_ISSUED, rolledBack, "{}");
+            outboxWriter.write(OutboxTaskType.TICKET_ISSUED, rolledBack, new TicketIssuedPayload(rolledBack));
             s.setRollbackOnly();
         });
         assertThat(count(rolledBack)).isZero();

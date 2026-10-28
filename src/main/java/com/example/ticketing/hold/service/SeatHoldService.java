@@ -18,8 +18,8 @@ import com.example.ticketing.hold.dto.HoldPlacement;
 import com.example.ticketing.hold.dto.HoldRelease;
 import com.example.ticketing.hold.dto.HoldSeatResult;
 import com.example.ticketing.hold.repository.SeatGateRedisStore;
+import com.example.ticketing.hold.repository.SeatHoldJdbcRepository;
 import com.example.ticketing.hold.repository.SeatHoldRepository;
-import com.example.ticketing.payment.repository.PaymentRepository;
 import com.example.ticketing.queue.service.QueueService;
 import com.example.ticketing.seat.dto.SeatSelection;
 import com.example.ticketing.seat.repository.SeatRepository;
@@ -41,7 +41,7 @@ public class SeatHoldService {
     private final SeatHoldTransaction seatHoldTransaction;
     private final SeatHoldRepository seatHoldRepository;
     private final SeatRepository seatRepository;
-    private final PaymentRepository paymentRepository;
+    private final SeatHoldJdbcRepository seatHoldJdbcRepository;
     private final DbClock dbClock;
     private final SeatGateRedisStore gateStore;
     private final SeatGateReflector gateReflector;
@@ -54,14 +54,14 @@ public class SeatHoldService {
 
     public SeatHoldService(SeatCatalog seatCatalog, SeatHoldTransaction seatHoldTransaction,
                            SeatHoldRepository seatHoldRepository, SeatRepository seatRepository,
-                           PaymentRepository paymentRepository, DbClock dbClock, SeatGateRedisStore gateStore,
+                           SeatHoldJdbcRepository seatHoldJdbcRepository, DbClock dbClock, SeatGateRedisStore gateStore,
                            SeatGateReflector gateReflector, QueueService queueService, HoldMetrics metrics,
                            LongSupplier nanoClock, TicketingProperties properties) {
         this.seatCatalog = seatCatalog;
         this.seatHoldTransaction = seatHoldTransaction;
         this.seatHoldRepository = seatHoldRepository;
         this.seatRepository = seatRepository;
-        this.paymentRepository = paymentRepository;
+        this.seatHoldJdbcRepository = seatHoldJdbcRepository;
         this.dbClock = dbClock;
         this.gateStore = gateStore;
         this.gateReflector = gateReflector;
@@ -100,7 +100,7 @@ public class SeatHoldService {
                 .orElseThrow(() -> new ApiException(ErrorCode.HOLD_NOT_FOUND, Map.of("holdId", holdId)));
         return HoldDetailResult.from(hold,
                 seatRepository.findByPerformanceIdAndHoldIdOrderByIdAsc(hold.getPerformanceId(), holdId),
-                paymentRepository.findIdByHoldId(holdId).orElse(null), dbClock.now());
+                seatHoldJdbcRepository.findPaymentIdByHoldId(holdId).orElse(null), dbClock.now());
     }
 
     // 이미 잡아 둔 자리가 있다는 응답을 받은 화면이 결제 화면으로 이어 가려고 쓴다
@@ -211,7 +211,7 @@ public class SeatHoldService {
     }
 
     private void warnRedisFailure(String op, long performanceId, RedisUnavailableException e) {
-        redisWarn.warn("[booking hold] Redis 실패 op={}, performanceId={}: {}", op, performanceId,
+        redisWarn.warn("[hold] Redis 실패 op={} performanceId={} cause={}", op, performanceId,
                 RedisFailures.describe(e));
     }
 

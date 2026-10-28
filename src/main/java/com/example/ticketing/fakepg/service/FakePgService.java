@@ -2,21 +2,18 @@ package com.example.ticketing.fakepg.service;
 
 import com.example.ticketing.common.config.TicketingProperties;
 import com.example.ticketing.common.jdbc.RowCounts;
+import com.example.ticketing.common.jdbc.SqlIntervals;
 import com.example.ticketing.fakepg.domain.FakePgDecider;
 import com.example.ticketing.fakepg.domain.FakePgOrder;
 import com.example.ticketing.fakepg.domain.FakePgScenario;
 import com.example.ticketing.fakepg.domain.FakePgStatus;
 import com.example.ticketing.fakepg.dto.FakePgReply;
-import com.example.ticketing.fakepg.repository.FakePgOrderRepository;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.PlatformTransactionManager;
-import org.springframework.transaction.TransactionDefinition;
-import org.springframework.transaction.support.TransactionTemplate;
 
-// 쓰기마다 짧은 트랜잭션을 따로 열고, 지연은 PROCESSING 커밋 뒤 트랜잭션 밖에서 기다린다
+// 지연은 PROCESSING 커밋 뒤 트랜잭션 밖에서 기다린다
 @Service
 public class FakePgService {
 
@@ -24,31 +21,25 @@ public class FakePgService {
     private static final int MAX_CANCEL_ATTEMPTS = 3;
     private static final String PG_TX_ID_PREFIX = "fpg_";
 
-    private final FakePgOrderRepository repository;
+    private final FakePgTransaction transaction;
+    private final FakePgReader reader;
     private final FakePgDecider decider;
     private final FakePgSleeper sleeper;
-    private final TransactionTemplate write;
-    private final TransactionTemplate freshRead;
     private final long staleMicros;
 
-    public FakePgService(FakePgOrderRepository repository, FakePgDecider decider, FakePgSleeper sleeper,
-                         PlatformTransactionManager transactionManager, TicketingProperties properties) {
-        this.repository = repository;
+    public FakePgService(FakePgTransaction transaction, FakePgReader reader, FakePgDecider decider,
+                         FakePgSleeper sleeper, TicketingProperties properties) {
+        this.transaction = transaction;
+        this.reader = reader;
         this.decider = decider;
         this.sleeper = sleeper;
-        this.staleMicros = properties.fakePg().slowDelay().plus(properties.fakePg().staleMargin()).toNanos() / 1_000;
-        this.write = new TransactionTemplate(transactionManager);
-        this.write.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
-        this.write.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
-        this.freshRead = new TransactionTemplate(transactionManager);
-        this.freshRead.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
-        this.freshRead.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
-        this.freshRead.setReadOnly(true);
+        TicketingProperties.FakePg fakePg = properties.fakePg();
+        this.staleMicros = SqlIntervals.micros(fakePg.slowDelay().plus(fakePg.staleMargin()));
     }
 
     public FakePgReply approve(String orderId, int amount, FakePgScenario scenario) {
         try {
-            write.executeWithoutResult(status -> repository.insertProcessing(orderId, amount));
+            transaction.insertProcessing(orderId, amount);
         } catch (DataIntegrityViolationException e) {
             return FakePgReply.toRepeatedApprove(find(orderId).orElseThrow(() -> e));
         }
@@ -56,9 +47,9 @@ public class FakePgService {
         FakePgDecider.Plan plan = decider.plan(scenario);
         pause(plan.delayMs());
         String pgTxId = plan.approve() ? PG_TX_ID_PREFIX + UUID.randomUUID().toString().replace("-", "") : null;
-        Integer updated = write.execute(status -> plan.approve()
-                ? repository.approveProcessing(orderId, pgTxId)
-                : repository.declineProcessing(orderId));
+        int updated = plan.approve()
+                ? transaction.processingToApproved(orderId, pgTxId)
+                : transaction.processingToDeclined(orderId);
         if (RowCounts.changedOne(updated)) {
             return FakePgReply.of(orderId, plan.approve() ? FakePgStatus.APPROVED : FakePgStatus.DECLINED, pgTxId);
         }
@@ -77,7 +68,7 @@ public class FakePgService {
             Optional<FakePgOrder> row = findSettlingStale(orderId);
             if (row.isEmpty()) {
                 try {
-                    write.executeWithoutResult(status -> repository.insertCancelled(orderId));
+                    transaction.insertCancelled(orderId);
                     return FakePgReply.of(orderId, FakePgStatus.CANCELLED, null);
                 } catch (DataIntegrityViolationException e) {
                     // 같은 주문의 승인·취소가 먼저 넣은 행을 다시 읽어 규칙을 적용한다
@@ -88,7 +79,7 @@ public class FakePgService {
             if (tx.getStatus() != FakePgStatus.APPROVED) {
                 return FakePgReply.of(tx);
             }
-            Integer updated = write.execute(status -> repository.cancelApproved(orderId));
+            int updated = transaction.approvedToCancelled(orderId);
             if (RowCounts.changedOne(updated)) {
                 return FakePgReply.of(orderId, FakePgStatus.CANCELLED, tx.getPgTxId());
             }
@@ -102,12 +93,12 @@ public class FakePgService {
         if (row.isEmpty() || row.get().getStatus() != FakePgStatus.PROCESSING) {
             return row;
         }
-        Integer updated = write.execute(status -> repository.declineStaleProcessing(orderId, staleMicros));
+        int updated = transaction.staleProcessingToDeclined(orderId, staleMicros);
         return RowCounts.changedOne(updated) ? find(orderId) : row;
     }
 
     private Optional<FakePgOrder> find(String orderId) {
-        return freshRead.execute(status -> repository.findById(orderId));
+        return reader.find(orderId);
     }
 
     // 끊겨도 PROCESSING에 묶이지 않게 결과는 쓰고 끊김 표시만 되살린다

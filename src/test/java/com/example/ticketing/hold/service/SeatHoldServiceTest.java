@@ -22,7 +22,7 @@ import com.example.ticketing.hold.dto.CreateHoldResult;
 import com.example.ticketing.hold.dto.HoldPlacement;
 import com.example.ticketing.hold.repository.SeatGateRedisStore;
 import com.example.ticketing.hold.repository.SeatHoldRepository;
-import com.example.ticketing.payment.repository.PaymentRepository;
+import com.example.ticketing.hold.repository.SeatHoldJdbcRepository;
 import com.example.ticketing.queue.service.QueueService;
 import com.example.ticketing.seat.dto.SeatSelection;
 import com.example.ticketing.seat.repository.SeatRepository;
@@ -58,7 +58,7 @@ class SeatHoldServiceTest {
     @Autowired
     private SeatRepository seatRepository;
     @Autowired
-    private PaymentRepository paymentRepository;
+    private SeatHoldJdbcRepository seatHoldJdbcRepository;
     @Autowired
     private QueueService queueService;
     @Autowired
@@ -231,7 +231,7 @@ class SeatHoldServiceTest {
                 p.seatmap(), p.outbox(), p.ops(), p.pg(), p.fakePg());
         SeatGateRedisStore openGate = mock(SeatGateRedisStore.class);
         when(openGate.tryHold(any(), any())).thenReturn(GateResult.ok());
-        return new SeatHoldService(seatCatalog, tx, seatHoldRepository, seatRepository, paymentRepository, clock,
+        return new SeatHoldService(seatCatalog, tx, seatHoldRepository, seatRepository, seatHoldJdbcRepository, clock,
                 openGate, new SeatGateReflector(openGate, noQueue, meterRegistry, System::nanoTime), queueService,
                 new HoldMetrics(meterRegistry), System::nanoTime, noQueue);
     }

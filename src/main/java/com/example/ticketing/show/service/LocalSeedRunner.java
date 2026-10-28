@@ -41,7 +41,7 @@ public class LocalSeedRunner implements ApplicationRunner {
 
     public void seed() {
         if (showRepository.existsByTitle(SEED_TITLE)) {
-            log.info("[booking seed] 시드 공연이 이미 있어 건너뛴다: {}", SEED_TITLE);
+            log.info("[seed] 시드 공연이 이미 있어 건너뛴다 title={}", SEED_TITLE);
             return;
         }
         LocalDateTime now = dbClock.now().withNano(0);
@@ -49,7 +49,7 @@ public class LocalSeedRunner implements ApplicationRunner {
                 new CreateShowCommand(SEED_TITLE, SEED_VENUE, SEED_DESCRIPTION)).showId();
         long openNow = createPerformance(showId, now.minusMinutes(1), now.toLocalDate().plusDays(3).atTime(SHOW_TIME));
         long openSoon = createPerformance(showId, now.plusMinutes(10), now.toLocalDate().plusDays(4).atTime(SHOW_TIME));
-        log.info("[booking seed] 시드 공연 생성: showId={}, 예매 중 회차={}, 10분 뒤 열리는 회차={}",
+        log.info("[seed] 시드 공연을 만들었다 showId={} openPerformanceId={} openSoonPerformanceId={}",
                 showId, openNow, openSoon);
     }
 
