@@ -7,9 +7,10 @@ import com.example.ticketing.common.redis.RedisKeys;
 import com.example.ticketing.common.redis.TicketingRedis;
 import com.example.ticketing.common.time.DbClock;
 import com.example.ticketing.queue.domain.QueueTokenStatus;
-import com.example.ticketing.queue.dto.QueueEntered;
+import com.example.ticketing.queue.dto.QueueEnterResult;
 import com.example.ticketing.queue.service.QueueService;
-import com.example.ticketing.show.dto.NewPerformance;
+import com.example.ticketing.show.dto.CreatePerformanceCommand;
+import com.example.ticketing.show.dto.CreateShowCommand;
 import com.example.ticketing.show.service.ShowAdminService;
 import com.example.ticketing.user.domain.AppUser;
 import com.example.ticketing.user.repository.AppUserRepository;
@@ -35,7 +36,8 @@ public class Fixtures {
     }
 
     public long newShow() {
-        return showAdminService.createShow("테스트 공연 " + shortId(), "테스트 공연장", null);
+        return showAdminService.createShow(new CreateShowCommand("테스트 공연 " + shortId(), "테스트 공연장", null))
+                .showId();
     }
 
     // 지금 예매 중인 회차: openAt = DB 시각 - 1분, startsAt = +1일
@@ -47,7 +49,8 @@ public class Fixtures {
     public long newPerformance(long showId, LocalDateTime openAt, LocalDateTime startsAt,
                                int sections, int rows, int seatsPerRow) {
         return showAdminService.createPerformance(
-                new NewPerformance(showId, startsAt, openAt, null, sections, rows, seatsPerRow)).performanceId();
+                        new CreatePerformanceCommand(showId, startsAt, openAt, null, sections, rows, seatsPerRow))
+                .performanceId();
     }
 
     public long newUser() {
@@ -56,21 +59,21 @@ public class Fixtures {
 
     // 운영과 같은 진입 경로로 처리열 토큰을 받는다. 바로 입장하지 못하면 테스트가 실패한다
     public String admit(long performanceId, long userId) {
-        QueueEntered entered = queueService.enter(performanceId, userId);
+        QueueEnterResult entered = queueService.enter(userId, performanceId);
         assertThat(entered.status())
                 .as("회차 %d 사용자 %d가 처리열에 바로 들어가야 한다", performanceId, userId)
                 .isEqualTo(QueueTokenStatus.PROCESSING);
-        return entered.token();
+        return entered.queueToken();
     }
 
     // 정원을 넘겨 입장시킨다(동시성 테스트용). 부를 때마다 새 토큰을 처리열에 직접 넣는다
     public String forceAdmit(long performanceId, long userId) {
-        String member = userId + "." + UUID.randomUUID();
+        String queueToken = userId + "." + UUID.randomUUID();
         long expireAt = System.currentTimeMillis() + properties.queue().processingTokenTtl().toMillis();
-        bookingRedis.template().opsForZSet().add(RedisKeys.queueProcessing(performanceId), member, expireAt);
-        bookingRedis.template().opsForValue().set(RedisKeys.queueUser(performanceId, userId), member,
+        bookingRedis.template().opsForZSet().add(RedisKeys.queueProcessing(performanceId), queueToken, expireAt);
+        bookingRedis.template().opsForValue().set(RedisKeys.queueUser(userId, performanceId), queueToken,
                 properties.queue().waitingTokenTtl());
-        return member;
+        return queueToken;
     }
 
     private static String shortId() {

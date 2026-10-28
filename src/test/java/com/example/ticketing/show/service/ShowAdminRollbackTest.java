@@ -7,7 +7,7 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.doThrow;
 
 import com.example.ticketing.seat.repository.SeatBulkInserter;
-import com.example.ticketing.show.dto.NewPerformance;
+import com.example.ticketing.show.dto.CreatePerformanceCommand;
 import com.example.ticketing.show.repository.PerformanceRepository;
 import com.example.ticketing.support.Fixtures;
 import com.example.ticketing.support.IntegrationTest;
@@ -42,7 +42,7 @@ class ShowAdminRollbackTest {
                 .when(spy).insert(anyLong(), anyList());
 
         assertThatThrownBy(() -> showAdminService.createPerformance(
-                new NewPerformance(showId, now.plusDays(1), now, null, 1, 1, 1)))
+                new CreatePerformanceCommand(showId, now.plusDays(1), now, null, 1, 1, 1)))
                 .isInstanceOf(DataIntegrityViolationException.class);
         assertThat(performanceRepository.findByShowIdOrderByStartsAtAsc(showId)).isEmpty();
     }

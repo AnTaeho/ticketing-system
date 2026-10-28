@@ -2,8 +2,9 @@ package com.example.ticketing.hold.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.example.ticketing.hold.dto.HoldCreated;
-import com.example.ticketing.hold.service.HoldExpiryTransaction.ExpiredHold;
+import com.example.ticketing.hold.dto.CreateHoldCommand;
+import com.example.ticketing.hold.dto.CreateHoldResult;
+import com.example.ticketing.hold.dto.HoldExpiry;
 import com.example.ticketing.support.Fixtures;
 import com.example.ticketing.support.IntegrationTest;
 import com.example.ticketing.support.RedisKeyCleaner;
@@ -52,7 +53,7 @@ class HoldExpiryTransactionTest {
         Map<Long, List<Long>> seatsByHold = new HashMap<>();
         for (int i = 0; i < holdCount; i++) {
             List<Long> seats = List.of(ids.get(i * 2), ids.get(i * 2 + 1));
-            HoldCreated created = holdAsNewUser(pid, seats);
+            CreateHoldResult created = holdAsNewUser(pid, seats);
             seatsByHold.put(created.holdId(), seats);
         }
         expirePerformance(pid);
@@ -61,7 +62,7 @@ class HoldExpiryTransactionTest {
         CountDownLatch ready = new CountDownLatch(threadCount);
         CountDownLatch start = new CountDownLatch(1);
         CountDownLatch done = new CountDownLatch(threadCount);
-        List<ExpiredHold> returned = new CopyOnWriteArrayList<>();
+        List<HoldExpiry> returned = new CopyOnWriteArrayList<>();
         List<Throwable> unexpected = new CopyOnWriteArrayList<>();
         AtomicInteger calls = new AtomicInteger();
         for (int t = 0; t < threadCount; t++) {
@@ -69,7 +70,7 @@ class HoldExpiryTransactionTest {
                 try {
                     ready.countDown();
                     start.await();
-                    List<ExpiredHold> batch;
+                    List<HoldExpiry> batch;
                     do {
                         batch = expiryTransaction.claimAndExpire(BATCH);
                         calls.incrementAndGet();
@@ -92,13 +93,13 @@ class HoldExpiryTransactionTest {
         assertThat(finished).isTrue();
         unexpected.forEach(Throwable::printStackTrace);
         assertThat(unexpected).isEmpty();
-        List<Long> allReturnedIds = returned.stream().map(ExpiredHold::holdId).toList();
+        List<Long> allReturnedIds = returned.stream().map(HoldExpiry::holdId).toList();
         assertThat(new HashSet<>(allReturnedIds)).hasSameSizeAs(allReturnedIds);
 
-        List<ExpiredHold> mine = returned.stream().filter(h -> h.performanceId() == pid).toList();
-        assertThat(mine).extracting(ExpiredHold::holdId).containsExactlyInAnyOrderElementsOf(seatsByHold.keySet());
+        List<HoldExpiry> mine = returned.stream().filter(h -> h.gate().performanceId() == pid).toList();
+        assertThat(mine).extracting(HoldExpiry::holdId).containsExactlyInAnyOrderElementsOf(seatsByHold.keySet());
         assertThat(mine).allSatisfy(h ->
-                assertThat(h.seatIds()).containsExactlyInAnyOrderElementsOf(seatsByHold.get(h.holdId())));
+                assertThat(h.gate().seatIds()).containsExactlyInAnyOrderElementsOf(seatsByHold.get(h.holdId())));
         assertThat(jdbcTemplate.queryForList(
                 "SELECT DISTINCT status FROM seat_hold WHERE performance_id = ?", String.class, pid))
                 .containsExactly("EXPIRED");
@@ -113,13 +114,13 @@ class HoldExpiryTransactionTest {
     void payingIsNotExpired() {
         long pid = fixtures.newPerformance(1, 1, 4);
         List<Long> target = seatIds(pid).subList(0, 2);
-        HoldCreated hold = holdAsNewUser(pid, target);
+        CreateHoldResult hold = holdAsNewUser(pid, target);
         jdbcTemplate.update("UPDATE seat_hold SET status = 'PAYING', expires_at = NOW(6) - INTERVAL 1 MINUTE "
                 + "WHERE id = ?", hold.holdId());
 
-        List<ExpiredHold> returned = drain();
+        List<HoldExpiry> returned = drain();
 
-        assertThat(returned).extracting(ExpiredHold::holdId).doesNotContain(hold.holdId());
+        assertThat(returned).extracting(HoldExpiry::holdId).doesNotContain(hold.holdId());
         assertThat(holdStatus(hold.holdId())).isEqualTo("PAYING");
         assertThat(heldSeats(pid, hold.holdId())).containsExactlyElementsOf(target);
     }
@@ -129,21 +130,21 @@ class HoldExpiryTransactionTest {
     void lateExpiryKeepsOthersSeats() {
         long pid = fixtures.newPerformance(1, 1, 4);
         List<Long> target = seatIds(pid).subList(0, 2);
-        HoldCreated holdA = holdAsNewUser(pid, target);
+        CreateHoldResult holdA = holdAsNewUser(pid, target);
         expireHold(holdA.holdId());
         // 게이트 키는 선점과 같은 TTL이라 만료 시각이 지나면 함께 사라진다. DB 시각만 당겼으므로 키도 지운다
         redisKeyCleaner.clean(pid);
-        HoldCreated holdB = holdAsNewUser(pid, target);
+        CreateHoldResult holdB = holdAsNewUser(pid, target);
 
-        List<ExpiredHold> returned = drain();
+        List<HoldExpiry> returned = drain();
 
         assertThat(holdStatus(holdA.holdId())).isEqualTo("EXPIRED");
         assertThat(holdStatus(holdB.holdId())).isEqualTo("HELD");
         assertThat(heldSeats(pid, holdB.holdId())).containsExactlyElementsOf(target);
         assertThat(returned).filteredOn(h -> h.holdId() == holdA.holdId())
                 .singleElement()
-                .satisfies(h -> assertThat(h.seatIds()).isEmpty());
-        assertThat(returned).extracting(ExpiredHold::holdId).doesNotContain(holdB.holdId());
+                .satisfies(h -> assertThat(h.gate().seatIds()).isEmpty());
+        assertThat(returned).extracting(HoldExpiry::holdId).doesNotContain(holdB.holdId());
         redisKeyCleaner.clean(pid);
     }
 
@@ -152,11 +153,11 @@ class HoldExpiryTransactionTest {
     void notYetExpiredIsUntouched() {
         long pid = fixtures.newPerformance(1, 1, 4);
         List<Long> target = seatIds(pid).subList(0, 2);
-        HoldCreated hold = holdAsNewUser(pid, target);
+        CreateHoldResult hold = holdAsNewUser(pid, target);
 
-        List<ExpiredHold> returned = drain();
+        List<HoldExpiry> returned = drain();
 
-        assertThat(returned).extracting(ExpiredHold::holdId).doesNotContain(hold.holdId());
+        assertThat(returned).extracting(HoldExpiry::holdId).doesNotContain(hold.holdId());
         assertThat(holdStatus(hold.holdId())).isEqualTo("HELD");
         assertThat(heldSeats(pid, hold.holdId())).containsExactlyElementsOf(target);
     }
@@ -169,9 +170,9 @@ class HoldExpiryTransactionTest {
     }
 
     // 다른 테스트가 남긴 만료 hold가 있을 수 있어 빌 때까지 치운다
-    private List<ExpiredHold> drain() {
-        List<ExpiredHold> all = new ArrayList<>();
-        List<ExpiredHold> batch;
+    private List<HoldExpiry> drain() {
+        List<HoldExpiry> all = new ArrayList<>();
+        List<HoldExpiry> batch;
         do {
             batch = expiryTransaction.claimAndExpire(BATCH);
             all.addAll(batch);
@@ -203,8 +204,8 @@ class HoldExpiryTransactionTest {
         return jdbcTemplate.queryForList("SELECT id FROM seat WHERE performance_id = ? ORDER BY id", Long.class, pid);
     }
 
-    private HoldCreated holdAsNewUser(long pid, List<Long> seats) {
+    private CreateHoldResult holdAsNewUser(long pid, List<Long> seats) {
         long userId = fixtures.newUser();
-        return seatHoldService.hold(userId, pid, seats, fixtures.admit(pid, userId));
+        return seatHoldService.hold(new CreateHoldCommand(userId, pid, seats, fixtures.admit(pid, userId)));
     }
 }

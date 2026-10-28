@@ -1,7 +1,7 @@
 package com.example.ticketing.show.controller;
 
-import com.example.ticketing.show.dto.ShowDetail;
-import com.example.ticketing.show.dto.ShowSummary;
+import com.example.ticketing.show.dto.ShowDetailResponse;
+import com.example.ticketing.show.dto.ShowSummaryResponse;
 import com.example.ticketing.show.service.ShowQueryService;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
@@ -18,12 +18,12 @@ public class ShowApiController {
     private final ShowQueryService showQueryService;
 
     @GetMapping
-    public List<ShowSummary> list() {
-        return showQueryService.listShows();
+    public List<ShowSummaryResponse> list() {
+        return showQueryService.listShows().stream().map(ShowSummaryResponse::from).toList();
     }
 
     @GetMapping("/{showId}")
-    public ShowDetail get(@PathVariable Long showId) {
-        return showQueryService.getShow(showId);
+    public ShowDetailResponse get(@PathVariable Long showId) {
+        return ShowDetailResponse.from(showQueryService.getShow(showId));
     }
 }

@@ -1,8 +1,11 @@
 package com.example.ticketing.queue.repository;
 
+import com.example.ticketing.common.redis.RedisFailures;
 import com.example.ticketing.common.redis.RedisKeys;
 import com.example.ticketing.common.redis.RedisScripts;
 import com.example.ticketing.common.redis.TicketingRedis;
+import com.example.ticketing.queue.domain.QueueEntry;
+import com.example.ticketing.queue.domain.QueuePlacement;
 import com.example.ticketing.queue.domain.QueueTokenStatus;
 import java.time.Duration;
 import java.util.List;
@@ -10,69 +13,77 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 
 // waiting 점수는 진입 시각이다. 만료는 진입 시각 + waiting 수명으로 판정해 FIFO 순서와 만료를 한 점수로 다룬다
+// Redis 장애는 RedisUnavailableException으로 던진다
 @Component
 public class QueueRedisStore {
 
     private final StringRedisTemplate redis;
 
-    public QueueRedisStore(TicketingRedis bookingRedis) {
-        this.redis = bookingRedis.template();
+    public QueueRedisStore(TicketingRedis ticketingRedis) {
+        this.redis = ticketingRedis.template();
     }
 
-    // 이미 살아 있는 토큰이 있으면 그 토큰과 상태를 돌려준다
-    public Entered enter(long performanceId, long userId, String member, long nowMs,
-                         long processingExpireAtMs, int capacity, long waitingTtlMs) {
-        List<?> reply = redis.execute(RedisScripts.QUEUE_ENTER,
-                List.of(RedisKeys.queueProcessing(performanceId), RedisKeys.queueWaiting(performanceId),
-                        RedisKeys.queueUser(performanceId, userId)),
-                member, String.valueOf(nowMs), String.valueOf(processingExpireAtMs), String.valueOf(nowMs),
-                String.valueOf(capacity), String.valueOf(waitingTtlMs));
+    public QueuePlacement enter(QueueEntry entry) {
+        long pid = entry.performanceId();
+        List<?> reply = RedisFailures.translate(() -> redis.execute(RedisScripts.QUEUE_ENTER,
+                List.of(RedisKeys.queueProcessing(pid), RedisKeys.queueWaiting(pid),
+                        RedisKeys.queueUser(entry.userId(), pid)),
+                entry.queueToken(), String.valueOf(entry.enteredAtMs()), String.valueOf(entry.processingExpireAtMs()),
+                String.valueOf(entry.enteredAtMs()), String.valueOf(entry.capacity()),
+                String.valueOf(entry.waitingTtlMs())));
         if (reply == null || reply.size() != 2) {
             throw new IllegalStateException("queue_enter.lua 응답이 예상과 다르다: " + reply);
         }
-        return new Entered(QueueTokenStatus.valueOf(String.valueOf(reply.get(0))), String.valueOf(reply.get(1)));
+        return new QueuePlacement(QueueTokenStatus.valueOf(String.valueOf(reply.get(0))),
+                String.valueOf(reply.get(1)));
     }
 
     // 반환: 승격한 수
     public long promote(long performanceId, long processingExpireAtMs, int capacity) {
-        Long moved = redis.execute(RedisScripts.QUEUE_PROMOTE,
+        Long moved = RedisFailures.translate(() -> redis.execute(RedisScripts.QUEUE_PROMOTE,
                 List.of(RedisKeys.queueProcessing(performanceId), RedisKeys.queueWaiting(performanceId)),
-                String.valueOf(processingExpireAtMs), String.valueOf(capacity));
+                String.valueOf(processingExpireAtMs), String.valueOf(capacity)));
         return moved == null ? 0 : moved;
     }
 
     // 0부터 센다. 없으면 null
-    public Long waitingRank(long performanceId, String member) {
-        return redis.opsForZSet().rank(RedisKeys.queueWaiting(performanceId), member);
+    public Long waitingRank(long performanceId, String queueToken) {
+        return RedisFailures.translate(
+                () -> redis.opsForZSet().rank(RedisKeys.queueWaiting(performanceId), queueToken));
     }
 
-    public Double waitingScore(long performanceId, String member) {
-        return redis.opsForZSet().score(RedisKeys.queueWaiting(performanceId), member);
+    public Double waitingScore(long performanceId, String queueToken) {
+        return RedisFailures.translate(
+                () -> redis.opsForZSet().score(RedisKeys.queueWaiting(performanceId), queueToken));
     }
 
-    public Double processingScore(long performanceId, String member) {
-        return redis.opsForZSet().score(RedisKeys.queueProcessing(performanceId), member);
+    public Double processingScore(long performanceId, String queueToken) {
+        return RedisFailures.translate(
+                () -> redis.opsForZSet().score(RedisKeys.queueProcessing(performanceId), queueToken));
     }
 
     // 반환: processing에서 지운 수
-    public long consume(long performanceId, long userId, String member) {
-        Long removed = redis.execute(RedisScripts.QUEUE_CONSUME,
-                List.of(RedisKeys.queueProcessing(performanceId), RedisKeys.queueUser(performanceId, userId)), member);
+    public long consume(long userId, long performanceId, String queueToken) {
+        Long removed = RedisFailures.translate(() -> redis.execute(RedisScripts.QUEUE_CONSUME,
+                List.of(RedisKeys.queueProcessing(performanceId), RedisKeys.queueUser(userId, performanceId)),
+                queueToken));
         return removed == null ? 0 : removed;
     }
 
     // 반환: 두 열에서 지운 수의 합
     public long purgeExpired(long performanceId, long nowMs, long waitingTtlMs) {
-        Long processing = redis.opsForZSet().removeRangeByScore(
-                RedisKeys.queueProcessing(performanceId), Double.NEGATIVE_INFINITY, nowMs);
-        Long waiting = redis.opsForZSet().removeRangeByScore(
-                RedisKeys.queueWaiting(performanceId), Double.NEGATIVE_INFINITY, nowMs - waitingTtlMs);
-        return (processing == null ? 0 : processing) + (waiting == null ? 0 : waiting);
+        return RedisFailures.translate(() -> {
+            Long processing = redis.opsForZSet().removeRangeByScore(
+                    RedisKeys.queueProcessing(performanceId), Double.NEGATIVE_INFINITY, nowMs);
+            Long waiting = redis.opsForZSet().removeRangeByScore(
+                    RedisKeys.queueWaiting(performanceId), Double.NEGATIVE_INFINITY, nowMs - waitingTtlMs);
+            return (processing == null ? 0 : processing) + (waiting == null ? 0 : waiting);
+        });
     }
 
     // 명/초. 기록이 없으면 0
     public double rate(long performanceId) {
-        String raw = redis.opsForValue().get(RedisKeys.queueRate(performanceId));
+        String raw = RedisFailures.translate(() -> redis.opsForValue().get(RedisKeys.queueRate(performanceId)));
         if (raw == null) {
             return 0;
         }
@@ -84,9 +95,7 @@ public class QueueRedisStore {
     }
 
     public void saveRate(long performanceId, double rate, Duration ttl) {
-        redis.opsForValue().set(RedisKeys.queueRate(performanceId), String.valueOf(rate), ttl);
-    }
-
-    public record Entered(QueueTokenStatus status, String member) {
+        RedisFailures.translate(
+                () -> redis.opsForValue().set(RedisKeys.queueRate(performanceId), String.valueOf(rate), ttl));
     }
 }

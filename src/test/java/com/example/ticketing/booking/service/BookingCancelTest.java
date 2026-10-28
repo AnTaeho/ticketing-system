@@ -1,9 +1,7 @@
 package com.example.ticketing.booking.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.anyList;
-import static org.mockito.ArgumentMatchers.anyLong;
-import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -18,8 +16,11 @@ import com.example.ticketing.common.error.ApiException;
 import com.example.ticketing.common.error.ErrorCode;
 import com.example.ticketing.common.redis.RedisKeys;
 import com.example.ticketing.common.redis.TicketingRedis;
-import com.example.ticketing.hold.dto.HoldCreated;
+import com.example.ticketing.hold.domain.GateHold;
+import com.example.ticketing.hold.dto.CreateHoldCommand;
+import com.example.ticketing.hold.dto.CreateHoldResult;
 import com.example.ticketing.hold.repository.SeatGateRedisStore;
+import com.example.ticketing.hold.service.SeatGateReflector;
 import com.example.ticketing.hold.service.SeatHoldService;
 import com.example.ticketing.outbox.service.OutboxClaimTransaction;
 import com.example.ticketing.outbox.service.OutboxWorker;
@@ -147,7 +148,8 @@ class BookingCancelTest {
                 c.bookingId)).isEqualTo(2);
 
         long other = fixtures.newUser();
-        HoldCreated retaken = seatHoldService.hold(other, c.pid, c.seatIds, fixtures.admit(c.pid, other));
+        CreateHoldResult retaken = seatHoldService.hold(
+                new CreateHoldCommand(other, c.pid, c.seatIds, fixtures.admit(c.pid, other)));
 
         c.seatIds.forEach(seatId -> assertThat(db.seat(seatId)).containsEntry("status", "HELD")
                 .containsEntry("hold_id", retaken.holdId()));
@@ -162,7 +164,8 @@ class BookingCancelTest {
 
         CancelResponse first = bookingService.cancel(c.userId, c.bookingId);
         long other = fixtures.newUser();
-        HoldCreated retaken = seatHoldService.hold(other, c.pid, c.seatIds, fixtures.admit(c.pid, other));
+        CreateHoldResult retaken = seatHoldService.hold(
+                new CreateHoldCommand(other, c.pid, c.seatIds, fixtures.admit(c.pid, other)));
         LocalDateTime cancelledAt = cancelledAt(c.bookingId);
         CancelResponse second = bookingService.cancel(c.userId, c.bookingId);
 
@@ -274,21 +277,21 @@ class BookingCancelTest {
     @DisplayName("게이트: OFF면 취소해도 Redis를 부르지 않고, ON이면 실제로 취소한 호출만 좌석 키를 지운다")
     void gateReflection() {
         SeatGateRedisStore offGate = mock(SeatGateRedisStore.class);
-        BookingService gateOff = new BookingService(bookingTransaction, viewReader, offGate, withGate(false));
+        BookingService gateOff = new BookingService(bookingTransaction, viewReader, reflector(offGate, false));
         Confirmed off = confirmed(1);
         gateOff.cancel(off.userId, off.bookingId);
         verifyNoInteractions(offGate);
         assertThat(db.seat(off.seatIds.get(0))).containsEntry("status", "AVAILABLE");
 
         SeatGateRedisStore onGate = mock(SeatGateRedisStore.class);
-        BookingService gateOn = new BookingService(bookingTransaction, viewReader, onGate, withGate(true));
+        BookingService gateOn = new BookingService(bookingTransaction, viewReader, reflector(onGate, true));
         Confirmed on = confirmed(2);
         gateOn.cancel(on.userId, on.bookingId);
-        verify(onGate).releaseSeatsOnlyQuietly(on.pid, on.seatIds, on.holdToken);
+        verify(onGate).releaseSeatsOnly(new GateHold(on.userId, on.pid, on.holdToken, on.seatIds));
 
         SeatGateRedisStore againGate = mock(SeatGateRedisStore.class);
-        new BookingService(bookingTransaction, viewReader, againGate, withGate(true)).cancel(on.userId, on.bookingId);
-        verify(againGate, never()).releaseSeatsOnlyQuietly(anyLong(), anyList(), anyString());
+        new BookingService(bookingTransaction, viewReader, reflector(againGate, true)).cancel(on.userId, on.bookingId);
+        verify(againGate, never()).releaseSeatsOnly(any());
     }
 
     // 결제 승인까지 마친 예매. 좌석은 A구역 1열 1번부터 seatCount석
@@ -297,7 +300,8 @@ class BookingCancelTest {
         performances.add(pid);
         long userId = fixtures.newUser();
         List<Long> seatIds = db.seatIds(pid).subList(0, seatCount);
-        HoldCreated hold = seatHoldService.hold(userId, pid, seatIds, fixtures.admit(pid, userId));
+        CreateHoldResult hold = seatHoldService.hold(
+                new CreateHoldCommand(userId, pid, seatIds, fixtures.admit(pid, userId)));
         PaymentResponse paid = paymentService.pay(userId, hold.holdId(), UUID.randomUUID().toString(),
                 Optional.empty());
         assertThat(paid.status()).isEqualTo(PaymentResponse.Status.CONFIRMED);
@@ -320,6 +324,10 @@ class BookingCancelTest {
                 + "locked_until = IF(status = 'PROCESSING', '2999-12-31 00:00:00', locked_until) "
                 + "WHERE status IN ('PENDING', 'PROCESSING') "
                 + "AND NOT (task_type = 'REFUND_REQUESTED' AND aggregate_id = ?)", c.paymentId);
+    }
+
+    private SeatGateReflector reflector(SeatGateRedisStore store, boolean gateEnabled) {
+        return new SeatGateReflector(store, withGate(gateEnabled), meterRegistry, System::nanoTime);
     }
 
     private TicketingProperties withGate(boolean enabled) {

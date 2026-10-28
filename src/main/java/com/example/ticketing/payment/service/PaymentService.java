@@ -5,7 +5,8 @@ import com.example.ticketing.common.error.ApiException;
 import com.example.ticketing.common.error.ErrorCode;
 import com.example.ticketing.common.jdbc.ConstraintViolations;
 import com.example.ticketing.common.web.HttpNames;
-import com.example.ticketing.hold.repository.SeatGateRedisStore;
+import com.example.ticketing.hold.domain.GateHold;
+import com.example.ticketing.hold.service.SeatGateReflector;
 import com.example.ticketing.payment.client.PgClient;
 import com.example.ticketing.payment.client.PgResult;
 import com.example.ticketing.payment.client.PgScenario;
@@ -32,19 +33,17 @@ public class PaymentService {
 
     private final PaymentTransaction paymentTransaction;
     private final PgClient pgClient;
-    private final SeatGateRedisStore gate;
-    private final boolean gateEnabled;
+    private final SeatGateReflector gate;
     private final Duration gateKeyMargin;
     private final PaymentGateReflector reflector;
 
     public PaymentService(PaymentTransaction paymentTransaction, PgClient pgClient,
-                          SeatGateRedisStore gate, TicketingProperties properties) {
+                          SeatGateReflector gate, TicketingProperties properties) {
         this.paymentTransaction = paymentTransaction;
         this.pgClient = pgClient;
         this.gate = gate;
-        this.gateEnabled = properties.gate().enabled();
         this.gateKeyMargin = properties.payment().gateKeyMargin();
-        this.reflector = new PaymentGateReflector(gate, gateEnabled);
+        this.reflector = new PaymentGateReflector(gate);
     }
 
     public PaymentResponse pay(long userId, long holdId, String idempotencyKey, Optional<PgScenario> scenario) {
@@ -56,10 +55,8 @@ public class PaymentService {
         Started started = (Started) start;
 
         // 게이트 키가 결제 중에 풀리지 않게 결제 마감 뒤까지 늘린다
-        if (gateEnabled) {
-            Duration ttl = Duration.between(started.dbNow(), started.payDeadline()).plus(gateKeyMargin);
-            gate.extendQuietly(started.performanceId(), userId, started.seatIds(), started.holdToken(), ttl);
-        }
+        Duration ttl = Duration.between(started.dbNow(), started.payDeadline()).plus(gateKeyMargin);
+        gate.extend(new GateHold(userId, started.performanceId(), started.holdToken(), started.seatIds()), ttl);
 
         PgResult pg = pgClient.approve(started.orderId(), started.amount(), scenario);
         PaymentSettlement settlement = switch (pg.status()) {

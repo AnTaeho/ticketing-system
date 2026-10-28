@@ -14,20 +14,22 @@ public class TicketingRedisHealthIndicator implements HealthIndicator {
 
     static final Status DEGRADED = new Status("DEGRADED", "Redis를 읽지 못해 DB 판정으로 동작 중");
 
-    private final TicketingRedis bookingRedis;
+    private final TicketingRedis ticketingRedis;
 
-    public TicketingRedisHealthIndicator(TicketingRedis bookingRedis) {
-        this.bookingRedis = bookingRedis;
+    public TicketingRedisHealthIndicator(TicketingRedis ticketingRedis) {
+        this.ticketingRedis = ticketingRedis;
     }
 
     // 예매 연결의 짧은 타임아웃으로 PING해 장애 때도 바로 답한다
     @Override
     public Health health() {
         try {
-            bookingRedis.template().execute((RedisCallback<String>) RedisConnection::ping);
+            RedisFailures.translate(
+                    () -> ticketingRedis.template().execute((RedisCallback<String>) RedisConnection::ping));
             return Health.up().build();
         } catch (RuntimeException e) {
-            return Health.status(DEGRADED).withDetail("error", e.toString()).build();
+            // Redis 장애가 아닌 실패도 서버를 빼지 않도록 DEGRADED로 답한다
+            return Health.status(DEGRADED).withDetail("error", RedisFailures.describe(e)).build();
         }
     }
 }

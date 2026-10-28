@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.example.ticketing.common.config.TicketingProperties;
 import com.example.ticketing.common.error.ApiException;
 import com.example.ticketing.common.error.ErrorCode;
+import com.example.ticketing.common.redis.RedisUnavailableException;
 import com.example.ticketing.common.redis.TestTicketingRedis;
 import com.example.ticketing.common.redis.TicketingRedis;
 import com.example.ticketing.common.time.DbClock;
@@ -14,6 +15,7 @@ import com.example.ticketing.seat.service.SeatCatalog;
 import com.example.ticketing.support.CapturedLogs;
 import com.example.ticketing.support.Fixtures;
 import com.example.ticketing.support.IntegrationTest;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.io.IOException;
 import java.net.ServerSocket;
 import java.time.Clock;
@@ -31,6 +33,8 @@ class QueueFailureTest {
     private static final long USER = 7_200_000_001L;
 
     @Autowired
+    private MeterRegistry meterRegistry;
+    @Autowired
     private TicketingProperties props;
     @Autowired
     private SeatCatalog seatCatalog;
@@ -46,7 +50,7 @@ class QueueFailureTest {
     void setUp() throws IOException {
         deadRedis = TestTicketingRedis.connectTo("localhost", closedPort(), props);
         deadService = new QueueService(new QueueRedisStore(deadRedis), seatCatalog, dbClock, Clock.systemDefaultZone(),
-                System::nanoTime, props);
+                System::nanoTime, props, meterRegistry);
     }
 
     @AfterEach
@@ -59,11 +63,11 @@ class QueueFailureTest {
     void enterAndStatusFailClosed() {
         long pid = fixtures.newPerformance(1, 1, 1);
 
-        assertThatThrownBy(() -> deadService.enter(pid, USER))
+        assertThatThrownBy(() -> deadService.enter(USER, pid))
                 .isInstanceOf(ApiException.class)
                 .extracting(e -> ((ApiException) e).getCode())
                 .isEqualTo(ErrorCode.QUEUE_UNAVAILABLE);
-        assertThatThrownBy(() -> deadService.status(pid, USER, USER + ".token"))
+        assertThatThrownBy(() -> deadService.status(USER, pid, USER + ".token"))
                 .isInstanceOf(ApiException.class)
                 .extracting(e -> ((ApiException) e).getCode())
                 .isEqualTo(ErrorCode.QUEUE_UNAVAILABLE);
@@ -76,7 +80,7 @@ class QueueFailureTest {
 
         try (CapturedLogs logs = CapturedLogs.of(QueueService.class)) {
             for (int i = 0; i < 5; i++) {
-                assertThatThrownBy(() -> deadService.enter(pid, USER))
+                assertThatThrownBy(() -> deadService.enter(USER, pid))
                         .isInstanceOf(ApiException.class)
                         .extracting(e -> ((ApiException) e).getCode())
                         .isEqualTo(ErrorCode.QUEUE_UNAVAILABLE);
@@ -88,10 +92,11 @@ class QueueFailureTest {
     }
 
     @Test
-    @DisplayName("isAdmitted는 Redis 예외를 그대로 던진다(선점 쪽에서 fail-open 처리)")
+    @DisplayName("isAdmitted는 Redis 장애를 원인을 담은 RedisUnavailableException으로 던진다(선점 쪽에서 fail-open 처리)")
     void isAdmittedThrows() {
-        assertThatThrownBy(() -> deadService.isAdmitted(1L, USER + ".token", USER))
-                .isInstanceOf(DataAccessException.class);
+        assertThatThrownBy(() -> deadService.isAdmitted(USER, 1L, USER + ".token"))
+                .isInstanceOf(RedisUnavailableException.class)
+                .hasCauseInstanceOf(DataAccessException.class);
     }
 
     private static int closedPort() throws IOException {

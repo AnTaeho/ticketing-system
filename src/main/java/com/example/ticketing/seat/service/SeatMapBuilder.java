@@ -2,11 +2,12 @@ package com.example.ticketing.seat.service;
 
 import com.example.ticketing.common.metrics.Metrics;
 import com.example.ticketing.common.metrics.Metrics.Tag;
+import com.example.ticketing.seat.domain.SeatMapRow;
 import com.example.ticketing.seat.domain.SeatMapSnapshot;
 import com.example.ticketing.seat.domain.SeatMapSnapshot.Row;
 import com.example.ticketing.seat.domain.SeatMapSnapshot.SeatCell;
 import com.example.ticketing.seat.domain.SeatMapSnapshot.Section;
-import com.example.ticketing.seat.domain.SeatStatus;
+import com.example.ticketing.seat.repository.SeatJdbcRepository;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Clock;
@@ -14,7 +15,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import lombok.RequiredArgsConstructor;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -23,40 +23,28 @@ import tools.jackson.databind.json.JsonMapper;
 @RequiredArgsConstructor
 public class SeatMapBuilder {
 
-    private static final String SQL = """
-            SELECT id, section, row_no, seat_no, grade, price, status
-              FROM seat
-             WHERE performance_id = ?
-             ORDER BY section, row_no, seat_no""";
-
-    private final JdbcTemplate jdbcTemplate;
+    private final SeatJdbcRepository seatJdbcRepository;
     private final JsonMapper jsonMapper;
     private final Clock clock;
 
     // 좌석이 없으면 빈 Optional. 빈 좌석맵은 저장하거나 내보내지 않는다
     public Optional<String> build(long performanceId) {
         List<Section> sections = new ArrayList<>();
-        jdbcTemplate.query(SQL, rs -> {
-            String section = rs.getString("section");
-            int rowNo = rs.getInt("row_no");
+        for (SeatMapRow seat : seatJdbcRepository.findSeatMapRows(performanceId)) {
             Section lastSection = sections.isEmpty() ? null : sections.get(sections.size() - 1);
-            if (lastSection == null || !lastSection.section().equals(section)) {
-                lastSection = new Section(section, new ArrayList<>());
+            if (lastSection == null || !lastSection.section().equals(seat.section())) {
+                lastSection = new Section(seat.section(), new ArrayList<>());
                 sections.add(lastSection);
             }
             List<Row> rows = lastSection.rows();
             Row lastRow = rows.isEmpty() ? null : rows.get(rows.size() - 1);
-            if (lastRow == null || lastRow.rowNo() != rowNo) {
-                lastRow = new Row(rowNo, new ArrayList<>());
+            if (lastRow == null || lastRow.rowNo() != seat.rowNo()) {
+                lastRow = new Row(seat.rowNo(), new ArrayList<>());
                 rows.add(lastRow);
             }
-            lastRow.seats().add(new SeatCell(
-                    rs.getLong("id"),
-                    rs.getInt("seat_no"),
-                    rs.getString("grade"),
-                    rs.getInt("price"),
-                    SeatMapSnapshot.code(SeatStatus.valueOf(rs.getString("status")))));
-        }, performanceId);
+            lastRow.seats().add(new SeatCell(seat.id(), seat.seatNo(), seat.grade(), seat.price(),
+                    SeatMapSnapshot.code(seat.status())));
+        }
         if (sections.isEmpty()) {
             return Optional.empty();
         }

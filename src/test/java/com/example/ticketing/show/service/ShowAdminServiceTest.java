@@ -9,8 +9,8 @@ import com.example.ticketing.seat.domain.SeatGrade;
 import com.example.ticketing.seat.domain.SeatLayout.SeatSpec;
 import com.example.ticketing.seat.repository.SeatBulkInserter;
 import com.example.ticketing.show.domain.Performance;
-import com.example.ticketing.show.dto.NewPerformance;
-import com.example.ticketing.show.dto.PerformanceCreated;
+import com.example.ticketing.show.dto.CreatePerformanceCommand;
+import com.example.ticketing.show.dto.CreatePerformanceResult;
 import com.example.ticketing.show.repository.PerformanceRepository;
 import com.example.ticketing.support.Fixtures;
 import com.example.ticketing.support.IntegrationTest;
@@ -49,8 +49,8 @@ class ShowAdminServiceTest {
         LocalDateTime now = fixtures.dbNow();
 
         long started = System.nanoTime();
-        PerformanceCreated created = showAdminService.createPerformance(
-                new NewPerformance(showId, now.plusDays(1), now.minusMinutes(1), null, 4, 10, 20));
+        CreatePerformanceResult created = showAdminService.createPerformance(
+                new CreatePerformanceCommand(showId, now.plusDays(1), now.minusMinutes(1), null, 4, 10, 20));
         long elapsedMs = (System.nanoTime() - started) / 1_000_000;
         System.out.printf("[S1.2] 회차 1건 + 좌석 800행 생성: %d ms%n", elapsedMs);
 
@@ -130,8 +130,8 @@ class ShowAdminServiceTest {
         long showId = fixtures.newShow();
         LocalDateTime now = fixtures.dbNow();
 
-        assertInvalid(new NewPerformance(showId, now, now, null, 1, 1, 1));
-        assertInvalid(new NewPerformance(showId, now, now.plusMinutes(1), null, 1, 1, 1));
+        assertInvalid(new CreatePerformanceCommand(showId, now, now, null, 1, 1, 1));
+        assertInvalid(new CreatePerformanceCommand(showId, now, now.plusMinutes(1), null, 1, 1, 1));
         assertThat(performanceRepository.findByShowIdOrderByStartsAtAsc(showId)).isEmpty();
     }
 
@@ -142,14 +142,14 @@ class ShowAdminServiceTest {
         LocalDateTime now = fixtures.dbNow();
         LocalDateTime startsAt = now.plusDays(1);
 
-        assertInvalid(new NewPerformance(showId, startsAt, now, null, 0, 10, 20));
-        assertInvalid(new NewPerformance(showId, startsAt, now, null, 27, 10, 20));
-        assertInvalid(new NewPerformance(showId, startsAt, now, null, 4, 0, 20));
-        assertInvalid(new NewPerformance(showId, startsAt, now, null, 4, 31, 20));
-        assertInvalid(new NewPerformance(showId, startsAt, now, null, 4, 10, 0));
-        assertInvalid(new NewPerformance(showId, startsAt, now, null, 4, 10, 51));
-        assertInvalid(new NewPerformance(showId, startsAt, now, null, null, 10, 20));
-        assertInvalid(new NewPerformance(showId, startsAt, now, now, 4, 10, 20));
+        assertInvalid(new CreatePerformanceCommand(showId, startsAt, now, null, 0, 10, 20));
+        assertInvalid(new CreatePerformanceCommand(showId, startsAt, now, null, 27, 10, 20));
+        assertInvalid(new CreatePerformanceCommand(showId, startsAt, now, null, 4, 0, 20));
+        assertInvalid(new CreatePerformanceCommand(showId, startsAt, now, null, 4, 31, 20));
+        assertInvalid(new CreatePerformanceCommand(showId, startsAt, now, null, 4, 10, 0));
+        assertInvalid(new CreatePerformanceCommand(showId, startsAt, now, null, 4, 10, 51));
+        assertInvalid(new CreatePerformanceCommand(showId, startsAt, now, null, null, 10, 20));
+        assertInvalid(new CreatePerformanceCommand(showId, startsAt, now, now, 4, 10, 20));
         assertThat(performanceRepository.findByShowIdOrderByStartsAtAsc(showId)).isEmpty();
     }
 
@@ -159,19 +159,19 @@ class ShowAdminServiceTest {
         LocalDateTime now = fixtures.dbNow();
 
         assertThatThrownBy(() -> showAdminService.createPerformance(
-                new NewPerformance(Long.MAX_VALUE, now.plusDays(1), now, null, 1, 1, 1)))
+                new CreatePerformanceCommand(Long.MAX_VALUE, now.plusDays(1), now, null, 1, 1, 1)))
                 .isInstanceOf(ApiException.class)
                 .extracting(e -> ((ApiException) e).getCode())
                 .isEqualTo(ErrorCode.SHOW_NOT_FOUND);
     }
 
     private Performance create(LocalDateTime openAt, LocalDateTime startsAt, LocalDateTime gateCloseAt) {
-        PerformanceCreated created = showAdminService.createPerformance(
-                new NewPerformance(fixtures.newShow(), startsAt, openAt, gateCloseAt, 1, 1, 1));
+        CreatePerformanceResult created = showAdminService.createPerformance(
+                new CreatePerformanceCommand(fixtures.newShow(), startsAt, openAt, gateCloseAt, 1, 1, 1));
         return performanceRepository.findById(created.performanceId()).orElseThrow();
     }
 
-    private void assertInvalid(NewPerformance command) {
+    private void assertInvalid(CreatePerformanceCommand command) {
         assertThatThrownBy(() -> showAdminService.createPerformance(command))
                 .isInstanceOf(ApiException.class)
                 .extracting(e -> ((ApiException) e).getCode())

@@ -8,6 +8,7 @@ import com.example.ticketing.common.metrics.Metrics;
 import com.example.ticketing.common.metrics.Metrics.Tag;
 import com.example.ticketing.common.redis.RedisFailures;
 import com.example.ticketing.common.redis.RedisKeys;
+import com.example.ticketing.common.redis.RedisUnavailableException;
 import com.example.ticketing.common.redis.TicketingRedis;
 import com.example.ticketing.hold.domain.HoldStatus;
 import com.example.ticketing.ops.dto.OpsSummary;
@@ -98,14 +99,14 @@ public class OpsSummaryService {
              ORDER BY bp.id DESC LIMIT %d""".formatted(LIST_LIMIT);
 
     private final JdbcTemplate jdbcTemplate;
-    private final TicketingRedis bookingRedis;
+    private final TicketingRedis ticketingRedis;
     private final MeterRegistry meterRegistry;
     private final long stalePaymentMicros;
 
-    public OpsSummaryService(JdbcTemplate jdbcTemplate, TicketingRedis bookingRedis, MeterRegistry meterRegistry,
+    public OpsSummaryService(JdbcTemplate jdbcTemplate, TicketingRedis ticketingRedis, MeterRegistry meterRegistry,
                              TicketingProperties properties) {
         this.jdbcTemplate = jdbcTemplate;
-        this.bookingRedis = bookingRedis;
+        this.ticketingRedis = ticketingRedis;
         this.meterRegistry = meterRegistry;
         this.stalePaymentMicros = properties.ops().stalePaymentAfter().toNanos() / 1_000;
     }
@@ -171,18 +172,17 @@ public class OpsSummaryService {
     // 한 명령이라도 실패하면 Redis 칸 전체를 비운다. 연결이 죽었으면 나머지도 타임아웃까지 기다리게 되므로
     private RedisPart readRedis(long performanceId) {
         try {
-            StringRedisTemplate redis = bookingRedis.template();
-            Long waiting = redis.opsForZSet().zCard(RedisKeys.queueWaiting(performanceId));
-            Long processing = redis.opsForZSet().zCard(RedisKeys.queueProcessing(performanceId));
-            long seatKeys = countKeys(redis, RedisKeys.seatPattern(performanceId));
-            long userHoldKeys = countKeys(redis, RedisKeys.userHoldPattern(performanceId));
-            return new RedisPart(true, new Queue(orZero(waiting), orZero(processing)),
-                    new GateKeys(seatKeys, userHoldKeys));
-        } catch (RuntimeException e) {
-            if (!RedisFailures.isFailure(e)) {
-                throw e;
-            }
-            log.warn("[booking ops] 회차 {} Redis 집계 실패: {}", performanceId, e.toString());
+            return RedisFailures.translate(() -> {
+                StringRedisTemplate redis = ticketingRedis.template();
+                Long waiting = redis.opsForZSet().zCard(RedisKeys.queueWaiting(performanceId));
+                Long processing = redis.opsForZSet().zCard(RedisKeys.queueProcessing(performanceId));
+                long seatKeys = countKeys(redis, RedisKeys.seatPattern(performanceId));
+                long userHoldKeys = countKeys(redis, RedisKeys.userHoldPattern(performanceId));
+                return new RedisPart(true, new Queue(orZero(waiting), orZero(processing)),
+                        new GateKeys(seatKeys, userHoldKeys));
+            });
+        } catch (RedisUnavailableException e) {
+            log.warn("[booking ops] 회차 {} Redis 집계 실패: {}", performanceId, RedisFailures.describe(e));
             return new RedisPart(false, new Queue(null, null), new GateKeys(null, null));
         }
     }

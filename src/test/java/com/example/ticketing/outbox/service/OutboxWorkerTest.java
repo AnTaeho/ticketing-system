@@ -6,7 +6,8 @@ import com.example.ticketing.common.config.TicketingProperties;
 import com.example.ticketing.common.config.TicketingProperties.Outbox;
 import com.example.ticketing.common.metrics.Metrics;
 import com.example.ticketing.common.metrics.Metrics.Tag;
-import com.example.ticketing.hold.dto.HoldCreated;
+import com.example.ticketing.hold.dto.CreateHoldCommand;
+import com.example.ticketing.hold.dto.CreateHoldResult;
 import com.example.ticketing.hold.service.SeatHoldService;
 import com.example.ticketing.outbox.domain.OutboxTaskType;
 import com.example.ticketing.outbox.dto.ClaimedOutboxTask;
@@ -406,7 +407,8 @@ class OutboxWorkerTest {
         long pid = newPerformance(1, 1, 6);
         long userId = fixtures.newUser();
         List<Long> seatIds = db.seatIds(pid).subList(0, seatCount);
-        HoldCreated hold = seatHoldService.hold(userId, pid, seatIds, fixtures.admit(pid, userId));
+        CreateHoldResult hold = seatHoldService.hold(
+                new CreateHoldCommand(userId, pid, seatIds, fixtures.admit(pid, userId)));
         paymentService.pay(userId, hold.holdId(), key(), Optional.empty());
         long bookingId = jdbcTemplate.queryForObject("SELECT id FROM booking WHERE hold_id = ?", Long.class,
                 hold.holdId());
@@ -419,7 +421,8 @@ class OutboxWorkerTest {
         List<Long> bookingIds = new ArrayList<>();
         for (int i = 0; i < count; i++) {
             long userId = fixtures.newUser();
-            HoldCreated hold = seatHoldService.hold(userId, pid, List.of(seatIds.get(i)), fixtures.admit(pid, userId));
+            CreateHoldResult hold = seatHoldService.hold(
+                    new CreateHoldCommand(userId, pid, List.of(seatIds.get(i)), fixtures.admit(pid, userId)));
             paymentService.pay(userId, hold.holdId(), key(), Optional.empty());
             bookingIds.add(jdbcTemplate.queryForObject("SELECT id FROM booking WHERE hold_id = ?", Long.class,
                     hold.holdId()));
@@ -432,13 +435,14 @@ class OutboxWorkerTest {
         long pid = newPerformance(1, 1, 6);
         long userId = fixtures.newUser();
         List<Long> seatIds = db.seatIds(pid).subList(0, 2);
-        HoldCreated hold = seatHoldService.hold(userId, pid, seatIds, fixtures.admit(pid, userId));
+        CreateHoldResult hold = seatHoldService.hold(
+                new CreateHoldCommand(userId, pid, seatIds, fixtures.admit(pid, userId)));
         long paymentId = ((Started) paymentTransaction.start(userId, hold.holdId(), key())).paymentId();
         long lost = seatIds.get(1);
         jdbcTemplate.update("UPDATE seat SET held_until = NOW(6) - INTERVAL 1 SECOND WHERE id = ?", lost);
         redisKeyCleaner.clean(pid);
         long thief = fixtures.newUser();
-        seatHoldService.hold(thief, pid, List.of(lost), fixtures.admit(pid, thief));
+        seatHoldService.hold(new CreateHoldCommand(thief, pid, List.of(lost), fixtures.admit(pid, thief)));
         paymentTransaction.confirm(paymentId, "pg-refund-" + paymentId);
         assertThat(db.holdStatus(hold.holdId())).isEqualTo("REFUNDING");
         assertThat(db.payment(paymentId)).containsEntry("status", "APPROVED");

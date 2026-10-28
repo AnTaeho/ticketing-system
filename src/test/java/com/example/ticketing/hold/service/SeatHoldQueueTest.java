@@ -15,10 +15,12 @@ import com.example.ticketing.common.error.ErrorCode;
 import com.example.ticketing.common.metrics.Metrics;
 import com.example.ticketing.common.metrics.Metrics.Tag;
 import com.example.ticketing.common.redis.RedisKeys;
+import com.example.ticketing.common.redis.RedisUnavailableException;
 import com.example.ticketing.common.redis.TestTicketingRedis;
 import com.example.ticketing.common.redis.TicketingRedis;
 import com.example.ticketing.common.time.DbClock;
-import com.example.ticketing.hold.dto.HoldCreated;
+import com.example.ticketing.hold.dto.CreateHoldCommand;
+import com.example.ticketing.hold.dto.CreateHoldResult;
 import com.example.ticketing.hold.repository.SeatGateRedisStore;
 import com.example.ticketing.hold.repository.SeatHoldRepository;
 import com.example.ticketing.payment.repository.PaymentRepository;
@@ -100,7 +102,7 @@ class SeatHoldQueueTest {
         double dbBefore = counterSum(Metrics.HOLD_DB);
 
         for (String token : new String[]{null, "", "  ", tokenB, userA + "." + UUID.randomUUID(), expiredA}) {
-            assertThatThrownBy(() -> seatHoldService.hold(userA, pid, target, token))
+            assertThatThrownBy(() -> seatHoldService.hold(new CreateHoldCommand(userA, pid, target, token)))
                     .as("token=%s", token)
                     .isInstanceOf(ApiException.class)
                     .extracting("code").isEqualTo(ErrorCode.NOT_ADMITTED);
@@ -121,19 +123,19 @@ class SeatHoldQueueTest {
         List<Long> ids = seatIds(pid);
         long userA = fixtures.newUser();
         long userB = fixtures.newUser();
-        seatHoldService.hold(userA, pid, List.of(ids.get(0)), fixtures.admit(pid, userA));
+        seatHoldService.hold(new CreateHoldCommand(userA, pid, List.of(ids.get(0)), fixtures.admit(pid, userA)));
         String tokenB = fixtures.admit(pid, userB);
 
-        assertThatThrownBy(() -> seatHoldService.hold(userB, pid, List.of(ids.get(0)), tokenB))
+        assertThatThrownBy(() -> seatHoldService.hold(new CreateHoldCommand(userB, pid, List.of(ids.get(0)), tokenB)))
                 .extracting("code").isEqualTo(ErrorCode.SEAT_TAKEN);
         assertThat(processingScore(pid, tokenB)).isNotNull();
-        assertThat(redis().opsForValue().get(RedisKeys.queueUser(pid, userB))).isEqualTo(tokenB);
+        assertThat(redis().opsForValue().get(RedisKeys.queueUser(userB, pid))).isEqualTo(tokenB);
 
-        HoldCreated holdB = seatHoldService.hold(userB, pid, List.of(ids.get(1)), tokenB);
+        CreateHoldResult holdB = seatHoldService.hold(new CreateHoldCommand(userB, pid, List.of(ids.get(1)), tokenB));
 
         assertThat(holdB.seats()).extracting(s -> s.id()).containsExactly(ids.get(1));
         assertThat(processingScore(pid, tokenB)).isNull();
-        assertThat(redis().hasKey(RedisKeys.queueUser(pid, userB))).isFalse();
+        assertThat(redis().hasKey(RedisKeys.queueUser(userB, pid))).isFalse();
     }
 
     @Test
@@ -143,15 +145,15 @@ class SeatHoldQueueTest {
         List<Long> target = seatIds(pid).subList(0, 1);
         long userA = fixtures.newUser();
         long userB = fixtures.newUser();
-        seatHoldService.hold(userA, pid, target, fixtures.admit(pid, userA));
+        seatHoldService.hold(new CreateHoldCommand(userA, pid, target, fixtures.admit(pid, userA)));
         redis().delete(RedisKeys.seat(pid, target.get(0)));
         String tokenB = fixtures.admit(pid, userB);
 
-        assertThatThrownBy(() -> seatHoldService.hold(userB, pid, target, tokenB))
+        assertThatThrownBy(() -> seatHoldService.hold(new CreateHoldCommand(userB, pid, target, tokenB)))
                 .extracting("code").isEqualTo(ErrorCode.SEAT_STATE_CHANGED);
 
         assertThat(processingScore(pid, tokenB)).isNotNull();
-        assertThat(redis().opsForValue().get(RedisKeys.queueUser(pid, userB))).isEqualTo(tokenB);
+        assertThat(redis().opsForValue().get(RedisKeys.queueUser(userB, pid))).isEqualTo(tokenB);
     }
 
     @Test
@@ -162,15 +164,15 @@ class SeatHoldQueueTest {
         long userId = fixtures.newUser();
         String token = fixtures.admit(pid, userId);
 
-        HoldCreated hold = seatHoldService.hold(userId, pid, target, token);
+        CreateHoldResult hold = seatHoldService.hold(new CreateHoldCommand(userId, pid, target, token));
 
         assertThat(processingScore(pid, token)).isNull();
-        assertThat(redis().hasKey(RedisKeys.queueUser(pid, userId))).isFalse();
+        assertThat(redis().hasKey(RedisKeys.queueUser(userId, pid))).isFalse();
 
         seatHoldService.release(userId, hold.holdId());
         double gateBefore = counterSum(Metrics.HOLD_GATE);
         double dbBefore = counterSum(Metrics.HOLD_DB);
-        assertThatThrownBy(() -> seatHoldService.hold(userId, pid, target, token))
+        assertThatThrownBy(() -> seatHoldService.hold(new CreateHoldCommand(userId, pid, target, token)))
                 .extracting("code").isEqualTo(ErrorCode.NOT_ADMITTED);
         assertThat(counterSum(Metrics.HOLD_GATE)).isEqualTo(gateBefore);
         assertThat(counterSum(Metrics.HOLD_DB)).isEqualTo(dbBefore);
@@ -183,14 +185,18 @@ class SeatHoldQueueTest {
         long pid = newPerformance();
         long userId = fixtures.newUser();
         String token = userId + "." + UUID.randomUUID();
-        QueueService queue = mock(QueueService.class);
-        when(queue.isAdmitted(pid, token, userId)).thenReturn(true);
-        when(queue.consume(pid, token, userId)).thenThrow(new QueryTimeoutException("consume timeout"));
+        QueueRedisStore store = mock(QueueRedisStore.class);
+        when(store.processingScore(pid, token)).thenReturn((double) System.currentTimeMillis() + 60_000);
+        when(store.consume(userId, pid, token))
+                .thenThrow(new RedisUnavailableException(new QueryTimeoutException("consume timeout")));
+        QueueService queue = new QueueService(store, seatCatalog, dbClock, Clock.systemDefaultZone(),
+                System::nanoTime, properties, meterRegistry);
         double failureBefore = consumeFailures();
 
-        HoldCreated hold = newService(queue, properties).hold(userId, pid, seatIds(pid).subList(0, 1), token);
+        CreateHoldResult hold = newService(queue, properties)
+                .hold(new CreateHoldCommand(userId, pid, seatIds(pid).subList(0, 1), token));
 
-        verify(queue).consume(pid, token, userId);
+        verify(store).consume(userId, pid, token);
         assertThat(consumeFailures() - failureBefore).isEqualTo(1);
         assertThat(jdbcTemplate.queryForObject("SELECT status FROM seat_hold WHERE id = ?", String.class,
                 hold.holdId())).isEqualTo("HELD");
@@ -204,21 +210,23 @@ class SeatHoldQueueTest {
         TicketingRedis deadRedis = TestTicketingRedis.connectTo("localhost", closedPort(), properties);
         try {
             QueueService deadQueue = new QueueService(new QueueRedisStore(deadRedis),
-                    seatCatalog, dbClock, Clock.systemDefaultZone(), System::nanoTime, properties);
+                    seatCatalog, dbClock, Clock.systemDefaultZone(), System::nanoTime, properties, meterRegistry);
             SeatGateRedisStore spyGate = mock(SeatGateRedisStore.class);
             SeatHoldService service = new SeatHoldService(seatCatalog, seatHoldTransaction, seatHoldRepository,
-                    seatRepository, paymentRepository, dbClock, spyGate, deadQueue, System::nanoTime, properties,
-                    meterRegistry);
+                    seatRepository, paymentRepository, dbClock, spyGate,
+                    new SeatGateReflector(spyGate, properties, meterRegistry, System::nanoTime), deadQueue,
+                    new HoldMetrics(meterRegistry), System::nanoTime, properties);
             // 토큰 주인 확인은 Redis 없이 하므로 장애 중에도 남의 토큰은 403이다
-            assertThatThrownBy(() -> service.hold(userId, pid, seatIds(pid).subList(0, 1),
-                    (userId + 1) + "." + UUID.randomUUID()))
+            assertThatThrownBy(() -> service.hold(new CreateHoldCommand(userId, pid, seatIds(pid).subList(0, 1),
+                    (userId + 1) + "." + UUID.randomUUID())))
                     .extracting("code").isEqualTo(ErrorCode.NOT_ADMITTED);
             double gateErrorBefore = meterRegistry.counter(Metrics.HOLD_GATE, Tag.RESULT, "error").count();
             double dbOkBefore = meterRegistry.counter(Metrics.HOLD_DB, Tag.RESULT, "ok").count();
             double acquiredBefore = meterRegistry.counter(Metrics.HOLD_FALLBACK, Tag.RESULT, "acquired").count();
             double consumeFailureBefore = consumeFailures();
 
-            HoldCreated hold = service.hold(userId, pid, seatIds(pid).subList(0, 1), userId + "." + UUID.randomUUID());
+            CreateHoldResult hold = service.hold(
+                    new CreateHoldCommand(userId, pid, seatIds(pid).subList(0, 1), userId + "." + UUID.randomUUID()));
 
             assertThat(hold.holdId()).isPositive();
             verifyNoInteractions(spyGate);
@@ -241,8 +249,8 @@ class SeatHoldQueueTest {
         long userId = fixtures.newUser();
         QueueService queue = mock(QueueService.class);
 
-        HoldCreated hold = newService(queue, with(properties.gate().enabled(), false))
-                .hold(userId, pid, seatIds(pid).subList(0, 1), null);
+        CreateHoldResult hold = newService(queue, with(properties.gate().enabled(), false))
+                .hold(new CreateHoldCommand(userId, pid, seatIds(pid).subList(0, 1), null));
 
         assertThat(hold.holdId()).isPositive();
         verifyNoInteractions(queue);
@@ -255,14 +263,16 @@ class SeatHoldQueueTest {
         List<Long> target = seatIds(pid).subList(0, 1);
         long userId = fixtures.newUser();
         SeatGateRedisStore offGate = mock(SeatGateRedisStore.class);
+        TicketingProperties off = with(false, true);
         SeatHoldService gateOff = new SeatHoldService(seatCatalog, seatHoldTransaction, seatHoldRepository,
-                seatRepository, paymentRepository, dbClock, offGate, queueService, System::nanoTime, with(false, true),
-                meterRegistry);
+                seatRepository, paymentRepository, dbClock, offGate,
+                new SeatGateReflector(offGate, off, meterRegistry, System::nanoTime), queueService,
+                new HoldMetrics(meterRegistry), System::nanoTime, off);
 
-        assertThatThrownBy(() -> gateOff.hold(userId, pid, target, null))
+        assertThatThrownBy(() -> gateOff.hold(new CreateHoldCommand(userId, pid, target, null)))
                 .extracting("code").isEqualTo(ErrorCode.NOT_ADMITTED);
         String token = fixtures.admit(pid, userId);
-        gateOff.hold(userId, pid, target, token);
+        gateOff.hold(new CreateHoldCommand(userId, pid, target, token));
 
         assertThat(processingScore(pid, token)).isNull();
         verifyNoInteractions(offGate);
@@ -270,7 +280,8 @@ class SeatHoldQueueTest {
 
     private SeatHoldService newService(QueueService queue, TicketingProperties props) {
         return new SeatHoldService(seatCatalog, seatHoldTransaction, seatHoldRepository, seatRepository,
-                paymentRepository, dbClock, gate, queue, System::nanoTime, props, meterRegistry);
+                paymentRepository, dbClock, gate, new SeatGateReflector(gate, props, meterRegistry, System::nanoTime),
+                queue, new HoldMetrics(meterRegistry), System::nanoTime, props);
     }
 
     private TicketingProperties with(boolean gateEnabled, boolean queueRequired) {

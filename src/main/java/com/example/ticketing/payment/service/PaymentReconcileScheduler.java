@@ -4,7 +4,7 @@ import com.example.ticketing.common.config.TicketingProperties;
 import com.example.ticketing.common.metrics.Metrics;
 import com.example.ticketing.common.metrics.Metrics.ReconcileResult;
 import com.example.ticketing.common.metrics.Metrics.Tag;
-import com.example.ticketing.hold.repository.SeatGateRedisStore;
+import com.example.ticketing.hold.service.SeatGateReflector;
 import com.example.ticketing.payment.client.PgClient;
 import com.example.ticketing.payment.client.PgResult;
 import com.example.ticketing.payment.dto.PaymentSettlement;
@@ -39,12 +39,12 @@ public class PaymentReconcileScheduler {
     private final Counter queryFailed;
 
     public PaymentReconcileScheduler(PaymentReconcileTransaction reconcileTransaction,
-                                     PaymentTransaction paymentTransaction, PgClient pgClient,
-                                     SeatGateRedisStore gate, TicketingProperties properties, MeterRegistry meterRegistry) {
+                                     PaymentTransaction paymentTransaction, PgClient pgClient, SeatGateReflector gate,
+                                     TicketingProperties properties, MeterRegistry meterRegistry) {
         this.reconcileTransaction = reconcileTransaction;
         this.paymentTransaction = paymentTransaction;
         this.pgClient = pgClient;
-        this.reflector = new PaymentGateReflector(gate, properties.gate().enabled());
+        this.reflector = new PaymentGateReflector(gate);
         this.batchSize = properties.payment().reconcileBatchSize();
         this.recheckAfter = properties.payment().unknownRecheckAfter();
         this.processingRecheckAfter = properties.payment().processingRecheckAfter();

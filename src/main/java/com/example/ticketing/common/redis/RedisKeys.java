@@ -18,7 +18,7 @@ public final class RedisKeys {
         return "seat:" + tag(performanceId) + ":*";
     }
 
-    public static String userHold(long performanceId, long userId) {
+    public static String userHold(long userId, long performanceId) {
         return "userhold:" + tag(performanceId) + ":" + userId;
     }
 
@@ -26,7 +26,7 @@ public final class RedisKeys {
         return "userhold:" + tag(performanceId) + ":*";
     }
 
-    public static String rehold(long performanceId, long userId, long seatId) {
+    public static String rehold(long userId, long performanceId, long seatId) {
         return "rehold:" + tag(performanceId) + ":" + userId + ":" + seatId;
     }
 
@@ -43,7 +43,7 @@ public final class RedisKeys {
         return "bq:" + tag(performanceId) + ":processing";
     }
 
-    public static String queueUser(long performanceId, long userId) {
+    public static String queueUser(long userId, long performanceId) {
         return "bq:" + tag(performanceId) + ":user:" + userId;
     }
 

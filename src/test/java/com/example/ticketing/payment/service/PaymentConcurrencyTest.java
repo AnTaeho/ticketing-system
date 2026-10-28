@@ -4,7 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.example.ticketing.common.error.ApiException;
 import com.example.ticketing.common.error.ErrorCode;
-import com.example.ticketing.hold.dto.HoldCreated;
+import com.example.ticketing.hold.dto.CreateHoldCommand;
+import com.example.ticketing.hold.dto.CreateHoldResult;
 import com.example.ticketing.hold.service.SeatHoldService;
 import com.example.ticketing.payment.client.PgResult;
 import com.example.ticketing.payment.dto.PaymentOutcome;
@@ -79,8 +80,8 @@ class PaymentConcurrencyTest {
     void sameKeyTenThreads() throws Exception {
         long pid = newPerformance();
         long userId = fixtures.newUser();
-        HoldCreated hold = seatHoldService.hold(userId, pid, db.seatIds(pid).subList(0, 2),
-                fixtures.admit(pid, userId));
+        CreateHoldResult hold = seatHoldService.hold(new CreateHoldCommand(userId, pid, db.seatIds(pid).subList(0, 2),
+                fixtures.admit(pid, userId)));
         stubPg.approveDelayMs(300);
         String key = UUID.randomUUID().toString();
 
@@ -116,8 +117,8 @@ class PaymentConcurrencyTest {
     void differentKeysTwoTabs() throws Exception {
         long pid = newPerformance();
         long userId = fixtures.newUser();
-        HoldCreated hold = seatHoldService.hold(userId, pid, db.seatIds(pid).subList(0, 2),
-                fixtures.admit(pid, userId));
+        CreateHoldResult hold = seatHoldService.hold(new CreateHoldCommand(userId, pid, db.seatIds(pid).subList(0, 2),
+                fixtures.admit(pid, userId)));
         stubPg.approveDelayMs(300);
 
         List<Outcome> outcomes = runConcurrently(2,
@@ -140,7 +141,8 @@ class PaymentConcurrencyTest {
         long pid = newPerformance();
         long userId = fixtures.newUser();
         List<Long> seats = db.seatIds(pid).subList(0, 3);
-        HoldCreated hold = seatHoldService.hold(userId, pid, seats, fixtures.admit(pid, userId));
+        CreateHoldResult hold = seatHoldService.hold(
+                new CreateHoldCommand(userId, pid, seats, fixtures.admit(pid, userId)));
         stubPg.approveWith(PgResult.unknown("timeout"));
         long paymentId = paymentService.pay(userId, hold.holdId(), UUID.randomUUID().toString(), Optional.empty())
                 .paymentId();
@@ -174,10 +176,12 @@ class PaymentConcurrencyTest {
         long userId = fixtures.newUser();
         long pidA = newPerformance();
         long pidB = newPerformance();
-        HoldCreated holdA = seatHoldService.hold(userId, pidA, db.seatIds(pidA).subList(0, 1),
-                fixtures.admit(pidA, userId));
-        HoldCreated holdB = seatHoldService.hold(userId, pidB, db.seatIds(pidB).subList(0, 1),
-                fixtures.admit(pidB, userId));
+        CreateHoldResult holdA = seatHoldService.hold(
+                new CreateHoldCommand(userId, pidA, db.seatIds(pidA).subList(0, 1),
+                fixtures.admit(pidA, userId)));
+        CreateHoldResult holdB = seatHoldService.hold(
+                new CreateHoldCommand(userId, pidB, db.seatIds(pidB).subList(0, 1),
+                fixtures.admit(pidB, userId)));
         stubPg.approveDelayMs(300);
         String key = UUID.randomUUID().toString();
 

@@ -1,7 +1,8 @@
 package com.example.ticketing.show.service;
 
 import com.example.ticketing.common.time.DbClock;
-import com.example.ticketing.show.dto.NewPerformance;
+import com.example.ticketing.show.dto.CreatePerformanceCommand;
+import com.example.ticketing.show.dto.CreateShowCommand;
 import com.example.ticketing.show.repository.ShowRepository;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
@@ -44,7 +45,8 @@ public class LocalSeedRunner implements ApplicationRunner {
             return;
         }
         LocalDateTime now = dbClock.now().withNano(0);
-        Long showId = showAdminService.createShow(SEED_TITLE, SEED_VENUE, SEED_DESCRIPTION);
+        Long showId = showAdminService.createShow(
+                new CreateShowCommand(SEED_TITLE, SEED_VENUE, SEED_DESCRIPTION)).showId();
         long openNow = createPerformance(showId, now.minusMinutes(1), now.toLocalDate().plusDays(3).atTime(SHOW_TIME));
         long openSoon = createPerformance(showId, now.plusMinutes(10), now.toLocalDate().plusDays(4).atTime(SHOW_TIME));
         log.info("[booking seed] 시드 공연 생성: showId={}, 예매 중 회차={}, 10분 뒤 열리는 회차={}",
@@ -53,6 +55,7 @@ public class LocalSeedRunner implements ApplicationRunner {
 
     private long createPerformance(Long showId, LocalDateTime openAt, LocalDateTime startsAt) {
         return showAdminService.createPerformance(
-                new NewPerformance(showId, startsAt, openAt, null, SECTIONS, ROWS, SEATS_PER_ROW)).performanceId();
+                        new CreatePerformanceCommand(showId, startsAt, openAt, null, SECTIONS, ROWS, SEATS_PER_ROW))
+                .performanceId();
     }
 }

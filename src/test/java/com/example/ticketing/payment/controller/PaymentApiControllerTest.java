@@ -6,7 +6,8 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import com.example.ticketing.hold.dto.HoldCreated;
+import com.example.ticketing.hold.dto.CreateHoldCommand;
+import com.example.ticketing.hold.dto.CreateHoldResult;
 import com.example.ticketing.hold.service.SeatHoldService;
 import com.example.ticketing.payment.client.PgResult;
 import com.example.ticketing.payment.client.PgScenario;
@@ -257,8 +258,8 @@ class PaymentApiControllerTest {
         long pid = fixtures.newPerformance(1, 1, 4);
         performances.add(pid);
         long userId = fixtures.newUser();
-        HoldCreated hold = seatHoldService.hold(userId, pid, db.seatIds(pid).subList(0, 2),
-                fixtures.admit(pid, userId));
+        CreateHoldResult hold = seatHoldService.hold(new CreateHoldCommand(userId, pid, db.seatIds(pid).subList(0, 2),
+                fixtures.admit(pid, userId)));
         return new Hold(userId, hold.holdId());
     }
 

@@ -1,6 +1,7 @@
 package com.example.ticketing.queue.service;
 
 import com.example.ticketing.common.config.TicketingProperties;
+import com.example.ticketing.common.redis.RedisFailures;
 import com.example.ticketing.common.redis.SchedulerLease;
 import com.example.ticketing.queue.repository.QueueRedisStore;
 import com.example.ticketing.seat.service.SeatCatalog;
@@ -21,7 +22,7 @@ public class QueuePromotionScheduler {
     static final Duration RATE_TTL = Duration.ofSeconds(60);
 
     private final SchedulerLease lease;
-    private final QueueRedisStore repository;
+    private final QueueRedisStore store;
     private final SeatCatalog seatCatalog;
     private final Clock clock;
     private final int capacity;
@@ -30,10 +31,10 @@ public class QueuePromotionScheduler {
     private final double intervalSeconds;
     private final Duration leaseTtl;
 
-    public QueuePromotionScheduler(SchedulerLease lease, QueueRedisStore repository, SeatCatalog seatCatalog,
+    public QueuePromotionScheduler(SchedulerLease lease, QueueRedisStore store, SeatCatalog seatCatalog,
                                    Clock clock, TicketingProperties properties) {
         this.lease = lease;
-        this.repository = repository;
+        this.store = store;
         this.seatCatalog = seatCatalog;
         this.clock = clock;
         this.capacity = properties.queue().capacity();
@@ -54,7 +55,9 @@ public class QueuePromotionScheduler {
             try {
                 promoteOne(performanceId);
             } catch (RuntimeException e) {
-                log.warn("[booking queue] 회차 {} 승격 실패, 다음 회차로 넘어간다: {}", performanceId, e.toString());
+                // 회차 하나의 실패가 나머지 회차의 승격을 막지 않게 한다
+                log.warn("[booking queue] 회차 {} 승격 실패, 다음 회차로 넘어간다: {}", performanceId,
+                        RedisFailures.describe(e));
             }
         }
     }
@@ -62,10 +65,10 @@ public class QueuePromotionScheduler {
     // 만료를 먼저 치워야 빈 자리가 승격에 잡힌다. 점수가 진입 때 쓴 서버 벽시계(ms)라 같은 시계로 비교한다
     long promoteOne(long performanceId) {
         long now = clock.millis();
-        repository.purgeExpired(performanceId, now, waitingTtlMs);
-        long moved = repository.promote(performanceId, now + processingTtlMs, capacity);
-        double rate = 0.8 * repository.rate(performanceId) + 0.2 * moved / intervalSeconds;
-        repository.saveRate(performanceId, rate, RATE_TTL);
+        store.purgeExpired(performanceId, now, waitingTtlMs);
+        long moved = store.promote(performanceId, now + processingTtlMs, capacity);
+        double rate = 0.8 * store.rate(performanceId) + 0.2 * moved / intervalSeconds;
+        store.saveRate(performanceId, rate, RATE_TTL);
         return moved;
     }
 }

@@ -7,9 +7,9 @@ import static org.assertj.core.api.Assertions.tuple;
 import com.example.ticketing.common.error.ApiException;
 import com.example.ticketing.common.error.ErrorCode;
 import com.example.ticketing.show.domain.PerformanceState;
-import com.example.ticketing.show.dto.PerformanceView;
-import com.example.ticketing.show.dto.ShowDetail;
-import com.example.ticketing.show.dto.ShowSummary;
+import com.example.ticketing.show.dto.PerformanceResult;
+import com.example.ticketing.show.dto.ShowDetailResult;
+import com.example.ticketing.show.dto.ShowSummaryResult;
 import com.example.ticketing.support.Fixtures;
 import com.example.ticketing.support.IntegrationTest;
 import java.time.LocalDateTime;
@@ -34,11 +34,11 @@ class ShowQueryServiceTest {
         long open = fixtures.newPerformance(showId, now.minusMinutes(1), now.plusDays(1), 1, 1, 1);
         long beforeOpen = fixtures.newPerformance(showId, now.plusHours(1), now.plusDays(2), 1, 1, 1);
 
-        ShowDetail detail = showQueryService.getShow(showId);
+        ShowDetailResult detail = showQueryService.getShow(showId);
 
         assertThat(detail.id()).isEqualTo(showId);
         assertThat(detail.performances())
-                .extracting(PerformanceView::id, PerformanceView::state)
+                .extracting(PerformanceResult::id, PerformanceResult::state)
                 .containsExactly(
                         tuple(closed, PerformanceState.CLOSED),
                         tuple(open, PerformanceState.OPEN),
@@ -58,10 +58,10 @@ class ShowQueryServiceTest {
 
         var shows = showQueryService.listShows();
 
-        ShowSummary summary = shows.stream().filter(s -> s.id() == showId).findFirst().orElseThrow();
+        ShowSummaryResult summary = shows.stream().filter(s -> s.id() == showId).findFirst().orElseThrow();
         assertThat(summary.nextPerformance().id()).isEqualTo(open);
         assertThat(summary.nextPerformance().state()).isEqualTo(PerformanceState.OPEN);
-        ShowSummary finished = shows.stream().filter(s -> s.id() == finishedShowId).findFirst().orElseThrow();
+        ShowSummaryResult finished = shows.stream().filter(s -> s.id() == finishedShowId).findFirst().orElseThrow();
         assertThat(finished.nextPerformance()).isNull();
     }
 

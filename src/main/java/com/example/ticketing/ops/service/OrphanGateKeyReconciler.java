@@ -8,6 +8,7 @@ import com.example.ticketing.common.metrics.Metrics.Tag;
 import com.example.ticketing.common.redis.RedisFailures;
 import com.example.ticketing.common.redis.RedisKeys;
 import com.example.ticketing.common.redis.RedisScripts;
+import com.example.ticketing.common.redis.RedisUnavailableException;
 import com.example.ticketing.common.redis.SchedulerLease;
 import com.example.ticketing.common.redis.TicketingRedis;
 import com.example.ticketing.seat.service.SeatCatalog;
@@ -23,7 +24,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Consumer;
-import java.util.function.Supplier;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.data.redis.core.Cursor;
@@ -75,11 +75,11 @@ public class OrphanGateKeyReconciler {
     private final Counter userHoldRemoved;
     private final Counter skippedFresh;
 
-    public OrphanGateKeyReconciler(SchedulerLease lease, TicketingRedis bookingRedis,
+    public OrphanGateKeyReconciler(SchedulerLease lease, TicketingRedis ticketingRedis,
                                    NamedParameterJdbcTemplate jdbcTemplate, SeatCatalog seatCatalog,
                                    TicketingProperties properties, MeterRegistry meterRegistry) {
         this.lease = lease;
-        this.redis = bookingRedis.template();
+        this.redis = ticketingRedis.template();
         this.jdbcTemplate = jdbcTemplate;
         this.seatCatalog = seatCatalog;
         this.leaseTtl = Duration.ofMillis(properties.ops().orphanScanMs() * 2);
@@ -98,11 +98,12 @@ public class OrphanGateKeyReconciler {
         for (long performanceId : seatCatalog.openPerformanceIds()) {
             try {
                 reconcileOne(performanceId);
-            } catch (RedisUnavailable e) {
+            } catch (RedisUnavailableException e) {
                 log.warn("[booking orphan] Redis 오류로 이번 주기를 건너뛴다(회차 {}): {}",
-                        performanceId, e.getCause().toString());
+                        performanceId, RedisFailures.describe(e));
                 return;
             } catch (RuntimeException e) {
+                // DB 실패 같은 회차 하나의 실패는 다음 회차로 넘어간다
                 log.warn("[booking orphan] 회차 {} 대사 실패, 다음 회차로 넘어간다: {}", performanceId, e.toString());
             }
         }
@@ -124,7 +125,7 @@ public class OrphanGateKeyReconciler {
 
     // 막 생긴 선점 키는 DB 커밋 전일 수 있어 건너뛴다. 결제 중·확정 키는 TTL이 더 길어 검사 대상이다
     private List<GateKey> readKeys(String pattern) {
-        return redisCall(() -> {
+        return RedisFailures.translate(() -> {
             Set<String> names = new LinkedHashSet<>();
             try (Cursor<String> cursor = redis.scan(
                     ScanOptions.scanOptions().match(pattern).count(SCAN_COUNT).build())) {
@@ -191,7 +192,7 @@ public class OrphanGateKeyReconciler {
         }
         Map<String, List<String>> keysByToken = new LinkedHashMap<>();
         orphans.forEach(key -> keysByToken.computeIfAbsent(key.token(), t -> new ArrayList<>()).add(key.name()));
-        return redisCall(() -> {
+        return RedisFailures.translate(() -> {
             long removed = 0;
             for (Map.Entry<String, List<String>> entry : keysByToken.entrySet()) {
                 Long n = redis.execute(RedisScripts.RELEASE, entry.getValue(), entry.getKey());
@@ -215,28 +216,9 @@ public class OrphanGateKeyReconciler {
         return new MapSqlParameterSource().addValue("pid", performanceId).addValue("tokens", tokens);
     }
 
-    // DB 예외와 갈라 Redis 예외만 주기 전체를 건너뛰게 한다
-    private static <T> T redisCall(Supplier<T> call) {
-        try {
-            return call.get();
-        } catch (RuntimeException e) {
-            if (!RedisFailures.isFailure(e)) {
-                throw e;
-            }
-            throw new RedisUnavailable(e);
-        }
-    }
-
     record Removed(long seats, long userHolds) {
     }
 
     private record GateKey(String name, String token) {
-    }
-
-    private static final class RedisUnavailable extends RuntimeException {
-
-        RedisUnavailable(RuntimeException cause) {
-            super(cause);
-        }
     }
 }

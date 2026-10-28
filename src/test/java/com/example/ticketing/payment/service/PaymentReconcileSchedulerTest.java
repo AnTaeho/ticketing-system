@@ -2,7 +2,6 @@ package com.example.ticketing.payment.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -12,8 +11,10 @@ import static org.mockito.Mockito.when;
 import com.example.ticketing.common.config.TicketingProperties;
 import com.example.ticketing.common.metrics.Metrics;
 import com.example.ticketing.common.metrics.Metrics.Tag;
+import com.example.ticketing.hold.domain.GateHold;
 import com.example.ticketing.hold.domain.HoldStatus;
 import com.example.ticketing.hold.repository.SeatGateRedisStore;
+import com.example.ticketing.hold.service.SeatGateReflector;
 import com.example.ticketing.payment.client.PgClient;
 import com.example.ticketing.payment.client.PgResult;
 import com.example.ticketing.payment.client.PgStatus;
@@ -60,7 +61,7 @@ class PaymentReconcileSchedulerTest {
         scheduler(true).scan();
 
         verify(paymentTransaction).confirm(2, "tx2");
-        verify(gate).confirmQuietly(eq(7L), eq(11L), eq(List.of(101L)), eq("token"), eq(Instant.EPOCH));
+        verify(gate).confirm(new GateHold(11L, 7L, "token", List.of(101L)), Instant.EPOCH);
         assertThat(count("confirmed")).isEqualTo(1);
     }
 
@@ -112,13 +113,15 @@ class PaymentReconcileSchedulerTest {
     }
 
     private PaymentReconcileScheduler scheduler(boolean gateEnabled) {
-        TicketingProperties properties = new TicketingProperties(null, null, null,
+        TicketingProperties properties = new TicketingProperties(null, null,
+                new TicketingProperties.Hold(Duration.ofMinutes(5), 4, true, 1000, 50, Duration.ofMinutes(10)),
                 new TicketingProperties.Payment(Duration.ofMinutes(10), Duration.ofMinutes(1), Duration.ofSeconds(30),
                         Duration.ofSeconds(5), RECHECK, Duration.ofSeconds(30), true, 2000, BATCH,
                         Duration.ofSeconds(30)),
                 new TicketingProperties.Gate(gateEnabled, 20), null, null, null, null, null, null);
-        return new PaymentReconcileScheduler(reconcileTransaction, paymentTransaction, pgClient, gate, properties,
-                meterRegistry);
+        SeatGateReflector reflector = new SeatGateReflector(gate, properties, meterRegistry, System::nanoTime);
+        return new PaymentReconcileScheduler(reconcileTransaction, paymentTransaction, pgClient, reflector,
+                properties, meterRegistry);
     }
 
     private double count(String result) {

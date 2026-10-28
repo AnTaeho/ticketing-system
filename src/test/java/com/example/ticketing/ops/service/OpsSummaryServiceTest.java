@@ -83,7 +83,7 @@ class OpsSummaryServiceTest {
         redis.opsForZSet().add(RedisKeys.queueProcessing(s.pid), "p1", now + 600_000);
         redis.opsForValue().set(RedisKeys.seat(s.pid, s.seats.get(0)), "token");
         redis.opsForValue().set(RedisKeys.seat(s.pid, s.seats.get(1)), "token");
-        redis.opsForValue().set(RedisKeys.userHold(s.pid, 1L), "token");
+        redis.opsForValue().set(RedisKeys.userHold(1L, s.pid), "token");
         // 이웃 회차의 게이트 키는 세지 않는다
         redis.opsForValue().set(RedisKeys.seat(s.otherPid, 1L), "token");
 

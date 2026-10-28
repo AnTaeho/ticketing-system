@@ -73,7 +73,7 @@ public class SeatHold {
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
 
-    public static SeatHold held(Long performanceId, Long userId, String holdToken, int seatCount,
+    public static SeatHold held(Long userId, Long performanceId, String holdToken, int seatCount,
                                 int totalAmount, LocalDateTime expiresAt) {
         SeatHold hold = new SeatHold();
         hold.performanceId = performanceId;

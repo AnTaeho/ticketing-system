@@ -9,10 +9,12 @@ import com.example.ticketing.common.redis.SchedulerLease;
 import com.example.ticketing.common.redis.TicketingRedis;
 import com.example.ticketing.common.time.DbClock;
 import com.example.ticketing.queue.repository.QueueRedisStore;
+import com.example.ticketing.seat.repository.SeatJdbcRepository;
 import com.example.ticketing.seat.service.SeatCatalog;
 import com.example.ticketing.support.Fixtures;
 import com.example.ticketing.support.IntegrationTest;
 import com.example.ticketing.support.RedisKeyCleaner;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Clock;
 import java.util.ArrayList;
 import java.util.List;
@@ -31,6 +33,10 @@ class QueuePromotionSchedulerTest {
     private static final long USER_BASE = 7_100_000_000L;
     private static final String LEASE_KEY = "sched:lease:" + QueuePromotionScheduler.LEASE;
 
+    @Autowired
+    private SeatJdbcRepository seatJdbcRepository;
+    @Autowired
+    private MeterRegistry meterRegistry;
     @Autowired
     private QueueRedisStore repository;
     @Autowired
@@ -68,27 +74,27 @@ class QueuePromotionSchedulerTest {
         QueuePromotionScheduler scheduler = scheduler(3, seatCatalog);
         List<String> admitted = new ArrayList<>();
         for (int i = 0; i < 3; i++) {
-            admitted.add(service.enter(pid, USER_BASE + i).token());
+            admitted.add(service.enter(USER_BASE + i, pid).queueToken());
         }
-        // 사용자 ID를 거꾸로 줘 같은 ms 진입에서 member 사전순과 도착 순서가 갈리게 한다
+        // 사용자 ID를 거꾸로 줘 같은 ms 진입에서 토큰 사전순과 도착 순서가 갈리게 한다
         List<Long> waitingUsers = List.of(USER_BASE + 900, USER_BASE + 800, USER_BASE + 700,
                 USER_BASE + 600, USER_BASE + 500);
         List<String> waiting = new ArrayList<>();
         for (long userId : waitingUsers) {
-            waiting.add(service.enter(pid, userId).token());
+            waiting.add(service.enter(userId, pid).queueToken());
         }
         assertThat(scheduler.promoteOne(pid)).isZero();
 
         for (int i = 0; i < 3; i++) {
-            assertThat(service.consume(pid, admitted.get(i), USER_BASE + i)).isTrue();
+            assertThat(service.consume(USER_BASE + i, pid, admitted.get(i))).isTrue();
         }
         assertThat(scheduler.promoteOne(pid)).isEqualTo(3);
 
         for (int i = 0; i < 3; i++) {
-            assertThat(service.isAdmitted(pid, waiting.get(i), waitingUsers.get(i))).isTrue();
+            assertThat(service.isAdmitted(waitingUsers.get(i), pid, waiting.get(i))).isTrue();
         }
-        assertThat(service.status(pid, waitingUsers.get(3), waiting.get(3)).position()).isEqualTo(1);
-        assertThat(service.status(pid, waitingUsers.get(4), waiting.get(4)).position()).isEqualTo(2);
+        assertThat(service.status(waitingUsers.get(3), pid, waiting.get(3)).position()).isEqualTo(1);
+        assertThat(service.status(waitingUsers.get(4), pid, waiting.get(4)).position()).isEqualTo(2);
         assertThat(redis().opsForZSet().zCard(RedisKeys.queueProcessing(pid))).isEqualTo(3);
         assertThat(scheduler.promoteOne(pid)).isZero();
     }
@@ -99,18 +105,18 @@ class QueuePromotionSchedulerTest {
         long pid = openPerformance();
         QueueService service = service(2);
         QueuePromotionScheduler scheduler = scheduler(2, seatCatalog);
-        String expired = service.enter(pid, USER_BASE + 1).token();
-        String alive = service.enter(pid, USER_BASE + 2).token();
-        String next = service.enter(pid, USER_BASE + 3).token();
+        String expired = service.enter(USER_BASE + 1, pid).queueToken();
+        String alive = service.enter(USER_BASE + 2, pid).queueToken();
+        String next = service.enter(USER_BASE + 3, pid).queueToken();
         redis().opsForZSet().add(RedisKeys.queueProcessing(pid), expired, System.currentTimeMillis() - 1);
 
-        assertThat(service.isAdmitted(pid, expired, USER_BASE + 1)).isFalse();
+        assertThat(service.isAdmitted(USER_BASE + 1, pid, expired)).isFalse();
         assertThat(redis().opsForZSet().zCard(RedisKeys.queueProcessing(pid))).isEqualTo(2);
 
         assertThat(scheduler.promoteOne(pid)).isEqualTo(1);
         assertThat(repository.processingScore(pid, expired)).isNull();
-        assertThat(service.isAdmitted(pid, alive, USER_BASE + 2)).isTrue();
-        assertThat(service.isAdmitted(pid, next, USER_BASE + 3)).isTrue();
+        assertThat(service.isAdmitted(USER_BASE + 2, pid, alive)).isTrue();
+        assertThat(service.isAdmitted(USER_BASE + 3, pid, next)).isTrue();
     }
 
     @Test
@@ -119,17 +125,17 @@ class QueuePromotionSchedulerTest {
         long pid = openPerformance();
         QueueService service = service(1);
         QueuePromotionScheduler scheduler = scheduler(1, seatCatalog);
-        String first = service.enter(pid, USER_BASE + 1).token();
-        String stale = service.enter(pid, USER_BASE + 2).token();
-        String fresh = service.enter(pid, USER_BASE + 3).token();
+        String first = service.enter(USER_BASE + 1, pid).queueToken();
+        String stale = service.enter(USER_BASE + 2, pid).queueToken();
+        String fresh = service.enter(USER_BASE + 3, pid).queueToken();
         redis().opsForZSet().add(RedisKeys.queueWaiting(pid), stale,
                 System.currentTimeMillis() - props.queue().waitingTokenTtl().toMillis() - 1);
-        service.consume(pid, first, USER_BASE + 1);
+        service.consume(USER_BASE + 1, pid, first);
 
         assertThat(scheduler.promoteOne(pid)).isEqualTo(1);
         assertThat(repository.waitingScore(pid, stale)).isNull();
         assertThat(repository.processingScore(pid, stale)).isNull();
-        assertThat(service.isAdmitted(pid, fresh, USER_BASE + 3)).isTrue();
+        assertThat(service.isAdmitted(USER_BASE + 3, pid, fresh)).isTrue();
         assertThat(redis().opsForZSet().zCard(RedisKeys.queueWaiting(pid))).isZero();
     }
 
@@ -141,13 +147,13 @@ class QueuePromotionSchedulerTest {
         QueuePromotionScheduler scheduler = scheduler(3, seatCatalog);
         List<String> admitted = new ArrayList<>();
         for (int i = 0; i < 3; i++) {
-            admitted.add(service.enter(pid, USER_BASE + i).token());
+            admitted.add(service.enter(USER_BASE + i, pid).queueToken());
         }
         for (int i = 3; i < 6; i++) {
-            service.enter(pid, USER_BASE + i);
+            service.enter(USER_BASE + i, pid);
         }
         for (int i = 0; i < 3; i++) {
-            service.consume(pid, admitted.get(i), USER_BASE + i);
+            service.consume(USER_BASE + i, pid, admitted.get(i));
         }
         double interval = props.queue().promoteIntervalMs() / 1000.0;
 
@@ -168,13 +174,13 @@ class QueuePromotionSchedulerTest {
         long healthy = openPerformance();
         redis().opsForValue().set(RedisKeys.queueProcessing(broken), "not-a-zset");
         QueueService service = service(1);
-        String first = service.enter(healthy, USER_BASE + 1).token();
-        String second = service.enter(healthy, USER_BASE + 2).token();
-        service.consume(healthy, first, USER_BASE + 1);
+        String first = service.enter(USER_BASE + 1, healthy).queueToken();
+        String second = service.enter(USER_BASE + 2, healthy).queueToken();
+        service.consume(USER_BASE + 1, healthy, first);
 
         scheduler(1, catalogOf(List.of(broken, healthy))).promoteAll();
 
-        assertThat(service.isAdmitted(healthy, second, USER_BASE + 2)).isTrue();
+        assertThat(service.isAdmitted(USER_BASE + 2, healthy, second)).isTrue();
     }
 
     @Test
@@ -183,23 +189,23 @@ class QueuePromotionSchedulerTest {
         long pid = openPerformance();
         QueueService service = service(1);
         QueuePromotionScheduler scheduler = scheduler(1, catalogOf(List.of(pid)));
-        String first = service.enter(pid, USER_BASE + 1).token();
-        String second = service.enter(pid, USER_BASE + 2).token();
-        service.consume(pid, first, USER_BASE + 1);
+        String first = service.enter(USER_BASE + 1, pid).queueToken();
+        String second = service.enter(USER_BASE + 2, pid).queueToken();
+        service.consume(USER_BASE + 1, pid, first);
 
         redis().opsForValue().set(LEASE_KEY, "other-instance", java.time.Duration.ofSeconds(5));
         scheduler.promote();
-        assertThat(service.isAdmitted(pid, second, USER_BASE + 2)).isFalse();
+        assertThat(service.isAdmitted(USER_BASE + 2, pid, second)).isFalse();
 
         redis().delete(LEASE_KEY);
         scheduler.promote();
-        assertThat(service.isAdmitted(pid, second, USER_BASE + 2)).isTrue();
+        assertThat(service.isAdmitted(USER_BASE + 2, pid, second)).isTrue();
         assertThat(redis().hasKey(LEASE_KEY)).isFalse();
     }
 
     private QueueService service(int capacity) {
         return new QueueService(repository, seatCatalog, dbClock, Clock.systemDefaultZone(), System::nanoTime,
-                QueueTestProps.withCapacity(props, capacity));
+                QueueTestProps.withCapacity(props, capacity), meterRegistry);
     }
 
     private QueuePromotionScheduler scheduler(int capacity, SeatCatalog catalog) {
@@ -209,7 +215,7 @@ class QueuePromotionSchedulerTest {
 
     // 운영 SeatCatalog는 예매 중 회차 목록을 10초 묶어 두므로 방금 만든 회차가 빠질 수 있다
     private SeatCatalog catalogOf(List<Long> openIds) {
-        return new SeatCatalog(jdbcTemplate, props, System::nanoTime) {
+        return new SeatCatalog(seatJdbcRepository, props, System::nanoTime) {
             @Override
             public List<Long> openPerformanceIds() {
                 return openIds;

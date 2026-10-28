@@ -3,8 +3,9 @@ package com.example.ticketing.payment.controller;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.example.ticketing.common.config.TicketingProperties;
-import com.example.ticketing.hold.dto.HoldCreated;
-import com.example.ticketing.hold.repository.SeatGateRedisStore;
+import com.example.ticketing.hold.dto.CreateHoldCommand;
+import com.example.ticketing.hold.dto.CreateHoldResult;
+import com.example.ticketing.hold.service.SeatGateReflector;
 import com.example.ticketing.hold.service.SeatHoldService;
 import com.example.ticketing.payment.client.HttpPgClient;
 import com.example.ticketing.payment.client.OddPgTestConfig;
@@ -58,7 +59,7 @@ class PaymentHttpTest {
     @Autowired
     private PaymentTransaction paymentTransaction;
     @Autowired
-    private SeatGateRedisStore gate;
+    private SeatGateReflector gate;
     @Autowired
     private TicketingProperties properties;
     @Autowired
@@ -73,7 +74,8 @@ class PaymentHttpTest {
             long userId = fixtures.newUser();
             List<Long> seats = jdbcTemplate.queryForList("SELECT id FROM seat WHERE performance_id = ? ORDER BY id",
                     Long.class, pid).subList(0, 2);
-            HoldCreated hold = seatHoldService.hold(userId, pid, seats, fixtures.admit(pid, userId));
+            CreateHoldResult hold = seatHoldService.hold(
+                    new CreateHoldCommand(userId, pid, seats, fixtures.admit(pid, userId)));
             RestClient client = RestClient.create("http://localhost:" + environment.getProperty("local.server.port"));
 
             ResponseEntity<String> response = client.post()
@@ -114,8 +116,8 @@ class PaymentHttpTest {
         long pid = fixtures.newPerformance(1, 1, 4);
         try {
             long userId = fixtures.newUser();
-            HoldCreated hold = seatHoldService.hold(userId, pid, seatIds(pid).subList(0, 2),
-                    fixtures.admit(pid, userId));
+            CreateHoldResult hold = seatHoldService.hold(new CreateHoldCommand(userId, pid, seatIds(pid).subList(0, 2),
+                    fixtures.admit(pid, userId)));
             RestClient client = client();
 
             ResponseEntity<String> response = client.post()
@@ -166,8 +168,8 @@ class PaymentHttpTest {
         long pid = fixtures.newPerformance(1, 1, 4);
         try {
             long userId = fixtures.newUser();
-            HoldCreated hold = seatHoldService.hold(userId, pid, seatIds(pid).subList(0, 1),
-                    fixtures.admit(pid, userId));
+            CreateHoldResult hold = seatHoldService.hold(new CreateHoldCommand(userId, pid, seatIds(pid).subList(0, 1),
+                    fixtures.admit(pid, userId)));
             Started started = (Started) paymentTransaction.start(userId, hold.holdId(), UUID.randomUUID().toString());
             PaymentDb db = new PaymentDb(jdbcTemplate);
             db.parkUnsettledPayments();

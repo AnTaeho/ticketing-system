@@ -6,8 +6,10 @@ import com.example.ticketing.seat.domain.SeatLayout;
 import com.example.ticketing.seat.repository.SeatBulkInserter;
 import com.example.ticketing.show.domain.Performance;
 import com.example.ticketing.show.domain.Show;
-import com.example.ticketing.show.dto.NewPerformance;
-import com.example.ticketing.show.dto.PerformanceCreated;
+import com.example.ticketing.show.dto.CreatePerformanceCommand;
+import com.example.ticketing.show.dto.CreatePerformanceResult;
+import com.example.ticketing.show.dto.CreateShowCommand;
+import com.example.ticketing.show.dto.CreateShowResult;
 import com.example.ticketing.show.repository.PerformanceRepository;
 import com.example.ticketing.show.repository.ShowRepository;
 import java.time.Duration;
@@ -31,16 +33,18 @@ public class ShowAdminService {
     private final SeatBulkInserter seatBulkInserter;
 
     @Transactional
-    public Long createShow(String title, String venueName, String description) {
-        if (isBlank(title) || isBlank(venueName)) {
+    public CreateShowResult createShow(CreateShowCommand command) {
+        if (isBlank(command.title()) || isBlank(command.venueName())) {
             throw invalid("title, venueName은 비울 수 없다");
         }
-        return showRepository.save(Show.create(title.trim(), venueName.trim(), description)).getId();
+        Show show = showRepository.save(
+                Show.create(command.title().trim(), command.venueName().trim(), command.description()));
+        return new CreateShowResult(show.getId());
     }
 
     // 회차와 좌석을 한 트랜잭션에서 만든다. 좌석 INSERT가 실패하면 회차도 남지 않는다
     @Transactional
-    public PerformanceCreated createPerformance(NewPerformance command) {
+    public CreatePerformanceResult createPerformance(CreatePerformanceCommand command) {
         validate(command);
         if (!showRepository.existsById(command.showId())) {
             throw new ApiException(ErrorCode.SHOW_NOT_FOUND, Map.of("showId", command.showId()));
@@ -50,7 +54,7 @@ public class ShowAdminService {
                 Performance.create(command.showId(), command.startsAt(), command.openAt(), gateCloseAt));
         int seatCount = seatBulkInserter.insert(performance.getId(),
                 SeatLayout.generate(command.sections(), command.rows(), command.seatsPerRow()));
-        return new PerformanceCreated(performance.getId(), seatCount);
+        return new CreatePerformanceResult(performance.getId(), seatCount);
     }
 
     static LocalDateTime resolveGateCloseAt(LocalDateTime openAt, LocalDateTime startsAt, LocalDateTime requested) {
@@ -58,7 +62,7 @@ public class ShowAdminService {
         return gateCloseAt.isAfter(startsAt) ? startsAt : gateCloseAt;
     }
 
-    private static void validate(NewPerformance command) {
+    private static void validate(CreatePerformanceCommand command) {
         if (command.showId() == null || command.startsAt() == null || command.openAt() == null
                 || command.sections() == null || command.rows() == null || command.seatsPerRow() == null) {
             throw invalid("showId, startsAt, openAt, sections, rows, seatsPerRow는 필수다");

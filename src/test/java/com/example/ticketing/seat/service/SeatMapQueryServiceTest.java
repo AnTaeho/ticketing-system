@@ -18,7 +18,9 @@ import com.example.ticketing.common.metrics.Metrics;
 import com.example.ticketing.common.metrics.Metrics.Tag;
 import com.example.ticketing.common.redis.InstanceId;
 import com.example.ticketing.common.redis.RedisKeys;
+import com.example.ticketing.common.redis.RedisUnavailableException;
 import com.example.ticketing.common.redis.TicketingRedis;
+import com.example.ticketing.seat.repository.SeatJdbcRepository;
 import com.example.ticketing.seat.repository.SeatMapRedisStore;
 import com.example.ticketing.support.Fixtures;
 import com.example.ticketing.support.IntegrationTest;
@@ -50,6 +52,8 @@ import tools.jackson.databind.json.JsonMapper;
 @IntegrationTest
 class SeatMapQueryServiceTest {
 
+    @Autowired
+    private SeatJdbcRepository seatJdbcRepository;
     @Autowired
     private SeatCatalog seatCatalog;
     @Autowired
@@ -171,7 +175,7 @@ class SeatMapQueryServiceTest {
         long pid = performance();
         String old = builder.build(pid).orElseThrow();
         SeatMapRedisStore mockStore = mock(SeatMapRedisStore.class);
-        when(mockStore.get(pid)).thenReturn(old).thenThrow(new QueryTimeoutException("redis timeout"));
+        when(mockStore.get(pid)).thenReturn(old).thenThrow(redisDown());
         SeatMapQueryService service = service(mockStore, builder);
         double fallbackBefore = rebuilds("fallback");
 
@@ -194,7 +198,7 @@ class SeatMapQueryServiceTest {
     void redisFailureKeepsStaleCacheWhenBuildFails() throws InterruptedException {
         long pid = performance();
         SeatMapRedisStore mockStore = mock(SeatMapRedisStore.class);
-        when(mockStore.get(pid)).thenReturn("cached-v1").thenThrow(new QueryTimeoutException("redis timeout"));
+        when(mockStore.get(pid)).thenReturn("cached-v1").thenThrow(redisDown());
         SeatMapBuilder failingBuilder = mock(SeatMapBuilder.class);
         when(failingBuilder.build(pid)).thenThrow(new DataAccessResourceFailureException("db down"));
         SeatMapQueryService service = service(mockStore, failingBuilder);
@@ -217,7 +221,7 @@ class SeatMapQueryServiceTest {
         long pid = performance();
         String old = builder.build(pid).orElseThrow();
         SeatMapRedisStore mockStore = mock(SeatMapRedisStore.class);
-        when(mockStore.get(pid)).thenReturn(old).thenThrow(new QueryTimeoutException("redis timeout"));
+        when(mockStore.get(pid)).thenReturn(old).thenThrow(redisDown());
         SeatMapQueryService service = service(mockStore, slowBuilder(200));
         assertThat(service.get(pid)).isEqualTo(old);
         Thread.sleep(props.seatmap().localCache().toMillis() + 100);
@@ -236,7 +240,7 @@ class SeatMapQueryServiceTest {
     void redisFailureWithoutLocalCacheBuildsFromDb() {
         long pid = performance();
         SeatMapRedisStore mockStore = mock(SeatMapRedisStore.class);
-        when(mockStore.get(anyLong())).thenThrow(new QueryTimeoutException("redis timeout"));
+        when(mockStore.get(anyLong())).thenThrow(redisDown());
         SeatMapQueryService service = service(mockStore, builder);
         double fallbackBefore = rebuilds("fallback");
 
@@ -254,7 +258,7 @@ class SeatMapQueryServiceTest {
     void concurrentFallbackIsSingleFlight() throws Exception {
         long pid = performance();
         SeatMapRedisStore mockStore = mock(SeatMapRedisStore.class);
-        when(mockStore.get(anyLong())).thenThrow(new QueryTimeoutException("redis timeout"));
+        when(mockStore.get(anyLong())).thenThrow(redisDown());
         SeatMapQueryService service = service(mockStore, slowBuilder(200));
         double fallbackBefore = rebuilds("fallback");
 
@@ -273,7 +277,7 @@ class SeatMapQueryServiceTest {
         long pid = performance();
         SeatMapRedisStore mockStore = mock(SeatMapRedisStore.class);
         when(mockStore.get(pid)).thenReturn(null);
-        when(mockStore.tryLease(eq(pid), anyString(), any())).thenThrow(new QueryTimeoutException("redis timeout"));
+        when(mockStore.tryLease(eq(pid), anyString(), any())).thenThrow(redisDown());
         double fallbackBefore = rebuilds("fallback");
 
         String json = service(mockStore, builder).get(pid);
@@ -306,6 +310,10 @@ class SeatMapQueryServiceTest {
         assertThat(store.get(pid)).isNull();
     }
 
+    private static RedisUnavailableException redisDown() {
+        return new RedisUnavailableException(new QueryTimeoutException("redis timeout"));
+    }
+
     private SeatMapQueryService service(SeatMapRedisStore seatMapStore, SeatMapBuilder seatMapBuilder) {
         return new SeatMapQueryService(seatCatalog, seatMapBuilder, seatMapStore, instanceId, System::nanoTime, props,
                 meterRegistry);
@@ -313,7 +321,7 @@ class SeatMapQueryServiceTest {
 
     // 동시 요청이 single-flight 안에서 겹치도록 빌드를 늦춘다
     private SeatMapBuilder slowBuilder(long delayMs) {
-        return new SeatMapBuilder(jdbcTemplate, jsonMapper, Clock.systemDefaultZone()) {
+        return new SeatMapBuilder(seatJdbcRepository, jsonMapper, Clock.systemDefaultZone()) {
             @Override
             public Optional<String> build(long performanceId) {
                 try {

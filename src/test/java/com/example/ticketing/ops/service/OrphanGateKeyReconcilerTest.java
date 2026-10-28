@@ -16,9 +16,12 @@ import com.example.ticketing.common.redis.SchedulerLease;
 import com.example.ticketing.common.redis.TestTicketingRedis;
 import com.example.ticketing.common.redis.TicketingRedis;
 import com.example.ticketing.common.time.DbClock;
-import com.example.ticketing.hold.dto.HoldCreated;
+import com.example.ticketing.hold.dto.CreateHoldCommand;
+import com.example.ticketing.hold.dto.CreateHoldResult;
 import com.example.ticketing.hold.repository.SeatGateRedisStore;
 import com.example.ticketing.hold.repository.SeatHoldRepository;
+import com.example.ticketing.hold.service.HoldMetrics;
+import com.example.ticketing.hold.service.SeatGateReflector;
 import com.example.ticketing.hold.service.SeatHoldService;
 import com.example.ticketing.hold.service.SeatHoldTransaction;
 import com.example.ticketing.payment.client.PgResult;
@@ -26,6 +29,7 @@ import com.example.ticketing.payment.dto.PaymentResponse;
 import com.example.ticketing.payment.repository.PaymentRepository;
 import com.example.ticketing.payment.service.PaymentService;
 import com.example.ticketing.queue.service.QueueService;
+import com.example.ticketing.seat.repository.SeatJdbcRepository;
 import com.example.ticketing.seat.repository.SeatRepository;
 import com.example.ticketing.seat.service.SeatCatalog;
 import com.example.ticketing.support.Fixtures;
@@ -69,6 +73,8 @@ class OrphanGateKeyReconcilerTest {
 
     private static final String LEASE_KEY = "sched:lease:" + OrphanGateKeyReconciler.LEASE;
 
+    @Autowired
+    private SeatJdbcRepository seatJdbcRepository;
     @Autowired
     private SchedulerLease lease;
     @Autowired
@@ -134,7 +140,7 @@ class OrphanGateKeyReconcilerTest {
         long pid = newPerformance();
         long seatId = seatIds(pid).get(0);
         String seatKey = RedisKeys.seat(pid, seatId);
-        String userHoldKey = RedisKeys.userHold(pid, 42L);
+        String userHoldKey = RedisKeys.userHold(42L, pid);
         setAged(seatKey, UUID.randomUUID().toString());
         setAged(userHoldKey, UUID.randomUUID().toString());
         long lookalikePid = pid * 10;
@@ -160,7 +166,8 @@ class OrphanGateKeyReconcilerTest {
         long pid = newPerformance();
         long userId = fixtures.newUser();
         List<Long> seats = seatIds(pid).subList(0, 2);
-        HoldCreated hold = seatHoldService.hold(userId, pid, seats, fixtures.admit(pid, userId));
+        CreateHoldResult hold = seatHoldService.hold(
+                new CreateHoldCommand(userId, pid, seats, fixtures.admit(pid, userId)));
         PaymentResponse paid = paymentService.pay(userId, hold.holdId(), UUID.randomUUID().toString(),
                 Optional.empty());
         assertThat(paid.status()).isEqualTo(PaymentResponse.Status.CONFIRMED);
@@ -169,8 +176,8 @@ class OrphanGateKeyReconcilerTest {
         assertThat(reconciler().reconcileOne(pid)).isEqualTo(new OrphanGateKeyReconciler.Removed(0, 0));
         seats.forEach(seatId -> assertThat(redis.opsForValue().get(RedisKeys.seat(pid, seatId))).isEqualTo(token));
 
-        // 취소 뒤 좌석 키 해제(releaseSeatsOnlyQuietly)가 실패한 상황: 반영을 목 게이트로 삼킨다
-        new BookingService(bookingTransaction, viewReader, mock(SeatGateRedisStore.class), properties)
+        // 취소 뒤 좌석 키 해제가 실패한 상황: 반영 빈을 목으로 바꿔 삼킨다
+        new BookingService(bookingTransaction, viewReader, mock(SeatGateReflector.class))
                 .cancel(userId, paid.bookingId());
         seats.forEach(seatId -> assertThat(redis.hasKey(RedisKeys.seat(pid, seatId))).isTrue());
 
@@ -185,8 +192,10 @@ class OrphanGateKeyReconcilerTest {
         List<Long> ids = seatIds(pid);
         long heldUser = fixtures.newUser();
         long payingUser = fixtures.newUser();
-        HoldCreated held = seatHoldService.hold(heldUser, pid, ids.subList(0, 2), fixtures.admit(pid, heldUser));
-        HoldCreated paying = seatHoldService.hold(payingUser, pid, ids.subList(2, 3), fixtures.admit(pid, payingUser));
+        CreateHoldResult held = seatHoldService.hold(
+                new CreateHoldCommand(heldUser, pid, ids.subList(0, 2), fixtures.admit(pid, heldUser)));
+        CreateHoldResult paying = seatHoldService.hold(
+                new CreateHoldCommand(payingUser, pid, ids.subList(2, 3), fixtures.admit(pid, payingUser)));
         stubPg.approveWith(PgResult.unknown("timeout"));
         assertThat(paymentService.pay(payingUser, paying.holdId(), UUID.randomUUID().toString(), Optional.empty())
                 .status()).isEqualTo(PaymentResponse.Status.UNKNOWN);
@@ -194,7 +203,7 @@ class OrphanGateKeyReconcilerTest {
         List<String> keys = cleaner.gateKeys(pid);
         assertThat(keys).hasSize(5);
         // HELD 키만 막 생긴 키로 보인다. 결제 중 키는 pay_deadline까지 늘어나 이미 검사 대상이다
-        List.of(RedisKeys.userHold(pid, heldUser), RedisKeys.seat(pid, ids.get(0)),
+        List.of(RedisKeys.userHold(heldUser, pid), RedisKeys.seat(pid, ids.get(0)),
                 RedisKeys.seat(pid, ids.get(1))).forEach(this::age);
         double skippedBefore = skippedCount();
 
@@ -202,8 +211,8 @@ class OrphanGateKeyReconcilerTest {
 
         assertThat(skippedCount() - skippedBefore).isZero();
         assertThat(cleaner.gateKeys(pid)).containsExactlyInAnyOrderElementsOf(keys);
-        assertThat(redis.opsForValue().get(RedisKeys.userHold(pid, heldUser))).isEqualTo(holdToken(held.holdId()));
-        assertThat(redis.opsForValue().get(RedisKeys.userHold(pid, payingUser)))
+        assertThat(redis.opsForValue().get(RedisKeys.userHold(heldUser, pid))).isEqualTo(holdToken(held.holdId()));
+        assertThat(redis.opsForValue().get(RedisKeys.userHold(payingUser, pid)))
                 .isEqualTo(holdToken(paying.holdId()));
     }
 
@@ -214,14 +223,16 @@ class OrphanGateKeyReconcilerTest {
         List<Long> target = seatIds(pid).subList(0, 2);
         long userA = fixtures.newUser();
         long userB = fixtures.newUser();
-        HoldCreated holdA = seatHoldService.hold(userA, pid, target, fixtures.admit(pid, userA));
+        CreateHoldResult holdA = seatHoldService.hold(
+                new CreateHoldCommand(userA, pid, target, fixtures.admit(pid, userA)));
         String tokenA = holdToken(holdA.holdId());
         target.forEach(seatId -> age(RedisKeys.seat(pid, seatId)));
-        age(RedisKeys.userHold(pid, userA));
+        age(RedisKeys.userHold(userA, pid));
         jdbcTemplate.update("UPDATE seat_hold SET expires_at = NOW(6) - INTERVAL 1 MINUTE WHERE id = ?", holdA.holdId());
         jdbcTemplate.update("UPDATE seat SET held_until = NOW(6) - INTERVAL 1 MINUTE WHERE hold_id = ?", holdA.holdId());
         // A의 키가 남아 게이트가 막으므로 B는 게이트 없이 DB 판정으로 잡는다
-        HoldCreated holdB = gateOffService().hold(userB, pid, target, fixtures.admit(pid, userB));
+        CreateHoldResult holdB = gateOffService().hold(
+                new CreateHoldCommand(userB, pid, target, fixtures.admit(pid, userB)));
         String tokenB = holdToken(holdB.holdId());
         assertThat(heldSeats(pid, holdB.holdId())).containsExactlyElementsOf(target);
         String raced = RedisKeys.seat(pid, target.get(0));
@@ -240,7 +251,7 @@ class OrphanGateKeyReconcilerTest {
         // 다음 주기에도 B의 키는 B의 좌석 행과 맞아 남는다
         assertThat(reconciler().reconcileOne(pid).seats()).isZero();
         assertThat(redis.opsForValue().get(raced)).isEqualTo(tokenB);
-        assertThat(redis.opsForValue().get(RedisKeys.userHold(pid, userA))).isEqualTo(tokenA);
+        assertThat(redis.opsForValue().get(RedisKeys.userHold(userA, pid))).isEqualTo(tokenA);
     }
 
     @Test
@@ -271,10 +282,10 @@ class OrphanGateKeyReconcilerTest {
         List<Long> ids = seatIds(pid);
         long expiredUser = fixtures.newUser();
         long releasedUser = fixtures.newUser();
-        HoldCreated expired = seatHoldService.hold(expiredUser, pid, ids.subList(0, 1),
-                fixtures.admit(pid, expiredUser));
-        HoldCreated released = seatHoldService.hold(releasedUser, pid, ids.subList(1, 2),
-                fixtures.admit(pid, releasedUser));
+        CreateHoldResult expired = seatHoldService.hold(new CreateHoldCommand(expiredUser, pid, ids.subList(0, 1),
+                fixtures.admit(pid, expiredUser)));
+        CreateHoldResult released = seatHoldService.hold(new CreateHoldCommand(releasedUser, pid, ids.subList(1, 2),
+                fixtures.admit(pid, releasedUser)));
         cleaner.gateKeys(pid).forEach(this::age);
         // 만료 처리와 선점 취소의 DB 쪽만 반영하고 키 해제는 실패한 상황
         jdbcTemplate.update("UPDATE seat_hold SET status = 'EXPIRED' WHERE id = ?", expired.holdId());
@@ -341,7 +352,7 @@ class OrphanGateKeyReconcilerTest {
         setAged(notOpenKey, UUID.randomUUID().toString());
         List<Long> mine = List.of(open, notOpen);
         // 새 인스턴스라 캐시 없이 DB로 예매 중 회차를 고른다. 이 테스트의 회차만 남겨 다른 테스트 키를 건드리지 않는다
-        SeatCatalog freshCatalog = new SeatCatalog(jdbcTemplate, properties, System::nanoTime) {
+        SeatCatalog freshCatalog = new SeatCatalog(seatJdbcRepository, properties, System::nanoTime) {
             @Override
             public List<Long> openPerformanceIds() {
                 return super.openPerformanceIds().stream().filter(mine::contains).toList();
@@ -422,7 +433,7 @@ class OrphanGateKeyReconcilerTest {
 
     // 운영 SeatCatalog는 예매 중 회차 목록을 10초 묶어 두므로 방금 만든 회차가 빠질 수 있다
     private SeatCatalog catalogOf(List<Long> openIds) {
-        return new SeatCatalog(jdbcTemplate, properties, System::nanoTime) {
+        return new SeatCatalog(seatJdbcRepository, properties, System::nanoTime) {
             @Override
             public List<Long> openPerformanceIds() {
                 return openIds;
@@ -435,9 +446,10 @@ class OrphanGateKeyReconcilerTest {
         TicketingProperties gateOff = new TicketingProperties(p.seed(), p.redis(), p.hold(), p.payment(),
                 new TicketingProperties.Gate(false, p.gate().fallbackMaxConcurrency()), p.queue(), p.seatmap(),
                 p.outbox(), p.ops(), p.pg(), p.fakePg());
+        SeatGateRedisStore offGate = mock(SeatGateRedisStore.class);
         return new SeatHoldService(seatCatalog, seatHoldTransaction, seatHoldRepository, seatRepository,
-                paymentRepository, dbClock, mock(SeatGateRedisStore.class), queueService, System::nanoTime, gateOff,
-                meterRegistry);
+                paymentRepository, dbClock, offGate, new SeatGateReflector(offGate, gateOff, meterRegistry,
+                System::nanoTime), queueService, new HoldMetrics(meterRegistry), System::nanoTime, gateOff);
     }
 
     private long newPerformance() {

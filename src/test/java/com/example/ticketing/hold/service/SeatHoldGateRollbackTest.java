@@ -11,6 +11,7 @@ import com.example.ticketing.common.metrics.Metrics;
 import com.example.ticketing.common.metrics.Metrics.Tag;
 import com.example.ticketing.common.redis.RedisKeys;
 import com.example.ticketing.common.redis.TicketingRedis;
+import com.example.ticketing.hold.dto.CreateHoldCommand;
 import com.example.ticketing.support.Fixtures;
 import com.example.ticketing.support.IntegrationTest;
 import com.example.ticketing.support.RedisKeyCleaner;
@@ -60,7 +61,7 @@ class SeatHoldGateRollbackTest {
             double releaseFailureBefore = meterRegistry.counter(Metrics.REDIS_REFLECT_FAILURE, Tag.OP, "release").count();
 
             String queueToken = fixtures.admit(pid, userId);
-            assertThatThrownBy(() -> seatHoldService.hold(userId, pid, target, queueToken))
+            assertThatThrownBy(() -> seatHoldService.hold(new CreateHoldCommand(userId, pid, target, queueToken)))
                     .isInstanceOf(DataAccessResourceFailureException.class);
 
             assertThat(meterRegistry.counter(Metrics.HOLD_GATE, Tag.RESULT, "ok").count() - gateOkBefore).isEqualTo(1);

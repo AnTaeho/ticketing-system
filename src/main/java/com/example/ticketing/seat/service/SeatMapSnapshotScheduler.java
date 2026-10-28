@@ -4,6 +4,7 @@ import com.example.ticketing.common.config.TicketingProperties;
 import com.example.ticketing.common.log.ThrottledWarn;
 import com.example.ticketing.common.metrics.Metrics.RebuildSource;
 import com.example.ticketing.common.redis.InstanceId;
+import com.example.ticketing.common.redis.RedisFailures;
 import com.example.ticketing.seat.repository.SeatMapRedisStore;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -50,7 +51,9 @@ public class SeatMapSnapshotScheduler {
             try {
                 snapshotOne(performanceId);
             } catch (RuntimeException e) {
-                failureWarn.warn("[booking seatmap] 회차 {} 스냅샷 실패, 다음 회차로 넘어간다: {}", performanceId, e.toString());
+                // 회차 하나의 실패가 나머지 회차의 스냅샷을 막지 않게 한다
+                failureWarn.warn("[booking seatmap] 회차 {} 스냅샷 실패, 다음 회차로 넘어간다: {}", performanceId,
+                        RedisFailures.describe(e));
             }
         }
     }

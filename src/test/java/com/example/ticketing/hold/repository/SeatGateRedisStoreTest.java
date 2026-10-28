@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.example.ticketing.common.redis.RedisKeys;
 import com.example.ticketing.common.redis.TicketingRedis;
+import com.example.ticketing.hold.domain.GateHold;
 import com.example.ticketing.hold.domain.GateResult;
 import com.example.ticketing.support.IntegrationTest;
 import com.example.ticketing.support.RedisKeyCleaner;
@@ -62,7 +63,7 @@ class SeatGateRedisStoreTest {
     @Test
     @DisplayName("hold.lua 성공: userhold와 좌석 키가 토큰 값으로 쓰이고 TTL이 ttl 근처다")
     void holdWritesKeys() {
-        GateResult result = gate.tryHold(pid, userA, seats, "tA", TTL);
+        GateResult result = gate.tryHold(new GateHold(userA, pid, "tA", seats), TTL);
 
         assertThat(result).isEqualTo(GateResult.ok());
         for (String key : List.of(userHoldKey(userA), seatKey(seat1), seatKey(seat2))) {
@@ -75,10 +76,10 @@ class SeatGateRedisStoreTest {
     @Test
     @DisplayName("이미 선점이 있는 사용자는 USER_HAS_HOLD이고 아무 키도 새로 쓰지 않는다")
     void userHasHoldWritesNothing() {
-        gate.tryHold(pid, userA, List.of(seat1), "tFirst", TTL);
+        gate.tryHold(new GateHold(userA, pid, "tFirst", List.of(seat1)), TTL);
         Map<String, String> before = snapshot();
 
-        GateResult result = gate.tryHold(pid, userA, List.of(seat2), "tSecond", TTL);
+        GateResult result = gate.tryHold(new GateHold(userA, pid, "tSecond", List.of(seat2)), TTL);
 
         assertThat(result.type()).isEqualTo(GateResult.Type.USER_HAS_HOLD);
         assertThat(result.seatId()).isNull();
@@ -89,10 +90,10 @@ class SeatGateRedisStoreTest {
     @Test
     @DisplayName("잡힌 좌석이 섞이면 SEAT_TAKEN(그 좌석)이고 아무 키도 새로 쓰지 않는다")
     void seatTakenWritesNothing() {
-        gate.tryHold(pid, userB, List.of(seat2), "tB", TTL);
+        gate.tryHold(new GateHold(userB, pid, "tB", List.of(seat2)), TTL);
         Map<String, String> before = snapshot();
 
-        GateResult result = gate.tryHold(pid, userA, seats, "tA", TTL);
+        GateResult result = gate.tryHold(new GateHold(userA, pid, "tA", seats), TTL);
 
         assertThat(result).isEqualTo(GateResult.seatTaken(seat2));
         assertThat(snapshot()).isEqualTo(before);
@@ -103,23 +104,23 @@ class SeatGateRedisStoreTest {
     @Test
     @DisplayName("쿨다운 좌석이 섞이면 COOLDOWN(그 좌석)이고 아무 키도 새로 쓰지 않는다. 다른 사용자는 잡을 수 있다")
     void cooldownWritesNothing() {
-        gate.setReholdCooldown(pid, userA, List.of(seat2), Duration.ofMinutes(10));
+        gate.setReholdCooldown(new GateHold(userA, pid, "cooldown", List.of(seat2)), Duration.ofMinutes(10));
         Map<String, String> before = snapshot();
 
-        GateResult result = gate.tryHold(pid, userA, seats, "tA", TTL);
+        GateResult result = gate.tryHold(new GateHold(userA, pid, "tA", seats), TTL);
 
         assertThat(result).isEqualTo(GateResult.cooldown(seat2));
         assertThat(snapshot()).isEqualTo(before);
-        assertThat(gate.tryHold(pid, userB, seats, "tB", TTL)).isEqualTo(GateResult.ok());
+        assertThat(gate.tryHold(new GateHold(userB, pid, "tB", seats), TTL)).isEqualTo(GateResult.ok());
     }
 
     @Test
     @DisplayName("release는 토큰이 같은 키만 지우고 다른 토큰의 키는 남긴다")
     void releaseOnlyOwnKeys() {
-        gate.tryHold(pid, userA, seats, "tA", TTL);
+        gate.tryHold(new GateHold(userA, pid, "tA", seats), TTL);
         redis.opsForValue().set(seatKey(seat2), "tOther", TTL);
 
-        long deleted = gate.release(pid, userA, seats, "tA");
+        long deleted = gate.release(new GateHold(userA, pid, "tA", seats));
 
         assertThat(deleted).isEqualTo(2);
         assertThat(redis.hasKey(userHoldKey(userA))).isFalse();
@@ -130,9 +131,9 @@ class SeatGateRedisStoreTest {
     @Test
     @DisplayName("releaseSeatsOnly는 좌석 키만 지우고 userhold는 남긴다")
     void releaseSeatsOnlyKeepsUserHold() {
-        gate.tryHold(pid, userA, seats, "tA", TTL);
+        gate.tryHold(new GateHold(userA, pid, "tA", seats), TTL);
 
-        long deleted = gate.releaseSeatsOnly(pid, seats, "tA");
+        long deleted = gate.releaseSeatsOnly(new GateHold(userA, pid, "tA", seats));
 
         assertThat(deleted).isEqualTo(2);
         assertThat(redis.hasKey(seatKey(seat1))).isFalse();
@@ -143,11 +144,11 @@ class SeatGateRedisStoreTest {
     @Test
     @DisplayName("extend는 토큰이 같은 키만 연장하고 다른 토큰 키의 TTL은 그대로다")
     void extendOnlyOwnKeys() {
-        gate.tryHold(pid, userA, seats, "tA", TTL);
+        gate.tryHold(new GateHold(userA, pid, "tA", seats), TTL);
         redis.opsForValue().set(seatKey(seat2), "tOther", Duration.ofSeconds(60));
         Duration extended = Duration.ofMinutes(11);
 
-        long count = gate.extend(pid, userA, seats, "tA", extended);
+        long count = gate.extend(new GateHold(userA, pid, "tA", seats), extended);
 
         assertThat(count).isEqualTo(2);
         assertThat(pttl(userHoldKey(userA))).isBetween(extended.toMillis() - TOLERANCE_MS, extended.toMillis());
@@ -159,11 +160,11 @@ class SeatGateRedisStoreTest {
     @Test
     @DisplayName("confirm은 좌석 키를 gateCloseAt에 만료되게 하고 userhold를 지운다. 다른 토큰 키는 그대로다")
     void confirmMovesExpiryToGateClose() {
-        gate.tryHold(pid, userA, seats, "tA", TTL);
+        gate.tryHold(new GateHold(userA, pid, "tA", seats), TTL);
         redis.opsForValue().set(seatKey(seat2), "tOther", Duration.ofSeconds(60));
         Instant gateCloseAt = Instant.now().plus(Duration.ofHours(1));
 
-        long count = gate.confirm(pid, userA, seats, "tA", gateCloseAt);
+        long count = gate.confirm(new GateHold(userA, pid, "tA", seats), gateCloseAt);
 
         long expectedMs = Duration.between(Instant.now(), gateCloseAt).toMillis();
         assertThat(count).isEqualTo(1);
@@ -177,9 +178,9 @@ class SeatGateRedisStoreTest {
     @Test
     @DisplayName("confirm 시각이 과거면 좌석 키가 바로 사라진다")
     void confirmPastRemovesSeatKeys() {
-        gate.tryHold(pid, userA, seats, "tA", TTL);
+        gate.tryHold(new GateHold(userA, pid, "tA", seats), TTL);
 
-        long count = gate.confirm(pid, userA, seats, "tA", Instant.now().minus(Duration.ofMinutes(1)));
+        long count = gate.confirm(new GateHold(userA, pid, "tA", seats), Instant.now().minus(Duration.ofMinutes(1)));
 
         assertThat(count).isEqualTo(2);
         assertThat(cleaner.keys(pid)).isEmpty();
@@ -188,10 +189,10 @@ class SeatGateRedisStoreTest {
     @Test
     @DisplayName("confirm은 토큰이 다른 userhold를 지우지 않는다")
     void confirmKeepsForeignUserHold() {
-        gate.tryHold(pid, userA, seats, "tA", TTL);
+        gate.tryHold(new GateHold(userA, pid, "tA", seats), TTL);
         redis.opsForValue().set(userHoldKey(userA), "tOther", TTL);
 
-        gate.confirm(pid, userA, seats, "tA", Instant.now().plus(Duration.ofHours(1)));
+        gate.confirm(new GateHold(userA, pid, "tA", seats), Instant.now().plus(Duration.ofHours(1)));
 
         assertThat(redis.opsForValue().get(userHoldKey(userA))).isEqualTo("tOther");
     }
@@ -201,10 +202,10 @@ class SeatGateRedisStoreTest {
     void cooldownKeys() {
         Duration cooldown = Duration.ofMinutes(10);
 
-        gate.setReholdCooldown(pid, userA, seats, cooldown);
+        gate.setReholdCooldown(new GateHold(userA, pid, "cooldown", seats), cooldown);
 
         for (long seatId : seats) {
-            String key = RedisKeys.rehold(pid, userA, seatId);
+            String key = RedisKeys.rehold(userA, pid, seatId);
             assertThat(redis.opsForValue().get(key)).isEqualTo("1");
             assertThat(pttl(key)).isBetween(cooldown.toMillis() - TOLERANCE_MS, cooldown.toMillis());
         }
@@ -215,8 +216,8 @@ class SeatGateRedisStoreTest {
     @DisplayName("키에는 회차 해시 태그가 들어가고 좌석 ID를 키에서 되읽는다")
     void keysCarryHashTag() {
         assertThat(RedisKeys.seat(7, 42)).isEqualTo("seat:{p:7}:42");
-        assertThat(RedisKeys.userHold(7, 3)).isEqualTo("userhold:{p:7}:3");
-        assertThat(RedisKeys.rehold(7, 3, 42)).isEqualTo("rehold:{p:7}:3:42");
+        assertThat(RedisKeys.userHold(3, 7)).isEqualTo("userhold:{p:7}:3");
+        assertThat(RedisKeys.rehold(3, 7, 42)).isEqualTo("rehold:{p:7}:3:42");
         assertThat(RedisKeys.seatIdOf("seat:{p:7}:42")).isEqualTo(42);
         assertThat(RedisKeys.seatIdOf("rehold:{p:7}:3:42")).isEqualTo(42);
         assertThat(RedisKeys.seatPattern(7)).isEqualTo("seat:{p:7}:*");
@@ -243,6 +244,6 @@ class SeatGateRedisStoreTest {
     }
 
     private String userHoldKey(long userId) {
-        return RedisKeys.userHold(pid, userId);
+        return RedisKeys.userHold(userId, pid);
     }
 }

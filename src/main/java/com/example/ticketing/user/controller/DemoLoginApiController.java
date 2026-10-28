@@ -2,6 +2,7 @@ package com.example.ticketing.user.controller;
 
 import com.example.ticketing.common.web.HttpNames;
 import com.example.ticketing.user.dto.DemoLoginRequest;
+import com.example.ticketing.user.dto.DemoLoginResponse;
 import com.example.ticketing.user.dto.DemoLoginResult;
 import com.example.ticketing.user.service.DemoLoginService;
 import lombok.RequiredArgsConstructor;
@@ -18,8 +19,9 @@ public class DemoLoginApiController {
 
     private final DemoLoginService demoLoginService;
 
+    // 닉네임 길이는 화면에 같은 문장을 내려고 서비스가 검사한다
     @PostMapping("/api/demo/login")
-    public ResponseEntity<DemoLoginResult> login(@RequestBody DemoLoginRequest request) {
+    public ResponseEntity<DemoLoginResponse> login(@RequestBody DemoLoginRequest request) {
         DemoLoginResult result = demoLoginService.login(request.nickname());
         ResponseCookie cookie = ResponseCookie.from(HttpNames.USER_ID_COOKIE,
                         String.valueOf(result.userId()))
@@ -29,6 +31,6 @@ public class DemoLoginApiController {
                 .build();
         return ResponseEntity.ok()
                 .header(HttpHeaders.SET_COOKIE, cookie.toString())
-                .body(result);
+                .body(DemoLoginResponse.from(result));
     }
 }

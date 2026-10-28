@@ -7,7 +7,8 @@ import com.example.ticketing.common.error.ApiException;
 import com.example.ticketing.common.error.ErrorCode;
 import com.example.ticketing.common.metrics.Metrics;
 import com.example.ticketing.common.metrics.Metrics.Tag;
-import com.example.ticketing.hold.dto.HoldCreated;
+import com.example.ticketing.hold.dto.CreateHoldCommand;
+import com.example.ticketing.hold.dto.CreateHoldResult;
 import com.example.ticketing.support.Fixtures;
 import com.example.ticketing.support.IntegrationTest;
 import com.example.ticketing.support.RedisKeyCleaner;
@@ -90,7 +91,7 @@ class SeatHoldConcurrencyTest {
                 try {
                     ready.countDown();
                     start.await();
-                    seatHoldService.hold(userId, pid, target, token);
+                    seatHoldService.hold(new CreateHoldCommand(userId, pid, target, token));
                     success.incrementAndGet();
                 } catch (ApiException e) {
                     rejected.computeIfAbsent(e.getCode(), c -> new AtomicInteger()).incrementAndGet();
@@ -173,7 +174,7 @@ class SeatHoldConcurrencyTest {
             for (int round = 0; round < CROSS_ROUNDS; round++) {
                 CountDownLatch start = new CountDownLatch(1);
                 CountDownLatch done = new CountDownLatch(2);
-                List<HoldCreated> created = new CopyOnWriteArrayList<>();
+                List<CreateHoldResult> created = new CopyOnWriteArrayList<>();
                 AtomicInteger conflicted = new AtomicInteger();
                 // 진 쪽은 토큰이 남아 같은 토큰을 다시 받고, 이긴 쪽은 소모돼 새로 받는다
                 for (Object[] attempt : new Object[][]{{userA, forward}, {userB, reverse}}) {
@@ -184,7 +185,7 @@ class SeatHoldConcurrencyTest {
                     executor.submit(() -> {
                         try {
                             start.await();
-                            created.add(seatHoldService.hold(userId, pid, seats, token));
+                            created.add(seatHoldService.hold(new CreateHoldCommand(userId, pid, seats, token)));
                         } catch (ApiException e) {
                             if (e.getCode() == conflict) {
                                 conflicted.incrementAndGet();
@@ -207,7 +208,7 @@ class SeatHoldConcurrencyTest {
                     badRounds.add(round);
                 }
                 // 다음 회차를 위해 이긴 쪽의 선점을 풀어 같은 좌석을 다시 쓴다
-                for (HoldCreated hold : created) {
+                for (CreateHoldResult hold : created) {
                     long owner = jdbcTemplate.queryForObject(
                             "SELECT user_id FROM seat_hold WHERE id = ?", Long.class, hold.holdId());
                     seatHoldService.release(owner, hold.holdId());
@@ -264,7 +265,7 @@ class SeatHoldConcurrencyTest {
             executor.submit(() -> {
                 try {
                     start.await();
-                    seatHoldService.hold(userId, pid, List.of(seatId), token);
+                    seatHoldService.hold(new CreateHoldCommand(userId, pid, List.of(seatId), token));
                     success.incrementAndGet();
                 } catch (ApiException e) {
                     rejected.computeIfAbsent(e.getCode(), c -> new AtomicInteger()).incrementAndGet();

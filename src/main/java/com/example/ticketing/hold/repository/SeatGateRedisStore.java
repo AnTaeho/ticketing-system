@@ -1,133 +1,87 @@
 package com.example.ticketing.hold.repository;
 
-import com.example.ticketing.common.metrics.Metrics;
-import com.example.ticketing.common.metrics.Metrics.ReflectOp;
-import com.example.ticketing.common.metrics.Metrics.Tag;
 import com.example.ticketing.common.redis.RedisFailures;
 import com.example.ticketing.common.redis.RedisKeys;
 import com.example.ticketing.common.redis.RedisScripts;
 import com.example.ticketing.common.redis.TicketingRedis;
+import com.example.ticketing.hold.domain.GateHold;
 import com.example.ticketing.hold.domain.GateResult;
-import io.micrometer.core.instrument.Counter;
-import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 
 // 이미 잡힌 좌석 요청을 DB 앞에서 거절하는 게이트. 판정은 DB가 하고 여기 키는 빠른 거절용이다
-@Slf4j
+// Redis 장애는 RedisUnavailableException으로 던진다. 장애 정책은 호출자와 SeatGateReflector가 정한다
 @Component
 public class SeatGateRedisStore {
 
     private final StringRedisTemplate redis;
-    private final Counter releaseFailure;
-    private final Counter extendFailure;
-    private final Counter confirmFailure;
-    private final Counter cooldownFailure;
 
-    public SeatGateRedisStore(TicketingRedis bookingRedis, MeterRegistry meterRegistry) {
-        this.redis = bookingRedis.template();
-        this.releaseFailure = meterRegistry.counter(Metrics.REDIS_REFLECT_FAILURE, Tag.OP, ReflectOp.RELEASE);
-        this.extendFailure = meterRegistry.counter(Metrics.REDIS_REFLECT_FAILURE, Tag.OP, ReflectOp.EXTEND);
-        this.confirmFailure = meterRegistry.counter(Metrics.REDIS_REFLECT_FAILURE, Tag.OP, ReflectOp.CONFIRM);
-        this.cooldownFailure = meterRegistry.counter(Metrics.REDIS_REFLECT_FAILURE, Tag.OP, ReflectOp.COOLDOWN);
+    public SeatGateRedisStore(TicketingRedis ticketingRedis) {
+        this.redis = ticketingRedis.template();
     }
 
-    // Redis 예외를 그대로 던진다. 장애 시 DB 판정으로 넘기는 일은 호출자가 한다
-    public GateResult tryHold(long performanceId, long userId, List<Long> sortedSeatIds,
-                              String holdToken, Duration ttl) {
-        if (sortedSeatIds.isEmpty()) {
+    // seatIds는 오름차순이어야 한다
+    public GateResult tryHold(GateHold hold, Duration ttl) {
+        List<Long> seatIds = hold.seatIds();
+        if (seatIds.isEmpty()) {
             throw new IllegalArgumentException("좌석이 비었다");
         }
-        int n = sortedSeatIds.size();
+        long pid = hold.performanceId();
+        int n = seatIds.size();
         List<String> keys = new ArrayList<>(2 * n + 1);
-        keys.add(RedisKeys.userHold(performanceId, userId));
-        sortedSeatIds.forEach(seatId -> keys.add(RedisKeys.seat(performanceId, seatId)));
-        sortedSeatIds.forEach(seatId -> keys.add(RedisKeys.rehold(performanceId, userId, seatId)));
-        List<?> reply = redis.execute(RedisScripts.HOLD, keys, holdToken, String.valueOf(ttl.toMillis()),
-                String.valueOf(n));
+        keys.add(RedisKeys.userHold(hold.userId(), pid));
+        seatIds.forEach(seatId -> keys.add(RedisKeys.seat(pid, seatId)));
+        seatIds.forEach(seatId -> keys.add(RedisKeys.rehold(hold.userId(), pid, seatId)));
+        List<?> reply = RedisFailures.translate(() -> redis.execute(RedisScripts.HOLD, keys, hold.holdToken(),
+                String.valueOf(ttl.toMillis()), String.valueOf(n)));
         return GateResult.fromScript(reply);
     }
 
     // userhold 키와 좌석 키 중 값이 holdToken인 것만 지운다. 반환: 지운 키 수
-    public long release(long performanceId, long userId, List<Long> seatIds, String holdToken) {
-        return redis.execute(RedisScripts.RELEASE, userHoldAndSeatKeys(performanceId, userId, seatIds), holdToken);
+    public long release(GateHold hold) {
+        return RedisFailures.translate(
+                () -> redis.execute(RedisScripts.RELEASE, userHoldAndSeatKeys(hold), hold.holdToken()));
     }
 
     // 예매 취소용. 확정 때 userhold는 이미 지웠으므로 좌석 키만 지운다
-    public long releaseSeatsOnly(long performanceId, List<Long> seatIds, String holdToken) {
-        return redis.execute(RedisScripts.RELEASE, seatKeys(performanceId, seatIds), holdToken);
+    public long releaseSeatsOnly(GateHold hold) {
+        return RedisFailures.translate(
+                () -> redis.execute(RedisScripts.RELEASE, seatKeys(hold), hold.holdToken()));
     }
 
     // 반환: 연장한 키 수
-    public long extend(long performanceId, long userId, List<Long> seatIds, String holdToken, Duration ttl) {
-        return redis.execute(RedisScripts.EXTEND, userHoldAndSeatKeys(performanceId, userId, seatIds),
-                holdToken, String.valueOf(ttl.toMillis()));
+    public long extend(GateHold hold, Duration ttl) {
+        return RedisFailures.translate(() -> redis.execute(RedisScripts.EXTEND, userHoldAndSeatKeys(hold),
+                hold.holdToken(), String.valueOf(ttl.toMillis())));
     }
 
     // 좌석 키는 gateCloseAt에 만료되게 바꾸고 userhold는 지운다. 반환: 처리한 좌석 키 수
-    public long confirm(long performanceId, long userId, List<Long> seatIds, String holdToken, Instant gateCloseAt) {
-        return redis.execute(RedisScripts.CONFIRM, userHoldAndSeatKeys(performanceId, userId, seatIds),
-                holdToken, String.valueOf(gateCloseAt.toEpochMilli()));
+    public long confirm(GateHold hold, Instant gateCloseAt) {
+        return RedisFailures.translate(() -> redis.execute(RedisScripts.CONFIRM, userHoldAndSeatKeys(hold),
+                hold.holdToken(), String.valueOf(gateCloseAt.toEpochMilli())));
     }
 
-    public void setReholdCooldown(long performanceId, long userId, List<Long> seatIds, Duration cooldown) {
-        for (long seatId : seatIds) {
-            redis.opsForValue().set(RedisKeys.rehold(performanceId, userId, seatId), "1", cooldown);
-        }
-    }
-
-    // 아래 Quietly 변형은 DB 커밋 뒤 반영용이다. 실패해도 사용자 응답을 바꾸지 않고 고아 키 대사가 복구한다
-    public void releaseQuietly(long performanceId, long userId, List<Long> seatIds, String holdToken) {
-        quietly("release", releaseFailure, performanceId,
-                () -> release(performanceId, userId, seatIds, holdToken));
-    }
-
-    public void releaseSeatsOnlyQuietly(long performanceId, List<Long> seatIds, String holdToken) {
-        quietly("release", releaseFailure, performanceId,
-                () -> releaseSeatsOnly(performanceId, seatIds, holdToken));
-    }
-
-    public void extendQuietly(long performanceId, long userId, List<Long> seatIds, String holdToken, Duration ttl) {
-        quietly("extend", extendFailure, performanceId,
-                () -> extend(performanceId, userId, seatIds, holdToken, ttl));
-    }
-
-    public void confirmQuietly(long performanceId, long userId, List<Long> seatIds, String holdToken,
-                               Instant gateCloseAt) {
-        quietly("confirm", confirmFailure, performanceId,
-                () -> confirm(performanceId, userId, seatIds, holdToken, gateCloseAt));
-    }
-
-    public void setReholdCooldownQuietly(long performanceId, long userId, List<Long> seatIds, Duration cooldown) {
-        quietly("cooldown", cooldownFailure, performanceId,
-                () -> setReholdCooldown(performanceId, userId, seatIds, cooldown));
-    }
-
-    private void quietly(String op, Counter failure, long performanceId, Runnable action) {
-        try {
-            action.run();
-        } catch (RuntimeException e) {
-            if (!RedisFailures.isFailure(e)) {
-                throw e;
+    public void setReholdCooldown(GateHold hold, Duration cooldown) {
+        RedisFailures.translate(() -> {
+            for (long seatId : hold.seatIds()) {
+                redis.opsForValue().set(RedisKeys.rehold(hold.userId(), hold.performanceId(), seatId), "1",
+                        cooldown);
             }
-            failure.increment();
-            log.warn("[booking gate] Redis 반영 실패 op={}, performanceId={}: {}", op, performanceId, e.toString());
-        }
+        });
     }
 
-    private static List<String> userHoldAndSeatKeys(long performanceId, long userId, List<Long> seatIds) {
-        List<String> keys = new ArrayList<>(seatIds.size() + 1);
-        keys.add(RedisKeys.userHold(performanceId, userId));
-        keys.addAll(seatKeys(performanceId, seatIds));
+    private static List<String> userHoldAndSeatKeys(GateHold hold) {
+        List<String> keys = new ArrayList<>(hold.seatIds().size() + 1);
+        keys.add(RedisKeys.userHold(hold.userId(), hold.performanceId()));
+        keys.addAll(seatKeys(hold));
         return keys;
     }
 
-    private static List<String> seatKeys(long performanceId, List<Long> seatIds) {
-        return seatIds.stream().map(seatId -> RedisKeys.seat(performanceId, seatId)).toList();
+    private static List<String> seatKeys(GateHold hold) {
+        return hold.seatIds().stream().map(seatId -> RedisKeys.seat(hold.performanceId(), seatId)).toList();
     }
 }

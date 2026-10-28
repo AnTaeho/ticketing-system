@@ -14,7 +14,7 @@ public record CreatePerformanceRequest(
         @NotNull Integer seatsPerRow
 ) {
 
-    public NewPerformance toCommand() {
-        return new NewPerformance(showId, startsAt, openAt, gateCloseAt, sections, rows, seatsPerRow);
+    public CreatePerformanceCommand toCommand() {
+        return new CreatePerformanceCommand(showId, startsAt, openAt, gateCloseAt, sections, rows, seatsPerRow);
     }
 }

@@ -9,6 +9,7 @@ import com.example.ticketing.common.redis.InstanceId;
 import com.example.ticketing.common.redis.RedisKeys;
 import com.example.ticketing.common.redis.TestTicketingRedis;
 import com.example.ticketing.common.redis.TicketingRedis;
+import com.example.ticketing.seat.repository.SeatJdbcRepository;
 import com.example.ticketing.seat.repository.SeatMapRedisStore;
 import com.example.ticketing.support.CapturedLogs;
 import com.example.ticketing.support.Fixtures;
@@ -34,6 +35,8 @@ import tools.jackson.databind.json.JsonMapper;
 @IntegrationTest
 class SeatMapSnapshotSchedulerTest {
 
+    @Autowired
+    private SeatJdbcRepository seatJdbcRepository;
     @Autowired
     private SeatCatalog seatCatalog;
     @Autowired
@@ -105,7 +108,7 @@ class SeatMapSnapshotSchedulerTest {
         long started = track(fixtures.newPerformance(fixtures.newShow(), now.minusDays(2), now.minusMinutes(1), 1, 1, 2));
         List<Long> mine = List.of(open, notYetOpen, started);
         // 운영 카탈로그는 예매 중 목록을 10초 묶어 두므로, 같은 쿼리를 쓰는 새 카탈로그에서 이 테스트의 회차만 남긴다
-        SeatCatalog fresh = new SeatCatalog(jdbcTemplate, props, System::nanoTime) {
+        SeatCatalog fresh = new SeatCatalog(seatJdbcRepository, props, System::nanoTime) {
             @Override
             public List<Long> openPerformanceIds() {
                 return super.openPerformanceIds().stream().filter(mine::contains).toList();
@@ -173,7 +176,7 @@ class SeatMapSnapshotSchedulerTest {
     }
 
     private SeatCatalog catalogOf(List<Long> openIds) {
-        return new SeatCatalog(jdbcTemplate, props, System::nanoTime) {
+        return new SeatCatalog(seatJdbcRepository, props, System::nanoTime) {
             @Override
             public List<Long> openPerformanceIds() {
                 return openIds;

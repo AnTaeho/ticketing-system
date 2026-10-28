@@ -11,13 +11,14 @@ import com.example.ticketing.common.redis.TicketingRedis;
 import com.example.ticketing.common.time.DbClock;
 import com.example.ticketing.common.time.TestDbClock;
 import com.example.ticketing.queue.domain.QueueTokenStatus;
-import com.example.ticketing.queue.dto.QueueEntered;
-import com.example.ticketing.queue.dto.QueuePosition;
+import com.example.ticketing.queue.dto.QueueEnterResult;
+import com.example.ticketing.queue.dto.QueueStatusResult;
 import com.example.ticketing.queue.repository.QueueRedisStore;
 import com.example.ticketing.seat.service.SeatCatalog;
 import com.example.ticketing.support.Fixtures;
 import com.example.ticketing.support.IntegrationTest;
 import com.example.ticketing.support.RedisKeyCleaner;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.LocalDateTime;
@@ -46,6 +47,8 @@ class QueueServiceTest {
     // 대기열은 사용자 행을 읽지 않으므로 DB에 없는 큰 ID를 쓴다
     private static final long USER_BASE = 7_000_000_000L;
 
+    @Autowired
+    private MeterRegistry meterRegistry;
     @Autowired
     private QueueService queueService;
     @Autowired
@@ -79,7 +82,7 @@ class QueueServiceTest {
         assertThat(capacity).isEqualTo(200);
         long pid = openPerformance();
         int threads = 500;
-        Map<Long, QueueEntered> results = new ConcurrentHashMap<>();
+        Map<Long, QueueEnterResult> results = new ConcurrentHashMap<>();
         AtomicInteger errors = new AtomicInteger();
         ExecutorService pool = Executors.newFixedThreadPool(64);
         CountDownLatch start = new CountDownLatch(1);
@@ -89,7 +92,7 @@ class QueueServiceTest {
             pool.submit(() -> {
                 try {
                     start.await();
-                    results.put(userId, queueService.enter(pid, userId));
+                    results.put(userId, queueService.enter(userId, pid));
                 } catch (Throwable e) {
                     errors.incrementAndGet();
                 } finally {
@@ -110,17 +113,17 @@ class QueueServiceTest {
         assertThat(waiting).isEqualTo(threads - capacity);
         assertThat(redis().opsForZSet().zCard(RedisKeys.queueProcessing(pid))).isEqualTo(capacity);
         assertThat(redis().opsForZSet().zCard(RedisKeys.queueWaiting(pid))).isEqualTo(threads - capacity);
-        assertThat(results.values().stream().map(QueueEntered::token).distinct().count()).isEqualTo(threads);
-        results.forEach((userId, r) -> assertThat(r.token()).startsWith(userId + "."));
+        assertThat(results.values().stream().map(QueueEnterResult::queueToken).distinct().count()).isEqualTo(threads);
+        results.forEach((userId, r) -> assertThat(r.queueToken()).startsWith(userId + "."));
 
         Set<Long> positions = results.entrySet().stream()
                 .filter(e -> e.getValue().status() == QueueTokenStatus.WAITING)
-                .map(e -> queueService.status(pid, e.getKey(), e.getValue().token()).position())
+                .map(e -> queueService.status(e.getKey(), pid, e.getValue().queueToken()).position())
                 .collect(Collectors.toSet());
         assertThat(positions).isEqualTo(LongStream.rangeClosed(1, threads - capacity).boxed().collect(Collectors.toSet()));
 
         results.forEach((userId, r) -> {
-            QueueEntered again = queueService.enter(pid, userId);
+            QueueEnterResult again = queueService.enter(userId, pid);
             assertThat(again).isEqualTo(r);
         });
         assertThat(redis().opsForZSet().zCard(RedisKeys.queueProcessing(pid))).isEqualTo(capacity);
@@ -140,7 +143,7 @@ class QueueServiceTest {
             pool.submit(() -> {
                 try {
                     start.await();
-                    tokens.add(queueService.enter(pid, userId).token());
+                    tokens.add(queueService.enter(userId, pid).queueToken());
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                 } finally {
@@ -155,7 +158,7 @@ class QueueServiceTest {
         assertThat(tokens).hasSize(1);
         assertThat(redis().opsForZSet().zCard(RedisKeys.queueProcessing(pid))
                 + redis().opsForZSet().zCard(RedisKeys.queueWaiting(pid))).isEqualTo(1);
-        assertThat(redis().opsForValue().get(RedisKeys.queueUser(pid, userId))).isEqualTo(tokens.iterator().next());
+        assertThat(redis().opsForValue().get(RedisKeys.queueUser(userId, pid))).isEqualTo(tokens.iterator().next());
     }
 
     @Test
@@ -163,15 +166,15 @@ class QueueServiceTest {
     void reEnterReturnsSameToken() {
         long pid = openPerformance();
         QueueService service = serviceWithCapacity(1);
-        QueueEntered first = service.enter(pid, USER_BASE + 1);
-        QueueEntered second = service.enter(pid, USER_BASE + 2);
+        QueueEnterResult first = service.enter(USER_BASE + 1, pid);
+        QueueEnterResult second = service.enter(USER_BASE + 2, pid);
         assertThat(first.status()).isEqualTo(QueueTokenStatus.PROCESSING);
         assertThat(second.status()).isEqualTo(QueueTokenStatus.WAITING);
 
-        assertThat(service.enter(pid, USER_BASE + 1)).isEqualTo(first);
-        assertThat(service.enter(pid, USER_BASE + 2)).isEqualTo(second);
+        assertThat(service.enter(USER_BASE + 1, pid)).isEqualTo(first);
+        assertThat(service.enter(USER_BASE + 2, pid)).isEqualTo(second);
         assertThat(redis().opsForZSet().zCard(RedisKeys.queueWaiting(pid))).isEqualTo(1);
-        Long ttl = redis().getExpire(RedisKeys.queueUser(pid, USER_BASE + 2), TimeUnit.MILLISECONDS);
+        Long ttl = redis().getExpire(RedisKeys.queueUser(USER_BASE + 2, pid), TimeUnit.MILLISECONDS);
         assertThat(ttl).isPositive().isLessThanOrEqualTo(props.queue().waitingTokenTtl().toMillis());
     }
 
@@ -182,30 +185,30 @@ class QueueServiceTest {
         QueueService service = serviceWithCapacity(1);
         long processingUser = USER_BASE + 1;
         long waitingUser = USER_BASE + 2;
-        QueueEntered oldProcessing = service.enter(pid, processingUser);
-        QueueEntered oldWaiting = service.enter(pid, waitingUser);
+        QueueEnterResult oldProcessing = service.enter(processingUser, pid);
+        QueueEnterResult oldWaiting = service.enter(waitingUser, pid);
         long now = System.currentTimeMillis();
-        redis().opsForZSet().add(RedisKeys.queueProcessing(pid), oldProcessing.token(), now - 1);
-        redis().opsForZSet().add(RedisKeys.queueWaiting(pid), oldWaiting.token(),
+        redis().opsForZSet().add(RedisKeys.queueProcessing(pid), oldProcessing.queueToken(), now - 1);
+        redis().opsForZSet().add(RedisKeys.queueWaiting(pid), oldWaiting.queueToken(),
                 now - props.queue().waitingTokenTtl().toMillis() - 1);
-        assertThat(service.status(pid, processingUser, oldProcessing.token()).status())
+        assertThat(service.status(processingUser, pid, oldProcessing.queueToken()).status())
                 .isEqualTo(QueueTokenStatus.EXPIRED);
-        assertThat(service.status(pid, waitingUser, oldWaiting.token()).status())
+        assertThat(service.status(waitingUser, pid, oldWaiting.queueToken()).status())
                 .isEqualTo(QueueTokenStatus.EXPIRED);
 
         // 정리 전의 만료 처리열 토큰도 정원을 차지하므로 새 토큰은 대기열 뒤에 선다
-        QueueEntered renewedWaiting = service.enter(pid, waitingUser);
-        assertThat(renewedWaiting.token()).isNotEqualTo(oldWaiting.token());
+        QueueEnterResult renewedWaiting = service.enter(waitingUser, pid);
+        assertThat(renewedWaiting.queueToken()).isNotEqualTo(oldWaiting.queueToken());
         assertThat(renewedWaiting.status()).isEqualTo(QueueTokenStatus.WAITING);
-        assertThat(repository.waitingScore(pid, oldWaiting.token())).isNull();
+        assertThat(repository.waitingScore(pid, oldWaiting.queueToken())).isNull();
 
-        QueueEntered renewedProcessing = service.enter(pid, processingUser);
-        assertThat(renewedProcessing.token()).isNotEqualTo(oldProcessing.token());
+        QueueEnterResult renewedProcessing = service.enter(processingUser, pid);
+        assertThat(renewedProcessing.queueToken()).isNotEqualTo(oldProcessing.queueToken());
         assertThat(renewedProcessing.status()).isEqualTo(QueueTokenStatus.WAITING);
-        assertThat(repository.processingScore(pid, oldProcessing.token())).isNull();
+        assertThat(repository.processingScore(pid, oldProcessing.queueToken())).isNull();
         assertThat(redis().opsForZSet().zCard(RedisKeys.queueProcessing(pid))).isZero();
-        assertThat(service.status(pid, waitingUser, renewedWaiting.token()).position()).isEqualTo(1);
-        assertThat(service.status(pid, processingUser, renewedProcessing.token()).position()).isEqualTo(2);
+        assertThat(service.status(waitingUser, pid, renewedWaiting.queueToken()).position()).isEqualTo(1);
+        assertThat(service.status(processingUser, pid, renewedProcessing.queueToken()).position()).isEqualTo(2);
     }
 
     @Test
@@ -217,7 +220,7 @@ class QueueServiceTest {
         long closed = track(fixtures.newPerformance(show, now.minusDays(2), now.minusDays(1), 1, 1, 1));
 
         for (long pid : List.of(before, closed)) {
-            assertThatThrownBy(() -> queueService.enter(pid, USER_BASE + 1))
+            assertThatThrownBy(() -> queueService.enter(USER_BASE + 1, pid))
                     .isInstanceOf(ApiException.class)
                     .extracting(e -> ((ApiException) e).getCode())
                     .isEqualTo(ErrorCode.NOT_OPEN);
@@ -234,13 +237,13 @@ class QueueServiceTest {
         long openedAnHourAgo = track(fixtures.newPerformance(show, now.minusHours(1), now.plusDays(1), 1, 1, 1));
         QueueService dbAhead = new QueueService(repository, seatCatalog,
                 TestDbClock.withDbShift(jdbcTemplate, Duration.ofHours(2)), Clock.systemDefaultZone(), System::nanoTime,
-                props);
+                props, meterRegistry);
         QueueService dbBehind = new QueueService(repository, seatCatalog,
                 TestDbClock.withDbShift(jdbcTemplate, Duration.ofHours(-2)), Clock.systemDefaultZone(), System::nanoTime,
-                props);
+                props, meterRegistry);
 
-        assertThat(dbAhead.enter(opensInAnHour, USER_BASE + 1).status()).isEqualTo(QueueTokenStatus.PROCESSING);
-        assertThatThrownBy(() -> dbBehind.enter(openedAnHourAgo, USER_BASE + 2))
+        assertThat(dbAhead.enter(USER_BASE + 1, opensInAnHour).status()).isEqualTo(QueueTokenStatus.PROCESSING);
+        assertThatThrownBy(() -> dbBehind.enter(USER_BASE + 2, openedAnHourAgo))
                 .isInstanceOf(ApiException.class)
                 .extracting(e -> ((ApiException) e).getCode())
                 .isEqualTo(ErrorCode.NOT_OPEN);
@@ -254,18 +257,18 @@ class QueueServiceTest {
         QueueService service = serviceWithCapacity(1);
         long owner = USER_BASE + 1;
         long other = USER_BASE + 2;
-        String admitted = service.enter(pid, owner).token();
-        String waiting = service.enter(pid, other).token();
+        String admitted = service.enter(owner, pid).queueToken();
+        String waiting = service.enter(other, pid).queueToken();
 
-        assertThat(service.isAdmitted(pid, admitted, owner)).isTrue();
-        assertThat(service.isAdmitted(pid, admitted, other)).isFalse();
-        assertThat(service.isAdmitted(pid, owner + ".no-such-token", owner)).isFalse();
-        assertThat(service.isAdmitted(pid, waiting, other)).isFalse();
-        assertThat(service.isAdmitted(pid, "garbage", owner)).isFalse();
-        assertThat(service.isAdmitted(pid, null, owner)).isFalse();
+        assertThat(service.isAdmitted(owner, pid, admitted)).isTrue();
+        assertThat(service.isAdmitted(other, pid, admitted)).isFalse();
+        assertThat(service.isAdmitted(owner, pid, owner + ".no-such-token")).isFalse();
+        assertThat(service.isAdmitted(other, pid, waiting)).isFalse();
+        assertThat(service.isAdmitted(owner, pid, "garbage")).isFalse();
+        assertThat(service.isAdmitted(owner, pid, null)).isFalse();
 
         redis().opsForZSet().add(RedisKeys.queueProcessing(pid), admitted, System.currentTimeMillis() - 1);
-        assertThat(service.isAdmitted(pid, admitted, owner)).isFalse();
+        assertThat(service.isAdmitted(owner, pid, admitted)).isFalse();
         assertThat(redis().opsForZSet().zCard(RedisKeys.queueProcessing(pid))).isEqualTo(1);
     }
 
@@ -274,22 +277,22 @@ class QueueServiceTest {
     void statusPositionAndEstimate() {
         long pid = openPerformance();
         QueueService service = serviceWithCapacity(1);
-        String processing = service.enter(pid, USER_BASE).token();
+        String processing = service.enter(USER_BASE, pid).queueToken();
         List<String> waiting = new ArrayList<>();
         for (int i = 1; i <= 5; i++) {
-            waiting.add(service.enter(pid, USER_BASE + i).token());
+            waiting.add(service.enter(USER_BASE + i, pid).queueToken());
         }
 
-        QueuePosition third = service.status(pid, USER_BASE + 3, waiting.get(2));
-        assertThat(third).isEqualTo(QueuePosition.waiting(3, 30));
+        QueueStatusResult third = service.status(USER_BASE + 3, pid, waiting.get(2));
+        assertThat(third).isEqualTo(QueueStatusResult.waiting(3, 30));
 
         repository.saveRate(pid, 2.0, QueuePromotionScheduler.RATE_TTL);
-        assertThat(service.status(pid, USER_BASE + 5, waiting.get(4))).isEqualTo(QueuePosition.waiting(5, 3));
-        assertThat(service.status(pid, USER_BASE + 1, waiting.get(0))).isEqualTo(QueuePosition.waiting(1, 1));
-        assertThat(service.status(pid, USER_BASE, processing)).isEqualTo(QueuePosition.processing());
-        assertThat(service.status(pid, USER_BASE, USER_BASE + ".unknown")).isEqualTo(QueuePosition.expired());
+        assertThat(service.status(USER_BASE + 5, pid, waiting.get(4))).isEqualTo(QueueStatusResult.waiting(5, 3));
+        assertThat(service.status(USER_BASE + 1, pid, waiting.get(0))).isEqualTo(QueueStatusResult.waiting(1, 1));
+        assertThat(service.status(USER_BASE, pid, processing)).isEqualTo(QueueStatusResult.processing());
+        assertThat(service.status(USER_BASE, pid, USER_BASE + ".unknown")).isEqualTo(QueueStatusResult.expired());
 
-        assertThatThrownBy(() -> service.status(pid, USER_BASE + 9, processing))
+        assertThatThrownBy(() -> service.status(USER_BASE + 9, pid, processing))
                 .isInstanceOf(ApiException.class)
                 .extracting(e -> ((ApiException) e).getCode())
                 .isEqualTo(ErrorCode.QUEUE_TOKEN_NOT_FOUND);
@@ -300,18 +303,18 @@ class QueueServiceTest {
     void consume() {
         long pid = openPerformance();
         long owner = USER_BASE + 1;
-        String token = queueService.enter(pid, owner).token();
+        String token = queueService.enter(owner, pid).queueToken();
 
-        assertThat(queueService.consume(pid, token, USER_BASE + 2)).isFalse();
-        assertThat(queueService.isAdmitted(pid, token, owner)).isTrue();
+        assertThat(queueService.consume(USER_BASE + 2, pid, token)).isFalse();
+        assertThat(queueService.isAdmitted(owner, pid, token)).isTrue();
 
-        assertThat(queueService.consume(pid, token, owner)).isTrue();
-        assertThat(queueService.isAdmitted(pid, token, owner)).isFalse();
-        assertThat(redis().hasKey(RedisKeys.queueUser(pid, owner))).isFalse();
-        assertThat(queueService.consume(pid, token, owner)).isFalse();
+        assertThat(queueService.consume(owner, pid, token)).isTrue();
+        assertThat(queueService.isAdmitted(owner, pid, token)).isFalse();
+        assertThat(redis().hasKey(RedisKeys.queueUser(owner, pid))).isFalse();
+        assertThat(queueService.consume(owner, pid, token)).isFalse();
 
-        QueueEntered again = queueService.enter(pid, owner);
-        assertThat(again.token()).isNotEqualTo(token);
+        QueueEnterResult again = queueService.enter(owner, pid);
+        assertThat(again.queueToken()).isNotEqualTo(token);
         assertThat(again.status()).isEqualTo(QueueTokenStatus.PROCESSING);
     }
 
@@ -320,20 +323,20 @@ class QueueServiceTest {
     void consumeKeepsNewerUserKey() {
         long pid = openPerformance();
         long owner = USER_BASE + 1;
-        String old = queueService.enter(pid, owner).token();
+        String old = queueService.enter(owner, pid).queueToken();
         redis().opsForZSet().add(RedisKeys.queueProcessing(pid), old, System.currentTimeMillis() - 1);
-        String renewed = queueService.enter(pid, owner).token();
+        String renewed = queueService.enter(owner, pid).queueToken();
         assertThat(renewed).isNotEqualTo(old);
 
-        queueService.consume(pid, old, owner);
+        queueService.consume(owner, pid, old);
 
-        assertThat(redis().opsForValue().get(RedisKeys.queueUser(pid, owner))).isEqualTo(renewed);
-        assertThat(queueService.isAdmitted(pid, renewed, owner)).isTrue();
+        assertThat(redis().opsForValue().get(RedisKeys.queueUser(owner, pid))).isEqualTo(renewed);
+        assertThat(queueService.isAdmitted(owner, pid, renewed)).isTrue();
     }
 
     private QueueService serviceWithCapacity(int capacity) {
         return new QueueService(repository, seatCatalog, dbClock, Clock.systemDefaultZone(), System::nanoTime,
-                QueueTestProps.withCapacity(props, capacity));
+                QueueTestProps.withCapacity(props, capacity), meterRegistry);
     }
 
     private long openPerformance() {

@@ -8,4 +8,8 @@ public record CreateShowRequest(
         @NotBlank @Size(max = 100) String venueName,
         @Size(max = 1000) String description
 ) {
+
+    public CreateShowCommand toCommand() {
+        return new CreateShowCommand(title, venueName, description);
+    }
 }

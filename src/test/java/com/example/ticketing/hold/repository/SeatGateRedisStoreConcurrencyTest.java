@@ -2,6 +2,7 @@ package com.example.ticketing.hold.repository;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.example.ticketing.hold.domain.GateHold;
 import com.example.ticketing.hold.domain.GateResult;
 import com.example.ticketing.support.IntegrationTest;
 import com.example.ticketing.support.RedisKeyCleaner;
@@ -55,7 +56,8 @@ class SeatGateRedisStoreConcurrencyTest {
                 try {
                     ready.countDown();
                     start.await();
-                    GateResult result = gate.tryHold(pid, userId, seats, "t-" + userId, Duration.ofMinutes(5));
+                    GateResult result = gate.tryHold(
+                            new GateHold(userId, pid, "t-" + userId, seats), Duration.ofMinutes(5));
                     results.computeIfAbsent(result, r -> new AtomicInteger()).incrementAndGet();
                 } catch (Throwable t) {
                     unexpected.add(t);

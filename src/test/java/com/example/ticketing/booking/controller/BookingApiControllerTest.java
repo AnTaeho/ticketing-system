@@ -6,7 +6,8 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import com.example.ticketing.hold.dto.HoldCreated;
+import com.example.ticketing.hold.dto.CreateHoldCommand;
+import com.example.ticketing.hold.dto.CreateHoldResult;
 import com.example.ticketing.hold.service.SeatHoldService;
 import com.example.ticketing.outbox.dto.ClaimedOutboxTask;
 import com.example.ticketing.outbox.service.TicketIssuedHandler;
@@ -200,7 +201,8 @@ class BookingApiControllerTest {
         long pid = fixtures.newPerformance(1, 1, 6);
         performances.add(pid);
         List<Long> seatIds = db.seatIds(pid).subList(0, seatCount);
-        HoldCreated hold = seatHoldService.hold(userId, pid, seatIds, fixtures.admit(pid, userId));
+        CreateHoldResult hold = seatHoldService.hold(
+                new CreateHoldCommand(userId, pid, seatIds, fixtures.admit(pid, userId)));
         PaymentResponse paid = paymentService.pay(userId, hold.holdId(), UUID.randomUUID().toString(),
                 Optional.empty());
         assertThat(paid.status()).isEqualTo(PaymentResponse.Status.CONFIRMED);

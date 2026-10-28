@@ -10,9 +10,11 @@ import com.example.ticketing.common.error.ErrorCode;
 import com.example.ticketing.common.jdbc.ConstraintViolations;
 import com.example.ticketing.common.redis.RedisKeys;
 import com.example.ticketing.common.redis.TicketingRedis;
-import com.example.ticketing.hold.dto.HoldCreated;
+import com.example.ticketing.hold.dto.CreateHoldCommand;
+import com.example.ticketing.hold.dto.CreateHoldResult;
 import com.example.ticketing.hold.repository.SeatGateRedisStore;
 import com.example.ticketing.hold.service.HoldExpiryTransaction;
+import com.example.ticketing.hold.service.SeatGateReflector;
 import com.example.ticketing.hold.service.SeatHoldService;
 import com.example.ticketing.payment.client.PgResult;
 import com.example.ticketing.payment.client.PgStatus;
@@ -28,6 +30,7 @@ import com.example.ticketing.support.PaymentDb;
 import com.example.ticketing.support.RedisKeyCleaner;
 import com.example.ticketing.support.StubPgClient;
 import com.example.ticketing.support.StubPgTestConfig;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -171,7 +174,7 @@ class PaymentServiceTest {
             assertThat(redis.opsForValue().get(seatKey)).isEqualTo(f.holdToken);
             assertThat(pttl(seatKey)).isBetween(expectedMs - TOLERANCE_MS, expectedMs + TOLERANCE_MS);
         }
-        assertThat(redis.hasKey(RedisKeys.userHold(f.pid, f.userId))).isFalse();
+        assertThat(redis.hasKey(RedisKeys.userHold(f.userId, f.pid))).isFalse();
         System.out.printf("[S4.3] 확정 좌석 키 PTTL=%dms, gate_close_at까지=%dms%n",
                 pttl(RedisKeys.seat(f.pid, f.seatIds.get(0))), expectedMs);
     }
@@ -242,7 +245,7 @@ class PaymentServiceTest {
                 .containsEntry("hold_id", f.holdId).containsEntry("held_until", payDeadline));
         long payDeadlineMs = Duration.between(db.dbNow(), payDeadline).toMillis();
         long expectedTtl = payDeadlineMs + properties.payment().gateKeyMargin().toMillis();
-        assertThat(pttl(RedisKeys.userHold(f.pid, f.userId)))
+        assertThat(pttl(RedisKeys.userHold(f.userId, f.pid)))
                 .isBetween(expectedTtl - TOLERANCE_MS, expectedTtl + TOLERANCE_MS);
         for (long seatId : f.seatIds) {
             assertThat(pttl(RedisKeys.seat(f.pid, seatId)))
@@ -394,12 +397,14 @@ class PaymentServiceTest {
 
         long other = fixtures.newUser();
         String queueToken = fixtures.admit(f.pid, other);
-        ApiException byGate = catchBooking(() -> seatHoldService.hold(other, f.pid, f.seatIds, queueToken));
+        ApiException byGate = catchBooking(() -> seatHoldService.hold(
+                new CreateHoldCommand(other, f.pid, f.seatIds, queueToken)));
         assertThat(byGate.getCode()).isEqualTo(ErrorCode.SEAT_TAKEN);
 
         redisKeyCleaner.clean(f.pid);
         String retryToken = fixtures.admit(f.pid, other);
-        ApiException byDb = catchBooking(() -> seatHoldService.hold(other, f.pid, f.seatIds, retryToken));
+        ApiException byDb = catchBooking(() -> seatHoldService.hold(
+                new CreateHoldCommand(other, f.pid, f.seatIds, retryToken)));
         assertThat(byDb.getCode()).isEqualTo(ErrorCode.SEAT_STATE_CHANGED);
 
         assertThat(expiryTransaction.claimAndExpire(50))
@@ -419,8 +424,9 @@ class PaymentServiceTest {
         long kept = f.seatIds.get(0);
         long lost = f.seatIds.get(1);
         long thief = fixtures.newUser();
-        HoldCreated thiefHold = seatHoldService.hold(thief, f.pid, List.of(db.seatIds(f.pid).get(2)),
-                fixtures.admit(f.pid, thief));
+        CreateHoldResult thiefHold = seatHoldService.hold(
+                new CreateHoldCommand(thief, f.pid, List.of(db.seatIds(f.pid).get(2)),
+                fixtures.admit(f.pid, thief)));
         stubPg.beforeApproveReturns(orderId ->
                 jdbcTemplate.update("UPDATE seat SET hold_id = ? WHERE id = ?", thiefHold.holdId(), lost));
         String key = key();
@@ -441,7 +447,7 @@ class PaymentServiceTest {
         assertThat(refund.get("paymentId").asLong()).isEqualTo(paymentId);
         assertThat(refund.get("orderId").asString()).isEqualTo(payment.get("order_id"));
 
-        assertThat(redis.hasKey(RedisKeys.userHold(f.pid, f.userId))).isFalse();
+        assertThat(redis.hasKey(RedisKeys.userHold(f.userId, f.pid))).isFalse();
         assertThat(redis.hasKey(RedisKeys.seat(f.pid, kept))).isFalse();
         assertThat(redis.hasKey(RedisKeys.seat(f.pid, lost))).isFalse();
         assertThat(redis.opsForValue().get(RedisKeys.seat(f.pid, db.seatIds(f.pid).get(2))))
@@ -537,7 +543,8 @@ class PaymentServiceTest {
                 properties.payment(), new TicketingProperties.Gate(false, properties.gate().fallbackMaxConcurrency()),
                 properties.queue(), properties.seatmap(), properties.outbox(), properties.ops(), properties.pg(),
                 properties.fakePg());
-        PaymentService service = new PaymentService(paymentTransaction, stubPg, gate, gateOff);
+        SeatGateReflector reflector = new SeatGateReflector(gate, gateOff, new SimpleMeterRegistry(), System::nanoTime);
+        PaymentService service = new PaymentService(paymentTransaction, stubPg, reflector, gateOff);
         Fixture confirmed = newHold(1);
         Fixture declined = newHold(1);
         Fixture unknown = newHold(1);
@@ -565,7 +572,8 @@ class PaymentServiceTest {
         performances.add(pid);
         long userId = fixtures.newUser();
         List<Long> seatIds = db.seatIds(pid).subList(0, seatCount);
-        HoldCreated hold = seatHoldService.hold(userId, pid, seatIds, fixtures.admit(pid, userId));
+        CreateHoldResult hold = seatHoldService.hold(
+                new CreateHoldCommand(userId, pid, seatIds, fixtures.admit(pid, userId)));
         return new Fixture(pid, userId, hold.holdId(), List.copyOf(seatIds), hold.totalAmount(),
                 db.holdToken(hold.holdId()));
     }

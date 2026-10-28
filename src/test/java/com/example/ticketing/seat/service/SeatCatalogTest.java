@@ -6,11 +6,13 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.example.ticketing.common.config.TicketingProperties;
 import com.example.ticketing.common.error.ApiException;
 import com.example.ticketing.common.error.ErrorCode;
+import com.example.ticketing.seat.domain.PerformanceInfo;
 import com.example.ticketing.seat.domain.SeatGrade;
-import com.example.ticketing.seat.service.SeatCatalog.PerformanceInfo;
-import com.example.ticketing.seat.service.SeatCatalog.SeatInfo;
-import com.example.ticketing.seat.service.SeatCatalog.SeatSelection;
+import com.example.ticketing.seat.domain.SeatInfo;
+import com.example.ticketing.seat.dto.SeatSelection;
+import com.example.ticketing.seat.repository.SeatJdbcRepository;
 import com.example.ticketing.show.domain.Performance;
+import com.example.ticketing.show.domain.PerformanceState;
 import com.example.ticketing.show.repository.PerformanceRepository;
 import com.example.ticketing.support.Fixtures;
 import com.example.ticketing.support.IntegrationTest;
@@ -26,6 +28,8 @@ import org.springframework.jdbc.core.JdbcTemplate;
 @IntegrationTest
 class SeatCatalogTest {
 
+    @Autowired
+    private SeatJdbcRepository seatJdbcRepository;
     @Autowired
     private SeatCatalog seatCatalog;
     @Autowired
@@ -137,7 +141,7 @@ class SeatCatalogTest {
     @Test
     @DisplayName("예매 중인 회차 목록은 open_at <= 지금 < starts_at인 회차만 담고 10초 동안 다시 읽지 않는다")
     void openPerformanceIds() {
-        SeatCatalog fresh = new SeatCatalog(jdbcTemplate, properties, System::nanoTime);
+        SeatCatalog fresh = new SeatCatalog(seatJdbcRepository, properties, System::nanoTime);
         long showId = fixtures.newShow();
         LocalDateTime now = fixtures.dbNow();
         long open = fixtures.newPerformance(showId, now.minusMinutes(1), now.plusDays(1), 1, 1, 1);
@@ -150,6 +154,27 @@ class SeatCatalogTest {
 
         assertThat(first).contains(open).doesNotContain(beforeOpen, closed);
         assertThat(second).isEqualTo(first).doesNotContain(openedLater);
+    }
+
+    @Test
+    @DisplayName("requireOpen은 넘긴 시각이 open_at 이상 starts_at 미만일 때만 회차를 돌려주고 그 밖은 409 NOT_OPEN이다")
+    void requireOpenUsesGivenTime() {
+        long pid = fixtures.newPerformance(1, 1, 1);
+        PerformanceInfo info = seatCatalog.performance(pid);
+
+        assertThat(seatCatalog.requireOpen(pid, info.openAt())).isSameAs(info);
+        assertThat(seatCatalog.requireOpen(pid, info.startsAt().minusNanos(1000))).isSameAs(info);
+        assertNotOpen(pid, info.openAt().minusNanos(1000));
+        assertNotOpen(pid, info.startsAt());
+        assertThat(info.stateAt(info.openAt().minusNanos(1000))).isEqualTo(PerformanceState.BEFORE_OPEN);
+        assertThat(info.stateAt(info.startsAt())).isEqualTo(PerformanceState.CLOSED);
+    }
+
+    private void assertNotOpen(long pid, LocalDateTime now) {
+        assertThatThrownBy(() -> seatCatalog.requireOpen(pid, now))
+                .isInstanceOf(ApiException.class)
+                .extracting(e -> ((ApiException) e).getCode())
+                .isEqualTo(ErrorCode.NOT_OPEN);
     }
 
     private List<Long> seatIds(long pid) {

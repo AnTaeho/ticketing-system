@@ -2,7 +2,6 @@ package com.example.ticketing.hold.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -13,8 +12,9 @@ import static org.mockito.Mockito.when;
 
 import com.example.ticketing.common.config.TicketingProperties;
 import com.example.ticketing.common.metrics.Metrics;
+import com.example.ticketing.hold.domain.GateHold;
+import com.example.ticketing.hold.dto.HoldExpiry;
 import com.example.ticketing.hold.repository.SeatGateRedisStore;
-import com.example.ticketing.hold.service.HoldExpiryTransaction.ExpiredHold;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Duration;
 import java.util.List;
@@ -45,16 +45,17 @@ class HoldExpirySchedulerTest {
     @Test
     @DisplayName("게이트 ON: hold마다 게이트 키를 지우고, 좌석이 남아 있던 hold에만 재선점 쿨다운을 건다")
     void releasesGateAndSetsCooldown() {
-        ExpiredHold withSeats = new ExpiredHold(1L, 7L, 11L, "token-1", List.of(101L, 102L));
-        ExpiredHold seatsTaken = new ExpiredHold(2L, 7L, 12L, "token-2", List.of());
-        when(expiryTransaction.claimAndExpire(BATCH)).thenReturn(List.of(withSeats, seatsTaken));
+        GateHold withSeats = new GateHold(11L, 7L, "token-1", List.of(101L, 102L));
+        GateHold seatsTaken = new GateHold(12L, 7L, "token-2", List.of());
+        when(expiryTransaction.claimAndExpire(BATCH))
+                .thenReturn(List.of(new HoldExpiry(1L, withSeats), new HoldExpiry(2L, seatsTaken)));
 
         scheduler.scan();
 
-        verify(gate).releaseQuietly(7L, 11L, List.of(101L, 102L), "token-1");
-        verify(gate).setReholdCooldownQuietly(7L, 11L, List.of(101L, 102L), COOLDOWN);
-        verify(gate).releaseQuietly(7L, 12L, List.of(), "token-2");
-        verify(gate, never()).setReholdCooldownQuietly(anyLong(), eq(12L), any(), any());
+        verify(gate).release(withSeats);
+        verify(gate).setReholdCooldown(withSeats, COOLDOWN);
+        verify(gate).release(seatsTaken);
+        verify(gate, never()).setReholdCooldown(eq(seatsTaken), any());
     }
 
     @Test
@@ -107,16 +108,17 @@ class HoldExpirySchedulerTest {
         TicketingProperties properties = new TicketingProperties(null, null,
                 new TicketingProperties.Hold(Duration.ofMinutes(5), 4, true, 1000, BATCH, COOLDOWN),
                 null, new TicketingProperties.Gate(gateEnabled, 20), null, null, null, null, null, null);
-        return new HoldExpiryScheduler(expiryTransaction, gate, properties, meterRegistry);
+        SeatGateReflector reflector = new SeatGateReflector(gate, properties, meterRegistry, System::nanoTime);
+        return new HoldExpiryScheduler(expiryTransaction, reflector, new HoldMetrics(meterRegistry), properties);
     }
 
     private double expiredCount() {
         return meterRegistry.counter(Metrics.HOLD_EXPIRED).count();
     }
 
-    private static List<ExpiredHold> holds(int count) {
+    private static List<HoldExpiry> holds(int count) {
         return LongStream.rangeClosed(1, count)
-                .mapToObj(id -> new ExpiredHold(id, 1L, id, "token-" + id, List.of(id)))
+                .mapToObj(id -> new HoldExpiry(id, new GateHold(id, 1L, "token-" + id, List.of(id))))
                 .toList();
     }
 }

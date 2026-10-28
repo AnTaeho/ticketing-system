@@ -1,8 +1,8 @@
 package com.example.ticketing.queue.controller;
 
 import com.example.ticketing.common.web.CurrentUser;
-import com.example.ticketing.queue.dto.QueueEntered;
-import com.example.ticketing.queue.dto.QueuePosition;
+import com.example.ticketing.queue.dto.QueueEnterResponse;
+import com.example.ticketing.queue.dto.QueueStatusResponse;
 import com.example.ticketing.queue.service.QueueService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -17,13 +17,13 @@ public class QueueApiController {
     private final QueueService queueService;
 
     @PostMapping("/api/performances/{performanceId}/queue/tokens")
-    public QueueEntered enter(@CurrentUser Long userId, @PathVariable long performanceId) {
-        return queueService.enter(performanceId, userId);
+    public QueueEnterResponse enter(@CurrentUser Long userId, @PathVariable long performanceId) {
+        return QueueEnterResponse.from(queueService.enter(userId, performanceId));
     }
 
-    @GetMapping("/api/performances/{performanceId}/queue/tokens/{token}")
-    public QueuePosition status(@CurrentUser Long userId, @PathVariable long performanceId,
-                                @PathVariable String token) {
-        return queueService.status(performanceId, userId, token);
+    @GetMapping("/api/performances/{performanceId}/queue/tokens/{queueToken}")
+    public QueueStatusResponse status(@CurrentUser Long userId, @PathVariable long performanceId,
+                                      @PathVariable String queueToken) {
+        return QueueStatusResponse.from(queueService.status(userId, performanceId, queueToken));
     }
 }

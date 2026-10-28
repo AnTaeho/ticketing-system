@@ -14,8 +14,8 @@ public class SchedulerLease {
     private final StringRedisTemplate redis;
     private final String instanceId;
 
-    public SchedulerLease(TicketingRedis bookingRedis, InstanceId instanceId) {
-        this.redis = bookingRedis.template();
+    public SchedulerLease(TicketingRedis ticketingRedis, InstanceId instanceId) {
+        this.redis = ticketingRedis.template();
         this.instanceId = instanceId.value();
     }
 
@@ -24,12 +24,9 @@ public class SchedulerLease {
         String key = RedisKeys.schedulerLease(name);
         Boolean acquired;
         try {
-            acquired = redis.opsForValue().setIfAbsent(key, instanceId, ttl);
-        } catch (RuntimeException e) {
-            if (!RedisFailures.isFailure(e)) {
-                throw e;
-            }
-            log.debug("[booking lease] {} 리스 획득 실패, 이번 주기는 건너뛴다: {}", name, e.toString());
+            acquired = RedisFailures.translate(() -> redis.opsForValue().setIfAbsent(key, instanceId, ttl));
+        } catch (RedisUnavailableException e) {
+            log.debug("[booking lease] {} 리스 획득 실패, 이번 주기는 건너뛴다: {}", name, RedisFailures.describe(e));
             return false;
         }
         if (!Boolean.TRUE.equals(acquired)) {
@@ -46,12 +43,9 @@ public class SchedulerLease {
     // TTL이 지나 다른 인스턴스가 잡은 리스는 값이 달라 지우지 않는다. 못 지우면 TTL이 푼다
     private void release(String name, String key) {
         try {
-            redis.execute(RedisScripts.RELEASE, List.of(key), instanceId);
-        } catch (RuntimeException e) {
-            if (!RedisFailures.isFailure(e)) {
-                throw e;
-            }
-            log.debug("[booking lease] {} 리스 해제 실패, TTL로 풀린다: {}", name, e.toString());
+            RedisFailures.translate(() -> redis.execute(RedisScripts.RELEASE, List.of(key), instanceId));
+        } catch (RedisUnavailableException e) {
+            log.debug("[booking lease] {} 리스 해제 실패, TTL로 풀린다: {}", name, RedisFailures.describe(e));
         }
     }
 }

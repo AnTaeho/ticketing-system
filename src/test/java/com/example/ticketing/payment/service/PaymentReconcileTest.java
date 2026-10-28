@@ -7,8 +7,9 @@ import com.example.ticketing.common.metrics.Metrics;
 import com.example.ticketing.common.metrics.Metrics.Tag;
 import com.example.ticketing.common.redis.RedisKeys;
 import com.example.ticketing.common.redis.TicketingRedis;
-import com.example.ticketing.hold.dto.HoldCreated;
-import com.example.ticketing.hold.repository.SeatGateRedisStore;
+import com.example.ticketing.hold.dto.CreateHoldCommand;
+import com.example.ticketing.hold.dto.CreateHoldResult;
+import com.example.ticketing.hold.service.SeatGateReflector;
 import com.example.ticketing.hold.service.SeatHoldService;
 import com.example.ticketing.payment.client.PgResult;
 import com.example.ticketing.payment.client.PgStatus;
@@ -60,7 +61,7 @@ class PaymentReconcileTest {
     @Autowired
     private SeatHoldService seatHoldService;
     @Autowired
-    private SeatGateRedisStore gate;
+    private SeatGateReflector gate;
     @Autowired
     private StubPgClient stubPg;
     @Autowired
@@ -129,7 +130,7 @@ class PaymentReconcileTest {
             assertThat(redis.opsForValue().get(seatKey)).isEqualTo(f.holdToken);
             assertThat(pttl(seatKey)).isBetween(expectedMs - TOLERANCE_MS, expectedMs + TOLERANCE_MS);
         }
-        assertThat(redis.hasKey(RedisKeys.userHold(f.pid, f.userId))).isFalse();
+        assertThat(redis.hasKey(RedisKeys.userHold(f.userId, f.pid))).isFalse();
         assertThat(stubPg.queryCalls()).isEqualTo(1);
         assertThat(count("confirmed") - before).isEqualTo(1);
         System.out.printf("[S5.1] 대사 확정 좌석 키 PTTL=%dms, gate_close_at까지=%dms%n",
@@ -209,7 +210,8 @@ class PaymentReconcileTest {
         jdbcTemplate.update("UPDATE seat SET held_until = NOW(6) - INTERVAL 1 SECOND WHERE id = ?", lost);
         redis.delete(RedisKeys.seat(f.pid, lost));
         long thief = fixtures.newUser();
-        HoldCreated thiefHold = seatHoldService.hold(thief, f.pid, List.of(lost), fixtures.admit(f.pid, thief));
+        CreateHoldResult thiefHold = seatHoldService.hold(
+                new CreateHoldCommand(thief, f.pid, List.of(lost), fixtures.admit(f.pid, thief)));
         stubPg.queryWith(PgResult.of(PgStatus.APPROVED, "pg-lost-1"));
         double before = count("seat_lost");
         db.makeDue(paymentId);
@@ -224,7 +226,7 @@ class PaymentReconcileTest {
         assertThat(db.outboxCount("REFUND_REQUESTED", paymentId)).isEqualTo(1);
         assertThat(db.bookingCountOfHold(f.holdId)).isZero();
         assertThat(redis.hasKey(RedisKeys.seat(f.pid, kept))).isFalse();
-        assertThat(redis.hasKey(RedisKeys.userHold(f.pid, f.userId))).isFalse();
+        assertThat(redis.hasKey(RedisKeys.userHold(f.userId, f.pid))).isFalse();
         assertThat(redis.opsForValue().get(RedisKeys.seat(f.pid, lost))).isEqualTo(db.holdToken(thiefHold.holdId()));
         assertThat(count("seat_lost") - before).isEqualTo(1);
     }
@@ -454,7 +456,8 @@ class PaymentReconcileTest {
         performances.add(pid);
         long userId = fixtures.newUser();
         List<Long> seatIds = db.seatIds(pid).subList(0, seatCount);
-        HoldCreated hold = seatHoldService.hold(userId, pid, seatIds, fixtures.admit(pid, userId));
+        CreateHoldResult hold = seatHoldService.hold(
+                new CreateHoldCommand(userId, pid, seatIds, fixtures.admit(pid, userId)));
         return new Fixture(pid, userId, hold.holdId(), List.copyOf(seatIds), db.holdToken(hold.holdId()));
     }
 

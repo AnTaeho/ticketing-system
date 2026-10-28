@@ -17,15 +17,16 @@ import com.example.ticketing.common.error.ErrorCode;
 import com.example.ticketing.common.time.DbClock;
 import com.example.ticketing.common.time.TestDbClock;
 import com.example.ticketing.hold.domain.GateResult;
-import com.example.ticketing.hold.dto.HoldCreated;
+import com.example.ticketing.hold.dto.CreateHoldCommand;
+import com.example.ticketing.hold.dto.CreateHoldResult;
+import com.example.ticketing.hold.dto.HoldPlacement;
 import com.example.ticketing.hold.repository.SeatGateRedisStore;
 import com.example.ticketing.hold.repository.SeatHoldRepository;
-import com.example.ticketing.hold.service.SeatHoldTransaction.PersistedHold;
 import com.example.ticketing.payment.repository.PaymentRepository;
 import com.example.ticketing.queue.service.QueueService;
+import com.example.ticketing.seat.dto.SeatSelection;
 import com.example.ticketing.seat.repository.SeatRepository;
 import com.example.ticketing.seat.service.SeatCatalog;
-import com.example.ticketing.seat.service.SeatCatalog.SeatSelection;
 import com.example.ticketing.support.Fixtures;
 import com.example.ticketing.support.IntegrationTest;
 import com.example.ticketing.support.RedisKeyCleaner;
@@ -73,8 +74,9 @@ class SeatHoldServiceTest {
         long userId = fixtures.newUser();
         LocalDateTime before = fixtures.dbNow();
 
-        HoldCreated created = seatHoldService.hold(userId, pid, List.of(ids.get(1), ids.get(0)),
-                fixtures.admit(pid, userId));
+        CreateHoldResult created = seatHoldService.hold(
+                new CreateHoldCommand(userId, pid, List.of(ids.get(1), ids.get(0)),
+                fixtures.admit(pid, userId)));
 
         Map<String, Object> hold = jdbcTemplate.queryForMap("SELECT * FROM seat_hold WHERE id = ?", created.holdId());
         assertThat(hold.get("status")).isEqualTo("HELD");
@@ -96,10 +98,11 @@ class SeatHoldServiceTest {
         long pid = fixtures.newPerformance(1, 1, 4);
         List<Long> ids = seatIds(pid);
         long userId = fixtures.newUser();
-        seatHoldService.hold(userId, pid, List.of(ids.get(0)), fixtures.admit(pid, userId));
+        seatHoldService.hold(new CreateHoldCommand(userId, pid, List.of(ids.get(0)), fixtures.admit(pid, userId)));
 
         String queueToken = fixtures.admit(pid, userId);
-        assertThatThrownBy(() -> seatHoldService.hold(userId, pid, List.of(ids.get(1)), queueToken))
+        assertThatThrownBy(() -> seatHoldService.hold(
+                new CreateHoldCommand(userId, pid, List.of(ids.get(1)), queueToken)))
                 .isInstanceOf(ApiException.class)
                 .extracting("code").isEqualTo(ErrorCode.USER_HAS_HOLD);
         assertThat(jdbcTemplate.queryForObject("SELECT status FROM seat WHERE id = ?", String.class, ids.get(1)))
@@ -113,7 +116,8 @@ class SeatHoldServiceTest {
         List<Long> target = seatIds(pid).subList(0, 2);
         long userA = fixtures.newUser();
         long userB = fixtures.newUser();
-        HoldCreated holdA = seatHoldService.hold(userA, pid, target, fixtures.admit(pid, userA));
+        CreateHoldResult holdA = seatHoldService.hold(
+                new CreateHoldCommand(userA, pid, target, fixtures.admit(pid, userA)));
 
         seatHoldService.release(userA, holdA.holdId());
 
@@ -126,7 +130,8 @@ class SeatHoldServiceTest {
             assertThat(seat.get("held_until")).isNull();
         });
 
-        HoldCreated holdB = seatHoldService.hold(userB, pid, target, fixtures.admit(pid, userB));
+        CreateHoldResult holdB = seatHoldService.hold(
+                new CreateHoldCommand(userB, pid, target, fixtures.admit(pid, userB)));
         assertThat(heldSeats(pid, holdB.holdId())).containsExactlyElementsOf(target);
 
         assertThatThrownBy(() -> seatHoldService.release(userA, holdA.holdId()))
@@ -143,18 +148,20 @@ class SeatHoldServiceTest {
         List<Long> target = seatIds(pid).subList(0, 2);
         long userA = fixtures.newUser();
         long userB = fixtures.newUser();
-        HoldCreated holdA = seatHoldService.hold(userA, pid, target, fixtures.admit(pid, userA));
+        CreateHoldResult holdA = seatHoldService.hold(
+                new CreateHoldCommand(userA, pid, target, fixtures.admit(pid, userA)));
         long otherUser = fixtures.newUser();
 
         String queueToken = fixtures.admit(pid, otherUser);
-        assertThatThrownBy(() -> seatHoldService.hold(otherUser, pid, target, queueToken))
+        assertThatThrownBy(() -> seatHoldService.hold(new CreateHoldCommand(otherUser, pid, target, queueToken)))
                 .extracting("code").isEqualTo(ErrorCode.SEAT_TAKEN);
 
         // 게이트 키는 선점과 같은 TTL이라 held_until이 지나면 함께 사라진다. DB 시각만 당겼으므로 키도 지운다
         jdbcTemplate.update("UPDATE seat SET held_until = NOW(6) - INTERVAL 1 SECOND "
                 + "WHERE performance_id = ? AND hold_id = ?", pid, holdA.holdId());
         redisKeyCleaner.clean(pid);
-        HoldCreated holdB = seatHoldService.hold(userB, pid, target, fixtures.admit(pid, userB));
+        CreateHoldResult holdB = seatHoldService.hold(
+                new CreateHoldCommand(userB, pid, target, fixtures.admit(pid, userB)));
 
         assertThat(heldSeats(pid, holdB.holdId())).containsExactlyElementsOf(target);
         assertThat(heldSeats(pid, holdA.holdId())).isEmpty();
@@ -170,7 +177,7 @@ class SeatHoldServiceTest {
         long userId = fixtures.newUser();
 
         // 열리기 전에는 줄도 설 수 없다. 회차 검증이 처리열 확인보다 먼저라 토큰 없이도 NOT_OPEN이다
-        assertThatThrownBy(() -> seatHoldService.hold(userId, pid, seatIds(pid), null))
+        assertThatThrownBy(() -> seatHoldService.hold(new CreateHoldCommand(userId, pid, seatIds(pid), null)))
                 .extracting("code").isEqualTo(ErrorCode.NOT_OPEN);
         assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM seat_hold WHERE performance_id = ?",
                 Long.class, pid)).isZero();
@@ -182,7 +189,7 @@ class SeatHoldServiceTest {
         long pid = fixtures.newPerformance(1, 1, 2);
         String token = fixtures.admit(pid, Long.MAX_VALUE);
 
-        assertThatThrownBy(() -> seatHoldService.hold(Long.MAX_VALUE, pid, seatIds(pid), token))
+        assertThatThrownBy(() -> seatHoldService.hold(new CreateHoldCommand(Long.MAX_VALUE, pid, seatIds(pid), token)))
                 .extracting("code").isEqualTo(ErrorCode.LOGIN_REQUIRED);
         assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM seat_hold WHERE performance_id = ?",
                 Long.class, pid)).isZero();
@@ -197,16 +204,17 @@ class SeatHoldServiceTest {
         long openedAnHourAgo = fixtures.newPerformance(show, now.minusHours(1), now.plusDays(1), 1, 1, 2);
         SeatHoldTransaction tx = mock(SeatHoldTransaction.class);
         when(tx.persistHold(anyLong(), any(SeatSelection.class), anyString()))
-                .thenReturn(new PersistedHold(1L, "t", now.plusMinutes(5)));
+                .thenReturn(new HoldPlacement(1L, "t", now.plusMinutes(5)));
         SeatHoldService dbAhead = serviceWith(TestDbClock.withDbShift(jdbcTemplate, Duration.ofHours(2)), tx);
         SeatHoldService dbBehind = serviceWith(TestDbClock.withDbShift(jdbcTemplate, Duration.ofHours(-2)), tx);
 
-        assertThat(dbAhead.hold(1L, opensInAnHour, seatIds(opensInAnHour).subList(0, 1), null).holdId())
+        assertThat(dbAhead.hold(
+                new CreateHoldCommand(1L, opensInAnHour, seatIds(opensInAnHour).subList(0, 1), null)).holdId())
                 .isEqualTo(1L);
         verify(tx).persistHold(anyLong(), any(SeatSelection.class), anyString());
 
         List<Long> openedSeats = seatIds(openedAnHourAgo).subList(0, 1);
-        assertThatThrownBy(() -> dbBehind.hold(2L, openedAnHourAgo, openedSeats, null))
+        assertThatThrownBy(() -> dbBehind.hold(new CreateHoldCommand(2L, openedAnHourAgo, openedSeats, null)))
                 .isInstanceOf(ApiException.class)
                 .extracting("code").isEqualTo(ErrorCode.NOT_OPEN);
         // 두 번째 회차는 사전 판정에서 막혀 DB 판정 호출 수가 그대로다
@@ -222,9 +230,10 @@ class SeatHoldServiceTest {
                         q.promoteIntervalMs(), false),
                 p.seatmap(), p.outbox(), p.ops(), p.pg(), p.fakePg());
         SeatGateRedisStore openGate = mock(SeatGateRedisStore.class);
-        when(openGate.tryHold(anyLong(), anyLong(), any(), anyString(), any())).thenReturn(GateResult.ok());
+        when(openGate.tryHold(any(), any())).thenReturn(GateResult.ok());
         return new SeatHoldService(seatCatalog, tx, seatHoldRepository, seatRepository, paymentRepository, clock,
-                openGate, queueService, System::nanoTime, noQueue, meterRegistry);
+                openGate, new SeatGateReflector(openGate, noQueue, meterRegistry, System::nanoTime), queueService,
+                new HoldMetrics(meterRegistry), System::nanoTime, noQueue);
     }
 
     private String holdStatus(long holdId) {
