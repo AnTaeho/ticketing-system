@@ -71,6 +71,11 @@ public class SeatMapQueryService {
         return localCache.put(performanceId, json);
     }
 
+    // 대기열이 요청마다 DB를 치지 않도록 스냅샷 스케줄러가 쓴 표시만 본다. Redis 장애는 호출자가 정한다
+    public boolean isSoldOut(long performanceId) {
+        return store.isSoldOut(performanceId);
+    }
+
     private String rebuildOrWait(long performanceId) {
         // 요청마다 소유자 값을 달리해 같은 인스턴스의 동시 요청도 리스를 하나만 잡게 한다
         String owner = instanceId + "#" + leaseSeq.incrementAndGet();

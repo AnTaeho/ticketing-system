@@ -6,6 +6,7 @@ import com.example.ticketing.common.metrics.Metrics.RebuildSource;
 import com.example.ticketing.common.redis.InstanceId;
 import com.example.ticketing.common.redis.RedisFailures;
 import com.example.ticketing.common.redis.RedisUnavailableException;
+import com.example.ticketing.seat.domain.SeatMapSnapshot;
 import com.example.ticketing.seat.repository.SeatMapRedisStore;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -61,14 +62,17 @@ public class SeatMapSnapshotScheduler {
         }
     }
 
-    // 반환: 이번 주기에 이 인스턴스가 스냅샷을 만들었는지
+    // 반환: 이번 주기에 이 인스턴스가 스냅샷을 만들었는지. 매진 표시도 함께 써 취소로 빈자리가 생기면 다음 주기에 풀린다
     boolean snapshotOne(long performanceId) {
         if (!store.tryLease(performanceId, instanceId, leaseTtl)) {
             return false;
         }
-        Optional<String> json = builder.build(performanceId);
+        Optional<SeatMapSnapshot> snapshot = builder.snapshot(performanceId);
         rebuilds.increment();
-        json.ifPresent(value -> store.put(performanceId, value, snapshotTtl));
-        return json.isPresent();
+        snapshot.ifPresent(value -> {
+            store.put(performanceId, builder.json(value), snapshotTtl);
+            store.putSoldOut(performanceId, value.everySeatSold(), snapshotTtl);
+        });
+        return snapshot.isPresent();
     }
 }

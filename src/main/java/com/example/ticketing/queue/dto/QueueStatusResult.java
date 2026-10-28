@@ -16,4 +16,8 @@ public record QueueStatusResult(QueueTokenStatus status, long position, long est
     public static QueueStatusResult expired() {
         return new QueueStatusResult(QueueTokenStatus.EXPIRED, 0, 0);
     }
+
+    public static QueueStatusResult soldOut() {
+        return new QueueStatusResult(QueueTokenStatus.SOLD_OUT, 0, 0);
+    }
 }

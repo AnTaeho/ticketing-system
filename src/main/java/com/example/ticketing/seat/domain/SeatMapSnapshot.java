@@ -14,6 +14,15 @@ public record SeatMapSnapshot(long performanceId, long generatedAt, List<Section
     public record SeatCell(long id, int no, String grade, int price, String s) {
     }
 
+    // HELD가 남아 있으면 결제 실패나 만료로 다시 풀릴 수 있으므로 매진이 아니다
+    public boolean everySeatSold() {
+        String sold = code(SeatStatus.SOLD);
+        return sections.stream()
+                .flatMap(section -> section.rows().stream())
+                .flatMap(row -> row.seats().stream())
+                .allMatch(seat -> sold.equals(seat.s()));
+    }
+
     public static String code(SeatStatus status) {
         return switch (status) {
             case AVAILABLE -> "A";

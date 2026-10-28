@@ -82,6 +82,8 @@
     showNote('');
     if (s.status === 'PROCESSING') {
       admit();
+    } else if (s.status === 'SOLD_OUT') {
+      soldOut();
     } else if (s.status === 'EXPIRED') {
       if (arrived) { forgetToken(); poller.now(); } else expired();
     } else {
@@ -107,6 +109,19 @@
       { label: '다시 줄 서기', run: function () { firstPosition = null; poller.now(); } });
   }
 
+  // 더 기다려도 고를 자리가 없으니 줄에서 빠지고 공연 정보로 돌려보낸다
+  function soldOut() {
+    poller.stop();
+    bk.leaveQueue(pid);
+    forgetToken();
+    showNote('');
+    showState('매진됐어요', '모든 자리가 팔렸어요.', { label: '공연 정보로 돌아가기', run: backToShow });
+  }
+
+  function backToShow() {
+    location.href = bk.links.show(showId);
+  }
+
   // 사람이 많거나 연결이 끊기면 지금 화면을 두고 잠시 뒤 같은 일을 다시 한다
   function retryLater(e) {
     var network = bk.isNetworkError(e);
@@ -130,11 +145,14 @@
       retryLater(e);
       return;
     }
+    if (e.code === 'SOLD_OUT') {
+      soldOut();
+      return;
+    }
     poller.stop();
     showNote('');
     if (e.code === 'NOT_OPEN' || e.code === 'PERFORMANCE_NOT_FOUND') {
-      showState('지금은 줄을 설 수 없어요', e.message,
-        { label: '공연 정보로 돌아가기', run: function () { location.href = bk.links.show(showId); } });
+      showState('지금은 줄을 설 수 없어요', e.message, { label: '공연 정보로 돌아가기', run: backToShow });
       return;
     }
     showState('줄을 서지 못했어요', e.message, { label: '다시 시도', run: poller.now });

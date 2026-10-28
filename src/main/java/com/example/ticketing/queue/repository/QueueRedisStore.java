@@ -27,7 +27,8 @@ public class QueueRedisStore {
         long pid = entry.performanceId();
         List<?> reply = RedisFailures.translate(() -> redis.execute(RedisScripts.QUEUE_ENTER,
                 List.of(RedisKeys.queueProcessing(pid), RedisKeys.queueWaiting(pid),
-                        RedisKeys.queueUser(entry.userId(), pid), RedisKeys.queueAdmitted(pid)),
+                        RedisKeys.queueUser(entry.userId(), pid), RedisKeys.queueAdmitted(pid),
+                        RedisKeys.queueLeaving(pid)),
                 entry.queueToken(), String.valueOf(entry.enteredAtMs()), String.valueOf(entry.processingExpireAtMs()),
                 String.valueOf(entry.enteredAtMs()), String.valueOf(entry.capacity()),
                 String.valueOf(entry.waitingTtlMs())));
@@ -42,7 +43,7 @@ public class QueueRedisStore {
     public long promote(long performanceId, long nowMs, long processingExpireAtMs, int capacity) {
         Long moved = RedisFailures.translate(() -> redis.execute(RedisScripts.QUEUE_PROMOTE,
                 List.of(RedisKeys.queueProcessing(performanceId), RedisKeys.queueWaiting(performanceId),
-                        RedisKeys.queueAdmitted(performanceId)),
+                        RedisKeys.queueAdmitted(performanceId), RedisKeys.queueLeaving(performanceId)),
                 String.valueOf(processingExpireAtMs), String.valueOf(capacity), String.valueOf(nowMs)));
         return moved == null ? 0 : moved;
     }
@@ -80,19 +81,26 @@ public class QueueRedisStore {
         return remaining == null ? 0 : remaining;
     }
 
-    // 반환: 점수를 줄였는지. 처리열에 없거나 만료됐거나 이미 짧으면 false
-    public boolean leave(long performanceId, String queueToken, long nowMs, long graceMs) {
-        Long shortened = RedisFailures.translate(() -> redis.execute(RedisScripts.QUEUE_LEAVE,
-                List.of(RedisKeys.queueProcessing(performanceId)),
-                queueToken, String.valueOf(nowMs), String.valueOf(graceMs)));
-        return shortened != null && shortened > 0;
+    // 처리열 토큰은 점수를 지금 + processingGraceMs로 줄이고, 대기열 토큰은 지금 + waitingGraceMs에 줄에서 빼도록 적는다
+    public void leave(long performanceId, String queueToken, long nowMs, long processingGraceMs,
+                      long waitingGraceMs, long waitingTtlMs) {
+        RedisFailures.translate(() -> redis.execute(RedisScripts.QUEUE_LEAVE,
+                List.of(RedisKeys.queueProcessing(performanceId), RedisKeys.queueWaiting(performanceId),
+                        RedisKeys.queueLeaving(performanceId)),
+                queueToken, String.valueOf(nowMs), String.valueOf(processingGraceMs), String.valueOf(waitingGraceMs),
+                String.valueOf(waitingTtlMs)));
     }
 
-    // 반환: 두 열에서 지운 수의 합. 처리열에서 빠진 토큰은 입장 시각도 함께 지운다
+    // 떠났다고 적힌 대기열 토큰이 돌아왔다. 줄에서 빼지 않는다
+    public void cancelLeave(long performanceId, String queueToken) {
+        RedisFailures.translate(() -> redis.opsForZSet().remove(RedisKeys.queueLeaving(performanceId), queueToken));
+    }
+
+    // 반환: 두 열에서 지운 수의 합. 처리열에서 빠진 토큰은 입장 시각도 함께 지우고, 떠난 뒤 유예가 지난 대기자도 뺀다
     public long purgeExpired(long performanceId, long nowMs, long waitingTtlMs, long maxSessionMs) {
         Long removed = RedisFailures.translate(() -> redis.execute(RedisScripts.QUEUE_PURGE,
                 List.of(RedisKeys.queueProcessing(performanceId), RedisKeys.queueWaiting(performanceId),
-                        RedisKeys.queueAdmitted(performanceId)),
+                        RedisKeys.queueAdmitted(performanceId), RedisKeys.queueLeaving(performanceId)),
                 String.valueOf(nowMs), String.valueOf(waitingTtlMs), String.valueOf(maxSessionMs)));
         return removed == null ? 0 : removed;
     }

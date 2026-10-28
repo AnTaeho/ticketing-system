@@ -26,6 +26,7 @@ public enum ErrorCode {
     QUEUE_TOKEN_NOT_FOUND(HttpStatus.NOT_FOUND, "줄 선 기록을 찾지 못했어요. 다시 줄을 서 주세요"),
 
     NOT_OPEN(HttpStatus.CONFLICT, "지금은 예매할 수 있는 시간이 아니에요"),
+    SOLD_OUT(HttpStatus.CONFLICT, "모든 자리가 팔렸어요"),
     SEAT_TAKEN(HttpStatus.CONFLICT, "방금 다른 분이 고른 자리예요. 다른 자리를 골라 주세요"),
     SEAT_STATE_CHANGED(HttpStatus.CONFLICT, "방금 다른 분이 고른 자리예요. 다른 자리를 골라 주세요"),
     USER_HAS_HOLD(HttpStatus.CONFLICT, "이미 잡아 둔 자리가 있어요"),

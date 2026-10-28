@@ -48,6 +48,11 @@ public final class RedisKeys {
         return "bq:" + tag(performanceId) + ":admitted";
     }
 
+    // 대기 중에 화면을 떠난 토큰과 줄에서 뺄 시각(ms). 유예 안에 돌아오면 지운다
+    public static String queueLeaving(long performanceId) {
+        return "bq:" + tag(performanceId) + ":leaving";
+    }
+
     public static String queueUser(long userId, long performanceId) {
         return "bq:" + tag(performanceId) + ":user:" + userId;
     }
@@ -58,6 +63,11 @@ public final class RedisKeys {
 
     public static String seatMap(long performanceId) {
         return "seatmap:" + tag(performanceId);
+    }
+
+    // 좌석맵 스냅샷과 함께 쓰는 매진 표시("1"이면 모든 좌석이 SOLD)
+    public static String seatMapSoldOut(long performanceId) {
+        return "seatmap:soldout:" + tag(performanceId);
     }
 
     public static String seatMapLease(long performanceId) {

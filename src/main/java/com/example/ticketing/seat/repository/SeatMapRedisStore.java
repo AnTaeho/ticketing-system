@@ -9,9 +9,12 @@ import java.util.List;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 
-// 스냅샷·리스의 Redis 읽기·쓰기만 맡는다. Redis 장애는 RedisUnavailableException으로 던진다
+// 스냅샷·매진 표시·리스의 Redis 읽기·쓰기만 맡는다. Redis 장애는 RedisUnavailableException으로 던진다
 @Component
 public class SeatMapRedisStore {
+
+    private static final String SOLD_OUT = "1";
+    private static final String NOT_SOLD_OUT = "0";
 
     private final StringRedisTemplate redis;
 
@@ -25,6 +28,17 @@ public class SeatMapRedisStore {
 
     public void put(long performanceId, String json, Duration ttl) {
         RedisFailures.translate(() -> redis.opsForValue().set(RedisKeys.seatMap(performanceId), json, ttl));
+    }
+
+    public void putSoldOut(long performanceId, boolean soldOut, Duration ttl) {
+        RedisFailures.translate(() -> redis.opsForValue()
+                .set(RedisKeys.seatMapSoldOut(performanceId), soldOut ? SOLD_OUT : NOT_SOLD_OUT, ttl));
+    }
+
+    // 표시가 없으면(스냅샷을 아직 안 만들었거나 TTL이 지났으면) 매진이 아니다
+    public boolean isSoldOut(long performanceId) {
+        return SOLD_OUT.equals(
+                RedisFailures.translate(() -> redis.opsForValue().get(RedisKeys.seatMapSoldOut(performanceId))));
     }
 
     // 비어 있거나 이미 owner 것이면 true(TTL 갱신)

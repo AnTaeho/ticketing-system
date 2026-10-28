@@ -15,13 +15,16 @@ import com.example.ticketing.booking.dto.RefundStatus;
 import com.example.ticketing.common.config.TicketingProperties;
 import com.example.ticketing.common.error.ApiException;
 import com.example.ticketing.common.error.ErrorCode;
+import com.example.ticketing.common.redis.InstanceId;
 import com.example.ticketing.common.redis.RedisKeys;
 import com.example.ticketing.hold.domain.GateHold;
 import com.example.ticketing.hold.repository.SeatGateRedisStore;
 import com.example.ticketing.hold.service.SeatGateReflector;
 import com.example.ticketing.payment.client.PgResult;
 import com.example.ticketing.payment.client.PgStatus;
+import com.example.ticketing.seat.repository.SeatMapRedisStore;
 import com.example.ticketing.seat.service.SeatCatalog;
+import com.example.ticketing.seat.service.SeatMapSnapshotScheduler;
 import com.example.ticketing.support.Concurrently;
 import com.example.ticketing.support.Concurrently.Results;
 import com.example.ticketing.support.Fixtures;
@@ -36,6 +39,7 @@ import com.example.ticketing.support.TestRedis;
 import com.example.ticketing.support.TestServices;
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -72,6 +76,8 @@ class BookingCancelTest {
     private JsonMapper jsonMapper;
     @Autowired
     private TicketingProperties properties;
+    @Autowired
+    private SeatMapRedisStore seatMapRedisStore;
 
     private StringRedisTemplate redis;
 
@@ -84,6 +90,23 @@ class BookingCancelTest {
     @AfterEach
     void tearDown() {
         stubPg.reset();
+    }
+
+    @Test
+    @DisplayName("모든 좌석이 팔린 회차에서 예매를 취소하면 다음 스냅샷 주기에 매진 표시가 풀린다")
+    void cancelLiftsSoldOut() {
+        long pid = fixtures.newPerformance(1, 1, 2);
+        Confirmed c = fixtures.confirmed(pid, db.seatIds(pid));
+        SeatMapSnapshotScheduler scheduler = services.seatMapSnapshotScheduler(new InstanceId(),
+                services.catalogOf(List.of(pid)));
+        scheduler.run();
+        assertThat(seatMapRedisStore.isSoldOut(pid)).isTrue();
+
+        bookingService.cancel(c.userId(), c.bookingId());
+        scheduler.run();
+
+        assertThat(seatMapRedisStore.isSoldOut(pid)).isFalse();
+        c.seatIds().forEach(seatId -> assertThat(db.seatStatus(seatId)).isEqualTo("AVAILABLE"));
     }
 
     @Test

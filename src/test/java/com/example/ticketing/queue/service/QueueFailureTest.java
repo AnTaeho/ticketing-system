@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.example.ticketing.common.error.ApiException;
 import com.example.ticketing.common.error.ErrorCode;
 import com.example.ticketing.common.redis.RedisUnavailableException;
+import com.example.ticketing.seat.service.SeatMapBuilder;
 import com.example.ticketing.support.CapturedLogs;
 import com.example.ticketing.support.Fixtures;
 import com.example.ticketing.support.IntegrationTest;
@@ -29,6 +30,8 @@ class QueueFailureTest {
     private TestRedis testRedis;
     @Autowired
     private TestServices services;
+    @Autowired
+    private SeatMapBuilder seatMapBuilder;
 
     private QueueService deadService;
 
@@ -76,6 +79,25 @@ class QueueFailureTest {
             assertThat(logs.warnings()).hasSize(1);
             assertThat(logs.warnings().get(0)).contains("op=enter").contains("앞서 생략 0건");
         }
+    }
+
+    @Test
+    @DisplayName("매진 표시를 읽다 Redis가 죽으면 진입·조회는 503 QUEUE_UNAVAILABLE로 막는다")
+    void soldOutReadFailsClosed() {
+        long pid = fixtures.newPerformance(1, 1, 1);
+        QueueService service = services.queueService()
+                .seatMap(services.seatMapQueryService(TestServices.seatMapStore(testRedis.dead()), seatMapBuilder))
+                .build();
+
+        assertThatThrownBy(() -> service.enter(USER, pid))
+                .isInstanceOf(ApiException.class)
+                .extracting(e -> ((ApiException) e).getCode())
+                .isEqualTo(ErrorCode.QUEUE_UNAVAILABLE);
+        assertThatThrownBy(() -> service.status(USER, pid, USER + ".token"))
+                .isInstanceOf(ApiException.class)
+                .extracting(e -> ((ApiException) e).getCode())
+                .isEqualTo(ErrorCode.QUEUE_UNAVAILABLE);
+        assertThat(testRedis.keys(pid)).isEmpty();
     }
 
     // 선점 쪽이 이 예외를 받아 fail-open으로 처리한다

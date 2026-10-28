@@ -8,10 +8,12 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.example.ticketing.common.redis.RedisKeys;
+import com.example.ticketing.seat.repository.SeatMapRedisStore;
 import com.example.ticketing.support.Fixtures;
 import com.example.ticketing.support.IntegrationTest;
 import com.example.ticketing.support.TestMvc;
 import com.example.ticketing.support.TestRedis;
+import java.time.Duration;
 import java.time.LocalDateTime;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -34,6 +36,8 @@ class QueueApiControllerTest {
     private Fixtures fixtures;
     @Autowired
     private TestRedis testRedis;
+    @Autowired
+    private SeatMapRedisStore seatMapRedisStore;
 
     private MockMvc mockMvc;
 
@@ -108,6 +112,30 @@ class QueueApiControllerTest {
         mockMvc.perform(post(TOKENS, notOpen).header(USER, owner))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("NOT_OPEN"));
+    }
+
+    @Test
+    @DisplayName("매진이면 진입은 409 SOLD_OUT으로, 대기자의 순서 조회는 status SOLD_OUT으로 답한다")
+    void soldOut() throws Exception {
+        long pid = openPerformance();
+        long now = System.currentTimeMillis();
+        for (int i = 0; i < 200; i++) {
+            testRedis.template().opsForZSet().add(RedisKeys.queueProcessing(pid), "filler." + i, now + 600_000);
+        }
+        long waiter = fixtures.newUser();
+        String token = testMvc.body(mockMvc.perform(post(TOKENS, pid).header(USER, waiter)).andReturn())
+                .get("token").asString();
+        seatMapRedisStore.putSoldOut(pid, true, Duration.ofSeconds(30));
+
+        mockMvc.perform(get(TOKEN, pid, token).header(USER, waiter))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("SOLD_OUT"))
+                .andExpect(jsonPath("$.position").value(0))
+                .andExpect(jsonPath("$.estimatedWaitSeconds").value(0));
+        mockMvc.perform(post(TOKENS, pid).header(USER, fixtures.newUser()))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("SOLD_OUT"))
+                .andExpect(jsonPath("$.message").value("모든 자리가 팔렸어요"));
     }
 
     @Test

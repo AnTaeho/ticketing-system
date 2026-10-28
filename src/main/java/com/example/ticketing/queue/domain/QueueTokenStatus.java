@@ -3,5 +3,6 @@ package com.example.ticketing.queue.domain;
 public enum QueueTokenStatus {
     PROCESSING,
     WAITING,
-    EXPIRED
+    EXPIRED,
+    SOLD_OUT
 }

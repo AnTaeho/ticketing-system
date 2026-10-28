@@ -13,6 +13,7 @@ import com.example.ticketing.support.CapturedLogs;
 import com.example.ticketing.support.Counters;
 import com.example.ticketing.support.Fixtures;
 import com.example.ticketing.support.IntegrationTest;
+import com.example.ticketing.support.TestDb;
 import com.example.ticketing.support.TestRedis;
 import com.example.ticketing.support.TestServices;
 import java.time.Duration;
@@ -23,6 +24,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.jdbc.core.JdbcTemplate;
 import tools.jackson.databind.json.JsonMapper;
 
 // 스케줄러 빈은 테스트에서 꺼져 있으므로 인스턴스 ID를 달리해 new로 만들고 주기 메서드를 직접 부른다
@@ -43,6 +45,10 @@ class SeatMapSnapshotSchedulerTest {
     private Counters counters;
     @Autowired
     private JsonMapper jsonMapper;
+    @Autowired
+    private TestDb db;
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
 
     private StringRedisTemplate redis;
 
@@ -135,6 +141,32 @@ class SeatMapSnapshotSchedulerTest {
             assertThat(logs.warnings().get(0)).contains("스냅샷 실패").contains("performanceId=1")
                     .contains("앞서 생략 0건");
         }
+    }
+
+    @Test
+    @DisplayName("모든 좌석이 SOLD면 스냅샷과 함께 매진 표시를 쓰고, HELD가 하나라도 남으면 매진이 아니다")
+    void writesSoldOutFlagWithSnapshot() {
+        long pid = fixtures.newPerformance(1, 1, 3);
+        List<Long> seatIds = db.seatIds(pid);
+        SeatMapSnapshotScheduler scheduler = services.seatMapSnapshotScheduler(new InstanceId(),
+                services.catalogOf(List.of(pid)));
+        assertThat(seatMapRedisStore.isSoldOut(pid)).as("표시가 없으면 매진이 아니다").isFalse();
+
+        scheduler.run();
+        assertThat(seatMapRedisStore.isSoldOut(pid)).isFalse();
+        assertThat(redis.opsForValue().get(RedisKeys.seatMapSoldOut(pid))).isEqualTo("0");
+
+        jdbcTemplate.update("UPDATE seat SET status = 'SOLD' WHERE id IN (?, ?)", seatIds.get(0), seatIds.get(1));
+        jdbcTemplate.update("UPDATE seat SET status = 'HELD', held_until = NOW(6) + INTERVAL 5 MINUTE WHERE id = ?",
+                seatIds.get(2));
+        scheduler.run();
+        assertThat(seatMapRedisStore.isSoldOut(pid)).as("HELD는 다시 풀릴 수 있다").isFalse();
+
+        jdbcTemplate.update("UPDATE seat SET status = 'SOLD', held_until = NULL WHERE id = ?", seatIds.get(2));
+        scheduler.run();
+        assertThat(seatMapRedisStore.isSoldOut(pid)).isTrue();
+        assertThat(testRedis.pttl(RedisKeys.seatMapSoldOut(pid)))
+                .isPositive().isLessThanOrEqualTo(properties.seatmap().snapshotTtl().toMillis());
     }
 
     @Test

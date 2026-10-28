@@ -29,6 +29,10 @@ public class SeatMapBuilder {
 
     // 좌석이 없으면 빈 Optional. 빈 좌석맵은 저장하거나 내보내지 않는다
     public Optional<String> build(long performanceId) {
+        return snapshot(performanceId).map(this::json);
+    }
+
+    public Optional<SeatMapSnapshot> snapshot(long performanceId) {
         List<Section> sections = new ArrayList<>();
         for (SeatMapRow seat : seatJdbcRepository.findSeatMapRows(performanceId)) {
             Section lastSection = sections.isEmpty() ? null : sections.get(sections.size() - 1);
@@ -49,8 +53,11 @@ public class SeatMapBuilder {
             return Optional.empty();
         }
         // 화면이 새 스냅샷인지 가리는 값일 뿐이라 DB 시각을 읽지 않고 서버 벽시계를 쓴다
-        SeatMapSnapshot snapshot = new SeatMapSnapshot(performanceId, clock.millis(), sections);
-        return Optional.of(jsonMapper.writeValueAsString(snapshot));
+        return Optional.of(new SeatMapSnapshot(performanceId, clock.millis(), sections));
+    }
+
+    public String json(SeatMapSnapshot snapshot) {
+        return jsonMapper.writeValueAsString(snapshot);
     }
 
     // source는 Metrics.RebuildSource 값이다

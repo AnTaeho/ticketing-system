@@ -1,4 +1,4 @@
--- KEYS: [1] processing, [2] waiting, [3] 사용자 키, [4] admitted
+-- KEYS: [1] processing, [2] waiting, [3] 사용자 키, [4] admitted, [5] leaving
 -- ARGV: [1] 새 queueToken, [2] now(ms, 입장 시각으로도 쓴다), [3] processing 만료 시각(ms), [4] waiting 점수(진입 시각 ms), [5] 정원, [6] 사용자 키 TTL(ms, waiting 토큰 수명과 같다)
 -- 반환: {'PROCESSING' | 'WAITING', queueToken}. 살아 있는 옛 토큰이 있으면 그 토큰과 상태
 local now = tonumber(ARGV[2])
@@ -7,11 +7,16 @@ if old then
   local p = redis.call('ZSCORE', KEYS[1], old)
   if p and tonumber(p) > now then return {'PROCESSING', old} end
   local w = redis.call('ZSCORE', KEYS[2], old)
-  if w and tonumber(w) + tonumber(ARGV[6]) > now then return {'WAITING', old} end
+  if w and tonumber(w) + tonumber(ARGV[6]) > now then
+    -- 떠났다가 유예 안에 다시 들어오면 순번을 그대로 둔다
+    redis.call('ZREM', KEYS[5], old)
+    return {'WAITING', old}
+  end
   -- 만료된 옛 토큰은 정리 전이라도 자리를 비우고 새로 선다
   redis.call('ZREM', KEYS[1], old)
   redis.call('ZREM', KEYS[2], old)
   redis.call('ZREM', KEYS[4], old)
+  redis.call('ZREM', KEYS[5], old)
 end
 local queue_token = ARGV[1]
 local status

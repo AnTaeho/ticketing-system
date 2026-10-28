@@ -13,6 +13,7 @@ import com.example.ticketing.queue.dto.QueueEnterResult;
 import com.example.ticketing.queue.dto.QueueHeartbeatResult;
 import com.example.ticketing.queue.dto.QueueStatusResult;
 import com.example.ticketing.queue.repository.QueueRedisStore;
+import com.example.ticketing.seat.repository.SeatMapRedisStore;
 import com.example.ticketing.support.Concurrently;
 import com.example.ticketing.support.Concurrently.Results;
 import com.example.ticketing.support.Fixtures;
@@ -46,6 +47,8 @@ class QueueServiceTest {
     private QueueService queueService;
     @Autowired
     private QueueRedisStore queueRedisStore;
+    @Autowired
+    private SeatMapRedisStore seatMapRedisStore;
     @Autowired
     private JdbcTemplate jdbcTemplate;
     @Autowired
@@ -451,8 +454,8 @@ class QueueServiceTest {
     }
 
     @Test
-    @DisplayName("소모·만료됐거나 대기 중인 토큰의 떠남 신호는 아무것도 바꾸지 않고, 남의 토큰은 404다")
-    void leaveIgnoresConsumedExpiredAndWaitingTokens() {
+    @DisplayName("소모·만료된 토큰의 떠남 신호는 아무것도 바꾸지 않고, 대기 중인 토큰은 순번을 둔 채 떠남만 적고, 남의 토큰은 404다")
+    void leaveIgnoresConsumedExpiredAndMarksWaitingTokens() {
         long pid = openPerformance();
         QueueService service = serviceWithCapacity(2);
         long consumedUser = USER_BASE + 1;
@@ -474,12 +477,125 @@ class QueueServiceTest {
         assertThat(queueRedisStore.processingScore(pid, expired)).isEqualTo((double) past);
         assertThat(queueRedisStore.processingScore(pid, waiting)).isNull();
         assertThat(queueRedisStore.waitingScore(pid, waiting)).isEqualTo(waitingScore);
+        assertThat(leaveDeadline(pid, waiting)).isNotNull();
+        assertThat(leaveDeadline(pid, consumed)).isNull();
+        assertThat(leaveDeadline(pid, expired)).isNull();
         assertThat(service.status(waiter, pid, waiting).position()).isEqualTo(1);
         assertThatThrownBy(() -> service.leave(waiter, pid, expired))
                 .isInstanceOf(ApiException.class)
                 .extracting(e -> ((ApiException) e).getCode())
                 .isEqualTo(ErrorCode.QUEUE_TOKEN_NOT_FOUND);
         assertThat(queueRedisStore.processingScore(pid, expired)).isEqualTo((double) past);
+    }
+
+    @Test
+    @DisplayName("대기 중에 떠나면 지금 + 대기 떠남 유예에 줄에서 빼도록 적고, 여러 번 와도 처음 시각을 지킨다")
+    void waitingLeaveRecordsDeadlineOnce() {
+        long pid = openPerformance();
+        QueueService service = serviceWithCapacity(1);
+        long waiter = USER_BASE + 2;
+        long grace = properties.queue().waitingLeaveGrace().toMillis();
+        assertThat(grace).isEqualTo(10_000L);
+        service.enter(USER_BASE + 1, pid);
+        String waiting = service.enter(waiter, pid).queueToken();
+
+        long before = System.currentTimeMillis();
+        service.leave(waiter, pid, waiting);
+        long after = System.currentTimeMillis();
+        double first = leaveDeadline(pid, waiting);
+        service.leave(waiter, pid, waiting);
+
+        assertThat(first).isBetween((double) before + grace, (double) after + grace);
+        assertThat(leaveDeadline(pid, waiting)).isEqualTo(first);
+        assertThat(redis.opsForValue().get(RedisKeys.queueUser(waiter, pid))).isEqualTo(waiting);
+    }
+
+    @Test
+    @DisplayName("떠난 뒤 유예 안에 순서를 물으면(새로고침) 떠남 기록이 지워지고 순번이 그대로다")
+    void statusWithinGraceKeepsPlace() {
+        long pid = openPerformance();
+        QueueService service = serviceWithCapacity(1);
+        service.enter(USER_BASE, pid);
+        String first = service.enter(USER_BASE + 1, pid).queueToken();
+        String second = service.enter(USER_BASE + 2, pid).queueToken();
+        service.leave(USER_BASE + 1, pid, first);
+
+        QueueStatusResult again = service.status(USER_BASE + 1, pid, first);
+
+        assertThat(again.status()).isEqualTo(QueueTokenStatus.WAITING);
+        assertThat(again.position()).isEqualTo(1);
+        assertThat(leaveDeadline(pid, first)).isNull();
+        assertThat(service.status(USER_BASE + 2, pid, second).position()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("떠난 뒤 유예 안에 다시 진입하면 같은 토큰과 순번을 받고 떠남 기록이 지워진다")
+    void reEnterWithinGraceKeepsToken() {
+        long pid = openPerformance();
+        QueueService service = serviceWithCapacity(1);
+        service.enter(USER_BASE, pid);
+        QueueEnterResult waiting = service.enter(USER_BASE + 1, pid);
+        service.leave(USER_BASE + 1, pid, waiting.queueToken());
+
+        QueueEnterResult again = service.enter(USER_BASE + 1, pid);
+
+        assertThat(again).isEqualTo(waiting);
+        assertThat(leaveDeadline(pid, waiting.queueToken())).isNull();
+        assertThat(service.status(USER_BASE + 1, pid, waiting.queueToken()).position()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("매진이면 진입은 409 SOLD_OUT이고 대기열 키를 만들지 않는다")
+    void enterRejectedWhenSoldOut() {
+        long pid = openPerformance();
+        markSoldOut(pid, true);
+
+        assertThatThrownBy(() -> queueService.enter(USER_BASE + 1, pid))
+                .isInstanceOf(ApiException.class)
+                .extracting(e -> ((ApiException) e).getCode())
+                .isEqualTo(ErrorCode.SOLD_OUT);
+        assertThat(testRedis.keys(pid)).noneMatch(key -> key.startsWith("bq:"));
+
+        markSoldOut(pid, false);
+        assertThat(queueService.enter(USER_BASE + 1, pid).status()).isEqualTo(QueueTokenStatus.PROCESSING);
+    }
+
+    @Test
+    @DisplayName("매진 표시가 없으면 매진이 아닌 것으로 보고 들여보낸다")
+    void missingSoldOutFlagAdmits() {
+        long pid = openPerformance();
+        assertThat(redis.hasKey(RedisKeys.seatMapSoldOut(pid))).isFalse();
+
+        assertThat(queueService.enter(USER_BASE + 1, pid).status()).isEqualTo(QueueTokenStatus.PROCESSING);
+    }
+
+    @Test
+    @DisplayName("매진이면 대기자의 순서 조회는 SOLD_OUT이고 입장한 사람은 PROCESSING이며, 줄은 그대로라 매진이 풀리면 이어서 기다린다")
+    void statusIsSoldOutForWaitersOnly() {
+        long pid = openPerformance();
+        QueueService service = serviceWithCapacity(1);
+        String admitted = service.enter(USER_BASE, pid).queueToken();
+        String waiting = service.enter(USER_BASE + 1, pid).queueToken();
+        markSoldOut(pid, true);
+
+        assertThat(service.status(USER_BASE + 1, pid, waiting)).isEqualTo(QueueStatusResult.soldOut());
+        assertThat(service.status(USER_BASE, pid, admitted)).isEqualTo(QueueStatusResult.processing());
+        assertThat(service.status(USER_BASE + 1, pid, USER_BASE + 1 + ".unknown"))
+                .isEqualTo(QueueStatusResult.soldOut());
+        assertThat(redis.opsForZSet().zCard(RedisKeys.queueWaiting(pid))).isEqualTo(1);
+        assertThat(service.isAdmitted(USER_BASE, pid, admitted)).isTrue();
+
+        markSoldOut(pid, false);
+        assertThat(service.status(USER_BASE + 1, pid, waiting).status()).isEqualTo(QueueTokenStatus.WAITING);
+        assertThat(service.status(USER_BASE + 1, pid, waiting).position()).isEqualTo(1);
+    }
+
+    private void markSoldOut(long pid, boolean soldOut) {
+        seatMapRedisStore.putSoldOut(pid, soldOut, properties.seatmap().snapshotTtl());
+    }
+
+    private Double leaveDeadline(long pid, String token) {
+        return redis.opsForZSet().score(RedisKeys.queueLeaving(pid), token);
     }
 
     private Double admittedAt(long pid, String token) {

@@ -6,6 +6,7 @@ import com.example.ticketing.common.redis.RedisUnavailableException;
 import com.example.ticketing.common.redis.SchedulerLease;
 import com.example.ticketing.queue.repository.QueueRedisStore;
 import com.example.ticketing.seat.service.SeatCatalog;
+import com.example.ticketing.seat.service.SeatMapQueryService;
 import java.time.Clock;
 import java.time.Duration;
 import lombok.extern.slf4j.Slf4j;
@@ -25,6 +26,7 @@ public class QueuePromotionScheduler {
     private final SchedulerLease lease;
     private final QueueRedisStore store;
     private final SeatCatalog seatCatalog;
+    private final SeatMapQueryService seatMap;
     private final Clock clock;
     private final int capacity;
     private final long idleTimeoutMs;
@@ -34,10 +36,11 @@ public class QueuePromotionScheduler {
     private final Duration leaseTtl;
 
     public QueuePromotionScheduler(SchedulerLease lease, QueueRedisStore store, SeatCatalog seatCatalog,
-                                   Clock clock, TicketingProperties properties) {
+                                   SeatMapQueryService seatMap, Clock clock, TicketingProperties properties) {
         this.lease = lease;
         this.store = store;
         this.seatCatalog = seatCatalog;
+        this.seatMap = seatMap;
         this.clock = clock;
         this.capacity = properties.queue().capacity();
         this.idleTimeoutMs = properties.queue().processingIdleTimeout().toMillis();
@@ -68,10 +71,12 @@ public class QueuePromotionScheduler {
     }
 
     // 만료를 먼저 치워야 빈 자리가 승격에 잡힌다. 점수가 진입 때 쓴 서버 벽시계(ms)라 같은 시계로 비교한다
+    // 매진이면 들여보내도 고를 자리가 없으므로 올리지 않는다. 이미 입장한 사람은 그대로 둔다
     long promoteOne(long performanceId) {
         long now = clock.millis();
         store.purgeExpired(performanceId, now, waitingTtlMs, maxSessionMs);
-        long moved = store.promote(performanceId, now, now + Math.min(idleTimeoutMs, maxSessionMs), capacity);
+        long moved = seatMap.isSoldOut(performanceId) ? 0
+                : store.promote(performanceId, now, now + Math.min(idleTimeoutMs, maxSessionMs), capacity);
         double rate = 0.8 * store.rate(performanceId) + 0.2 * moved / intervalSeconds;
         store.saveRate(performanceId, rate, RATE_TTL);
         return moved;

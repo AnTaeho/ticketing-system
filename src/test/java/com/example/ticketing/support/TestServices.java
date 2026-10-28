@@ -103,7 +103,7 @@ public class TestServices {
 
     public QueuePromotionScheduler queuePromotionScheduler(TicketingProperties properties, SeatCatalog catalog) {
         return new QueuePromotionScheduler(bean(SchedulerLease.class), bean(QueueRedisStore.class), catalog,
-                Clock.systemDefaultZone(), properties);
+                bean(SeatMapQueryService.class), Clock.systemDefaultZone(), properties);
     }
 
     // 운영 카탈로그는 예매 중 회차 목록을 10초 묶어 두므로 방금 만든 회차가 빠질 수 있다. 캐시 없는 새 카탈로그다
@@ -273,6 +273,7 @@ public class TestServices {
 
         private TicketingProperties properties;
         private QueueRedisStore store;
+        private SeatMapQueryService seatMap;
         private DbClock dbClock;
 
         public QueueServiceBuilder properties(TicketingProperties properties) {
@@ -285,6 +286,11 @@ public class TestServices {
             return this;
         }
 
+        public QueueServiceBuilder seatMap(SeatMapQueryService seatMap) {
+            this.seatMap = seatMap;
+            return this;
+        }
+
         public QueueServiceBuilder dbClock(DbClock dbClock) {
             this.dbClock = dbClock;
             return this;
@@ -292,6 +298,7 @@ public class TestServices {
 
         public QueueService build() {
             return new QueueService(store != null ? store : bean(QueueRedisStore.class), bean(SeatCatalog.class),
+                    seatMap != null ? seatMap : bean(SeatMapQueryService.class),
                     dbClock != null ? dbClock : bean(DbClock.class), Clock.systemDefaultZone(), System::nanoTime,
                     properties != null ? properties : contextProperties(), meterRegistry());
         }

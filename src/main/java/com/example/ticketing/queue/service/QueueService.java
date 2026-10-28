@@ -17,9 +17,11 @@ import com.example.ticketing.queue.dto.QueueHeartbeatResult;
 import com.example.ticketing.queue.dto.QueueStatusResult;
 import com.example.ticketing.queue.repository.QueueRedisStore;
 import com.example.ticketing.seat.service.SeatCatalog;
+import com.example.ticketing.seat.service.SeatMapQueryService;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Clock;
+import java.util.Map;
 import java.util.UUID;
 import java.util.function.LongSupplier;
 import lombok.extern.slf4j.Slf4j;
@@ -35,21 +37,25 @@ public class QueueService {
 
     private final QueueRedisStore store;
     private final SeatCatalog seatCatalog;
+    private final SeatMapQueryService seatMap;
     private final DbClock dbClock;
     private final Clock clock;
     private final int capacity;
     private final long idleTimeoutMs;
     private final long maxSessionMs;
     private final long leaveGraceMs;
+    private final long waitingLeaveGraceMs;
     private final long waitingTtlMs;
     private final Counter consumeFailure;
     private final ThrottledWarn unavailableWarn;
     private final ThrottledWarn consumeWarn;
 
-    public QueueService(QueueRedisStore store, SeatCatalog seatCatalog, DbClock dbClock, Clock clock,
-                        LongSupplier nanoClock, TicketingProperties properties, MeterRegistry meterRegistry) {
+    public QueueService(QueueRedisStore store, SeatCatalog seatCatalog, SeatMapQueryService seatMap, DbClock dbClock,
+                        Clock clock, LongSupplier nanoClock, TicketingProperties properties,
+                        MeterRegistry meterRegistry) {
         this.store = store;
         this.seatCatalog = seatCatalog;
+        this.seatMap = seatMap;
         this.dbClock = dbClock;
         this.clock = clock;
         this.unavailableWarn = new ThrottledWarn(log, nanoClock);
@@ -58,6 +64,7 @@ public class QueueService {
         this.idleTimeoutMs = properties.queue().processingIdleTimeout().toMillis();
         this.maxSessionMs = properties.queue().processingMaxSession().toMillis();
         this.leaveGraceMs = properties.queue().processingLeaveGrace().toMillis();
+        this.waitingLeaveGraceMs = properties.queue().waitingLeaveGrace().toMillis();
         this.waitingTtlMs = properties.queue().waitingTokenTtl().toMillis();
         this.consumeFailure = meterRegistry.counter(Metrics.REDIS_REFLECT_FAILURE, Tag.OP, ReflectOp.QUEUE_CONSUME);
     }
@@ -68,6 +75,9 @@ public class QueueService {
         String queueToken = userId + "." + UUID.randomUUID();
         long now = clock.millis();
         try {
+            if (seatMap.isSoldOut(performanceId)) {
+                throw new ApiException(ErrorCode.SOLD_OUT, Map.of("performanceId", performanceId));
+            }
             QueuePlacement placed = store.enter(new QueueEntry(userId, performanceId, queueToken, now,
                     now + Math.min(idleTimeoutMs, maxSessionMs), capacity, waitingTtlMs));
             return new QueueEnterResult(placed.queueToken(), placed.status());
@@ -105,13 +115,13 @@ public class QueueService {
         return QueueHeartbeatResult.processing(remainingMs);
     }
 
-    // 화면을 떠날 때 자리를 잠깐만 더 남긴다. 소모·만료됐거나 대기 중인 토큰에는 아무 일도 하지 않는다
+    // 화면을 떠날 때 처리열 자리는 잠깐만 더 남기고, 대기 순번은 유예 뒤 줄에서 뺀다. 소모·만료된 토큰에는 아무 일도 하지 않는다
     public void leave(long userId, long performanceId, String queueToken) {
         if (!ownedBy(queueToken, userId)) {
             throw new ApiException(ErrorCode.QUEUE_TOKEN_NOT_FOUND);
         }
         try {
-            store.leave(performanceId, queueToken, clock.millis(), leaveGraceMs);
+            store.leave(performanceId, queueToken, clock.millis(), leaveGraceMs, waitingLeaveGraceMs, waitingTtlMs);
         } catch (RedisUnavailableException e) {
             throw unavailable("leave", performanceId, e);
         }
@@ -146,11 +156,18 @@ public class QueueService {
     }
 
     // 승격은 waiting → processing 한 방향이라 waiting을 먼저 봐야 그 사이 승격돼도 놓치지 않는다
+    // 매진이면 이미 입장한 사람만 그대로 두고 나머지에게 매진을 알린다. 줄은 건드리지 않아 매진이 풀리면 이어서 기다린다
     private QueueStatusResult lookUp(long performanceId, String queueToken, long now) {
+        if (seatMap.isSoldOut(performanceId)) {
+            Double expireAt = store.processingScore(performanceId, queueToken);
+            return expireAt != null && expireAt > now ? QueueStatusResult.processing() : QueueStatusResult.soldOut();
+        }
         Double enteredAt = store.waitingScore(performanceId, queueToken);
         if (enteredAt != null && enteredAt + waitingTtlMs > now) {
             Long rank = store.waitingRank(performanceId, queueToken);
             if (rank != null) {
+                // 순서를 묻는 화면이 있으면 떠난 게 아니다(새로고침)
+                store.cancelLeave(performanceId, queueToken);
                 long position = rank + 1;
                 double rate = Math.max(store.rate(performanceId), MIN_RATE);
                 return QueueStatusResult.waiting(position, (long) Math.ceil(position / rate));

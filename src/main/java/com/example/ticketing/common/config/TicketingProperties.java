@@ -57,6 +57,7 @@ public record TicketingProperties(
             Duration processingMaxSession,
             Duration processingIdleTimeout,
             Duration processingLeaveGrace,
+            Duration waitingLeaveGrace,
             Duration waitingTokenTtl,
             boolean promoteEnabled,
             long promoteIntervalMs,

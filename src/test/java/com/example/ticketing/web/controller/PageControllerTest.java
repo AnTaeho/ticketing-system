@@ -18,6 +18,7 @@ import com.example.ticketing.support.IntegrationTest;
 import com.example.ticketing.support.TestMvc;
 import com.example.ticketing.support.TestProperties;
 import com.example.ticketing.web.PageExceptionHandler;
+import java.nio.charset.StandardCharsets;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -296,6 +297,20 @@ class PageControllerTest {
                     .andExpect(content().string(containsString("bk.leaveQueue(pid)")))
                     .andExpect(content().string(containsString("keepWhenHidden: true")));
         }
+    }
+
+    @Test
+    @DisplayName("대기열 화면은 매진이면 기다리기를 멈추고 매진 안내와 공연 정보로 돌아가는 단추를 띄운다")
+    void queueShowsSoldOut() throws Exception {
+        // 정적 파일 응답에는 charset이 없어 한글 단언은 UTF-8로 읽는다
+        String script = mockMvc.perform(get("/booking/js/queue.js")).andReturn().getResponse()
+                .getContentAsString(StandardCharsets.UTF_8);
+
+        assertThat(script)
+                .contains("s.status === 'SOLD_OUT'")
+                .contains("e.code === 'SOLD_OUT'")
+                .contains("showState('매진됐어요', '모든 자리가 팔렸어요.', { label: '공연 정보로 돌아가기', run: backToShow })")
+                .contains("function soldOut() {\n    poller.stop();\n    bk.leaveQueue(pid);");
     }
 
     @ParameterizedTest(name = "{0}")

@@ -5,7 +5,9 @@ import static org.assertj.core.api.Assertions.within;
 
 import com.example.ticketing.common.config.TicketingProperties;
 import com.example.ticketing.common.redis.RedisKeys;
+import com.example.ticketing.queue.domain.QueueTokenStatus;
 import com.example.ticketing.queue.repository.QueueRedisStore;
+import com.example.ticketing.seat.repository.SeatMapRedisStore;
 import com.example.ticketing.seat.service.SeatCatalog;
 import com.example.ticketing.support.Fixtures;
 import com.example.ticketing.support.IntegrationTest;
@@ -31,6 +33,8 @@ class QueuePromotionSchedulerTest {
 
     @Autowired
     private QueueRedisStore queueRedisStore;
+    @Autowired
+    private SeatMapRedisStore seatMapRedisStore;
     @Autowired
     private SeatCatalog seatCatalog;
     @Autowired
@@ -268,6 +272,72 @@ class QueuePromotionSchedulerTest {
         assertThat(service.status(USER_BASE + 1_030, pid, waiting.get(30)).position()).isEqualTo(1);
         assertThat(scheduler.promoteOne(pid)).isZero();
         assertThat(redis.opsForZSet().zCard(RedisKeys.queueProcessing(pid))).isEqualTo(capacity);
+    }
+
+    @Test
+    @DisplayName("매진인 회차는 빈 자리가 있어도 올리지 않고 입장한 사람은 그대로 두며, 매진이 풀리면 다시 올린다")
+    void soldOutStopsPromotion() {
+        long pid = openPerformance();
+        QueueService service = service(2);
+        QueuePromotionScheduler scheduler = scheduler(2, seatCatalog);
+        String gone = service.enter(USER_BASE + 1, pid).queueToken();
+        String paying = service.enter(USER_BASE + 2, pid).queueToken();
+        String next = service.enter(USER_BASE + 3, pid).queueToken();
+        service.consume(USER_BASE + 1, pid, gone);
+        seatMapRedisStore.putSoldOut(pid, true, properties.seatmap().snapshotTtl());
+
+        assertThat(scheduler.promoteOne(pid)).isZero();
+        assertThat(service.isAdmitted(USER_BASE + 2, pid, paying)).isTrue();
+        assertThat(queueRedisStore.waitingScore(pid, next)).isNotNull();
+        assertThat(redis.opsForZSet().zCard(RedisKeys.queueProcessing(pid))).isEqualTo(1);
+
+        seatMapRedisStore.putSoldOut(pid, false, properties.seatmap().snapshotTtl());
+        assertThat(scheduler.promoteOne(pid)).isEqualTo(1);
+        assertThat(service.isAdmitted(USER_BASE + 3, pid, next)).isTrue();
+    }
+
+    @Test
+    @DisplayName("대기 중에 떠난 사람은 유예가 지나면 줄에서 빠지고 뒷사람 순번이 올라간다")
+    void waitingLeaverIsDroppedAfterGrace() {
+        long pid = openPerformance();
+        QueueService service = service(1);
+        QueuePromotionScheduler scheduler = scheduler(1, seatCatalog);
+        service.enter(USER_BASE, pid);
+        String leaver = service.enter(USER_BASE + 1, pid).queueToken();
+        String behind = service.enter(USER_BASE + 2, pid).queueToken();
+        service.leave(USER_BASE + 1, pid, leaver);
+
+        assertThat(scheduler.promoteOne(pid)).isZero();
+        assertThat(queueRedisStore.waitingScore(pid, leaver)).as("유예 안에는 줄에 남는다").isNotNull();
+
+        redis.opsForZSet().add(RedisKeys.queueLeaving(pid), leaver, System.currentTimeMillis() - 1);
+        assertThat(scheduler.promoteOne(pid)).isZero();
+
+        assertThat(queueRedisStore.waitingScore(pid, leaver)).isNull();
+        assertThat(redis.opsForZSet().score(RedisKeys.queueLeaving(pid), leaver)).isNull();
+        assertThat(service.status(USER_BASE + 2, pid, behind).position()).isEqualTo(1);
+        assertThat(service.status(USER_BASE + 1, pid, leaver).status()).isEqualTo(QueueTokenStatus.EXPIRED);
+        assertThat(service.enter(USER_BASE + 1, pid).queueToken()).isNotEqualTo(leaver);
+        assertThat(service.status(USER_BASE + 2, pid, behind).position()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("떠남 유예 중에 차례가 오면 유예가 끝나는 시각까지만 입장 자리를 받는다")
+    void leaverPromotedOnlyUntilGraceEnds() {
+        long pid = openPerformance();
+        QueueService service = service(1);
+        QueuePromotionScheduler scheduler = scheduler(1, seatCatalog);
+        String first = service.enter(USER_BASE, pid).queueToken();
+        String leaver = service.enter(USER_BASE + 1, pid).queueToken();
+        service.leave(USER_BASE + 1, pid, leaver);
+        double deadline = redis.opsForZSet().score(RedisKeys.queueLeaving(pid), leaver);
+        service.consume(USER_BASE, pid, first);
+
+        assertThat(scheduler.promoteOne(pid)).isEqualTo(1);
+
+        assertThat(queueRedisStore.processingScore(pid, leaver)).isEqualTo(deadline);
+        assertThat(redis.opsForZSet().score(RedisKeys.queueLeaving(pid), leaver)).isNull();
+        assertThat(service.isAdmitted(USER_BASE + 1, pid, leaver)).isTrue();
     }
 
     private Double admittedAt(long pid, String token) {
