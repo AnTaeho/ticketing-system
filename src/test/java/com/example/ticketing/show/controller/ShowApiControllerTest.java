@@ -8,6 +8,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.example.ticketing.support.Fixtures;
 import com.example.ticketing.support.IntegrationTest;
+import com.example.ticketing.support.TestMvc;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import org.junit.jupiter.api.BeforeEach;
@@ -19,10 +20,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
-import org.springframework.test.web.servlet.setup.MockMvcBuilders;
-import org.springframework.web.context.WebApplicationContext;
 import tools.jackson.databind.JsonNode;
-import tools.jackson.databind.json.JsonMapper;
 
 @IntegrationTest
 class ShowApiControllerTest {
@@ -30,19 +28,17 @@ class ShowApiControllerTest {
     private static final DateTimeFormatter ISO = DateTimeFormatter.ISO_LOCAL_DATE_TIME;
 
     @Autowired
-    private WebApplicationContext context;
+    private TestMvc testMvc;
     @Autowired
     private Fixtures fixtures;
     @Autowired
     private JdbcTemplate jdbcTemplate;
-    @Autowired
-    private JsonMapper jsonMapper;
 
     private MockMvc mockMvc;
 
     @BeforeEach
     void setUp() {
-        mockMvc = MockMvcBuilders.webAppContextSetup(context).build();
+        mockMvc = testMvc.mockMvc();
     }
 
     @Test
@@ -63,7 +59,7 @@ class ShowApiControllerTest {
                 .andExpect(jsonPath("$.performanceId").isNumber())
                 .andExpect(jsonPath("$.seatCount").value(24))
                 .andReturn();
-        long pid = body(created).get("performanceId").asLong();
+        long pid = testMvc.body(created).get("performanceId").asLong();
         assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM seat WHERE performance_id = ?",
                 Long.class, pid)).isEqualTo(24);
 
@@ -79,7 +75,7 @@ class ShowApiControllerTest {
                 .andExpect(jsonPath("$.performances[0].openAt").value(openAt.format(ISO)))
                 .andExpect(jsonPath("$.performances[0].state").value("OPEN"));
 
-        JsonNode shows = body(mockMvc.perform(get("/api/shows"))
+        JsonNode shows = testMvc.body(mockMvc.perform(get("/api/shows"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$").isArray())
                 .andReturn());
@@ -90,7 +86,6 @@ class ShowApiControllerTest {
             }
         }
         assertThat(summary).isNotNull();
-        System.out.println("[S1.2] GET /api/shows 항목: " + summary);
         assertThat(summary.get("title").asString()).isEqualTo("API 공연");
         assertThat(summary.get("venueName").asString()).isEqualTo("API 홀");
         assertThat(summary.get("nextPerformance").get("id").asLong()).isEqualTo(pid);
@@ -99,7 +94,7 @@ class ShowApiControllerTest {
     }
 
     @Test
-    @DisplayName("없는 공연 조회와 없는 공연의 회차 생성은 404 SHOW_NOT_FOUND")
+    @DisplayName("없는 공연을 조회하거나 그 공연에 회차를 만들면 404로 답한다")
     void showNotFound() throws Exception {
         mockMvc.perform(get("/api/shows/{showId}", Long.MAX_VALUE))
                 .andExpect(status().isNotFound())
@@ -114,7 +109,7 @@ class ShowApiControllerTest {
     }
 
     @Test
-    @DisplayName("잘못된 입력은 400 INVALID_REQUEST")
+    @DisplayName("잘못된 입력은 400 INVALID_REQUEST로 거절한다")
     void invalidRequests() throws Exception {
         long showId = fixtures.newShow();
         LocalDateTime now = fixtures.dbNow().withNano(0);
@@ -141,7 +136,7 @@ class ShowApiControllerTest {
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.showId").isNumber())
                 .andReturn();
-        return body(result).get("showId").asLong();
+        return testMvc.body(result).get("showId").asLong();
     }
 
     private void expectInvalid(
@@ -158,9 +153,5 @@ class ShowApiControllerTest {
         return """
                 {"showId":%d,"startsAt":"%s","openAt":"%s","sections":%d,"rows":%d,"seatsPerRow":%d}"""
                 .formatted(showId, startsAt.format(ISO), openAt.format(ISO), sections, rows, seatsPerRow);
-    }
-
-    private JsonNode body(MvcResult result) throws Exception {
-        return jsonMapper.readTree(result.getResponse().getContentAsString());
     }
 }

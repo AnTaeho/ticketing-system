@@ -38,7 +38,7 @@ class DbClockTest {
     }
 
     @Test
-    @DisplayName("estimatedNow: 서버 시계가 DB보다 2시간 늦거나 빨라도 DB 시각에 가깝다")
+    @DisplayName("서버 시계가 DB보다 2시간 어긋나도 추정 시각(estimatedNow)은 DB 시각에 가깝다")
     void estimatedNowFollowsDbEvenIfJvmClockIsSkewed() {
         for (Duration skew : new Duration[] {Duration.ofHours(-2), Duration.ofHours(2)}) {
             DbClock skewed = new DbClock(jdbcTemplate, Clock.offset(Clock.systemDefaultZone(), skew), System::nanoTime);
@@ -51,7 +51,7 @@ class DbClockTest {
     }
 
     @Test
-    @DisplayName("estimatedNow: DB 시각과의 차이는 10초 동안 다시 재지 않고, 지나면 한 번 다시 잰다")
+    @DisplayName("추정 시각은 DB와의 차이를 10초 동안 다시 재지 않고 지나면 한 번 다시 잰다")
     void offsetIsCachedForTenSeconds() {
         JdbcTemplate spied = spy(jdbcTemplate);
         AtomicLong nanos = new AtomicLong(0);

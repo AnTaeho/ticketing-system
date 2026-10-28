@@ -1,5 +1,6 @@
 package com.example.ticketing.hold.controller;
 
+import static com.example.ticketing.support.TestMvc.USER;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -9,10 +10,11 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.example.ticketing.common.metrics.Metrics;
+import com.example.ticketing.support.Counters;
 import com.example.ticketing.support.Fixtures;
 import com.example.ticketing.support.IntegrationTest;
-import io.micrometer.core.instrument.Counter;
-import io.micrometer.core.instrument.MeterRegistry;
+import com.example.ticketing.support.TestDb;
+import com.example.ticketing.support.TestMvc;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -25,39 +27,34 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.ResultActions;
-import org.springframework.test.web.servlet.setup.MockMvcBuilders;
-import org.springframework.web.context.WebApplicationContext;
 import tools.jackson.databind.JsonNode;
-import tools.jackson.databind.json.JsonMapper;
 
 @IntegrationTest
 class HoldApiControllerTest {
 
-    private static final String USER = "X-User-Id";
-
     @Autowired
-    private WebApplicationContext context;
+    private TestMvc testMvc;
     @Autowired
     private Fixtures fixtures;
     @Autowired
+    private TestDb db;
+    @Autowired
+    private Counters counters;
+    @Autowired
     private JdbcTemplate jdbcTemplate;
-    @Autowired
-    private JsonMapper jsonMapper;
-    @Autowired
-    private MeterRegistry meterRegistry;
 
     private MockMvc mockMvc;
 
     @BeforeEach
     void setUp() {
-        mockMvc = MockMvcBuilders.webAppContextSetup(context).build();
+        mockMvc = testMvc.mockMvc();
     }
 
     @Test
-    @DisplayName("POST 201 → GET 상태 → DELETE 204 → GET RELEASED")
+    @DisplayName("잡기 → 조회 → 취소 → 조회 흐름에서 상태가 RELEASED로 바뀐다")
     void holdGetRelease() throws Exception {
         long pid = fixtures.newPerformance(1, 10, 2);
-        List<Long> ids = seatIds(pid);
+        List<Long> ids = db.seatIds(pid);
         long vip = ids.get(0);
         long r = ids.get(4);
         long userId = fixtures.newUser();
@@ -77,11 +74,10 @@ class HoldApiControllerTest {
                 .andExpect(jsonPath("$.seats[1].id").value(r))
                 .andExpect(jsonPath("$.seats[1].grade").value("R"))
                 .andReturn();
-        JsonNode body = body(created);
-        System.out.println("[S2.1] POST /holds 응답: " + body);
+        JsonNode body = testMvc.body(created);
         long holdId = body.get("holdId").asLong();
 
-        JsonNode detail = body(mockMvc.perform(get("/api/holds/{holdId}", holdId).header(USER, userId))
+        JsonNode detail = testMvc.body(mockMvc.perform(get("/api/holds/{holdId}", holdId).header(USER, userId))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.holdId").value(holdId))
                 .andExpect(jsonPath("$.performanceId").value(pid))
@@ -95,7 +91,6 @@ class HoldApiControllerTest {
                 .andExpect(jsonPath("$.totalAmount").value(330_000))
                 .andExpect(jsonPath("$.paymentId").isEmpty())
                 .andReturn());
-        System.out.println("[S2.1] GET /holds/{id} 응답: " + detail);
         assertThat(detail.has("payDeadline")).isTrue();
         assertThat(detail.has("paymentId")).isTrue();
         LocalDateTime serverNow = LocalDateTime.parse(detail.get("serverNow").asString());
@@ -109,6 +104,7 @@ class HoldApiControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("RELEASED"))
                 .andExpect(jsonPath("$.seats.length()").value(0));
+
         mockMvc.perform(delete("/api/holds/{holdId}", holdId).header(USER, userId))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("HOLD_NOT_CANCELLABLE"))
@@ -116,12 +112,12 @@ class HoldApiControllerTest {
     }
 
     @Test
-    @DisplayName("남의 hold와 없는 hold는 조회·취소 모두 404 HOLD_NOT_FOUND")
+    @DisplayName("남의 선점이나 없는 선점은 조회·취소 모두 404로 답한다")
     void othersHoldIsNotFound() throws Exception {
         long pid = fixtures.newPerformance(1, 1, 2);
         long owner = fixtures.newUser();
         long stranger = fixtures.newUser();
-        long holdId = body(hold(owner, pid, List.of(seatIds(pid).get(0)))
+        long holdId = testMvc.body(hold(owner, pid, List.of(db.seatIds(pid).get(0)))
                 .andExpect(status().isCreated()).andReturn()).get("holdId").asLong();
 
         mockMvc.perform(get("/api/holds/{holdId}", holdId).header(USER, stranger))
@@ -133,17 +129,16 @@ class HoldApiControllerTest {
         mockMvc.perform(get("/api/holds/{holdId}", Long.MAX_VALUE).header(USER, owner))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("HOLD_NOT_FOUND"));
-        assertThat(jdbcTemplate.queryForObject("SELECT status FROM seat_hold WHERE id = ?", String.class, holdId))
-                .isEqualTo("HELD");
+        assertThat(db.holdStatus(holdId)).isEqualTo("HELD");
     }
 
     @Test
-    @DisplayName("결제 중(PAYING)인 hold는 취소할 수 없다: 409 HOLD_NOT_CANCELLABLE, 좌석 유지")
+    @DisplayName("결제 중인 선점을 취소하면 409로 거절하고 좌석을 그대로 둔다")
     void payingHoldNotCancellable() throws Exception {
         long pid = fixtures.newPerformance(1, 1, 2);
-        long seatId = seatIds(pid).get(0);
+        long seatId = db.seatIds(pid).get(0);
         long userId = fixtures.newUser();
-        long holdId = body(hold(userId, pid, List.of(seatId))
+        long holdId = testMvc.body(hold(userId, pid, List.of(seatId))
                 .andExpect(status().isCreated()).andReturn()).get("holdId").asLong();
         jdbcTemplate.update("UPDATE seat_hold SET status = 'PAYING' WHERE id = ?", holdId);
 
@@ -151,19 +146,18 @@ class HoldApiControllerTest {
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("HOLD_NOT_CANCELLABLE"))
                 .andExpect(jsonPath("$.detail.status").value("PAYING"));
-        assertThat(jdbcTemplate.queryForObject("SELECT status FROM seat WHERE id = ?", String.class, seatId))
-                .isEqualTo("HELD");
+        assertThat(db.seatStatus(seatId)).isEqualTo("HELD");
     }
 
     @Test
-    @DisplayName("이미 끝난 hold의 취소는 409 HOLD_NOT_CANCELLABLE과 detail.status(EXPIRED·CONFIRMED·RELEASED)로 까닭을 알린다")
+    @DisplayName("이미 끝난 선점을 취소하면 409로 거절하고 끝난 상태를 알려 준다")
     void notCancellableCarriesStatus() throws Exception {
         long pid = fixtures.newPerformance(1, 1, 3);
         List<String> finishedStates = List.of("EXPIRED", "CONFIRMED", "RELEASED");
         for (int i = 0; i < finishedStates.size(); i++) {
             String finished = finishedStates.get(i);
             long userId = fixtures.newUser();
-            long holdId = body(hold(userId, pid, List.of(seatIds(pid).get(i)))
+            long holdId = testMvc.body(hold(userId, pid, List.of(db.seatIds(pid).get(i)))
                     .andExpect(status().isCreated()).andReturn()).get("holdId").asLong();
             jdbcTemplate.update("UPDATE seat_hold SET status = ? WHERE id = ?", finished, holdId);
 
@@ -172,16 +166,15 @@ class HoldApiControllerTest {
                     .andExpect(jsonPath("$.code").value("HOLD_NOT_CANCELLABLE"))
                     .andExpect(jsonPath("$.message").value("지금은 이 자리를 놓을 수 없어요"))
                     .andExpect(jsonPath("$.detail.status").value(finished));
-            assertThat(jdbcTemplate.queryForObject("SELECT status FROM seat_hold WHERE id = ?", String.class, holdId))
-                    .isEqualTo(finished);
+            assertThat(db.holdStatus(holdId)).isEqualTo(finished);
         }
     }
 
     @Test
-    @DisplayName("두 번째 선점은 409 USER_HAS_HOLD, 이미 잡힌 좌석은 게이트가 409 SEAT_TAKEN(detail.seatId)")
+    @DisplayName("두 번째 선점이나 이미 잡힌 좌석을 고르면 409로 거절한다")
     void conflicts() throws Exception {
         long pid = fixtures.newPerformance(1, 1, 4);
-        List<Long> ids = seatIds(pid);
+        List<Long> ids = db.seatIds(pid);
         long userA = fixtures.newUser();
         long userB = fixtures.newUser();
         hold(userA, pid, List.of(ids.get(0))).andExpect(status().isCreated());
@@ -193,20 +186,19 @@ class HoldApiControllerTest {
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("SEAT_TAKEN"))
                 .andExpect(jsonPath("$.detail.seatId").value(ids.get(0)));
-        assertThat(jdbcTemplate.queryForObject("SELECT status FROM seat WHERE id = ?", String.class, ids.get(1)))
-                .isEqualTo("AVAILABLE");
+        assertThat(db.seatStatus(ids.get(1))).isEqualTo("AVAILABLE");
     }
 
     @Test
-    @DisplayName("다른 회차 좌석·없는 좌석·5석은 400 INVALID_SEAT_SELECTION이고 ticketing.hold.db가 늘지 않는다")
+    @DisplayName("고른 좌석이 잘못됐으면 DB까지 가지 않고 400으로 거절한다")
     void invalidSelectionDoesNotReachDb() throws Exception {
         long pid = fixtures.newPerformance(1, 1, 6);
         long otherPid = fixtures.newPerformance(1, 1, 2);
-        List<Long> ids = seatIds(pid);
+        List<Long> ids = db.seatIds(pid);
         long userId = fixtures.newUser();
-        double before = dbCounterTotal();
+        double before = counters.sum(Metrics.HOLD_DB);
 
-        hold(userId, pid, List.of(ids.get(0), seatIds(otherPid).get(0)))
+        hold(userId, pid, List.of(ids.get(0), db.seatIds(otherPid).get(0)))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("INVALID_SEAT_SELECTION"))
                 .andExpect(jsonPath("$.detail.reason").value("UNKNOWN_SEAT"));
@@ -219,34 +211,31 @@ class HoldApiControllerTest {
                 .andExpect(jsonPath("$.code").value("INVALID_SEAT_SELECTION"))
                 .andExpect(jsonPath("$.detail.reason").value("COUNT"));
 
-        assertThat(dbCounterTotal()).isEqualTo(before);
+        assertThat(counters.sum(Metrics.HOLD_DB)).isEqualTo(before);
         assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM seat_hold WHERE user_id = ?",
                 Long.class, userId)).isZero();
     }
 
     @Test
-    @DisplayName("처리열 토큰이 없거나 남의 것이면 403 NOT_ADMITTED이고 본문에 code·message가 있다")
+    @DisplayName("처리열 토큰이 없거나 남의 것이면 403 NOT_ADMITTED로 거절한다")
     void notAdmitted() throws Exception {
         long pid = fixtures.newPerformance(1, 1, 2);
         long userId = fixtures.newUser();
         long other = fixtures.newUser();
-        List<Long> target = List.of(seatIds(pid).get(0));
+        List<Long> target = List.of(db.seatIds(pid).get(0));
 
-        MvcResult missing = hold(userId, pid, target, null)
+        hold(userId, pid, target, null)
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code").value("NOT_ADMITTED"))
-                .andExpect(jsonPath("$.message").value("입장 순서가 지났어요. 다시 줄을 서 주세요"))
-                .andReturn();
-        System.out.println("[S6.2] 토큰 없는 POST /holds 응답: " + body(missing));
+                .andExpect(jsonPath("$.message").value("입장 순서가 지났어요. 다시 줄을 서 주세요"));
         hold(userId, pid, target, fixtures.admit(pid, other))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code").value("NOT_ADMITTED"));
-        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM seat_hold WHERE performance_id = ?",
-                Long.class, pid)).isZero();
+        assertThat(db.holdCount(pid)).isZero();
     }
 
     @Test
-    @DisplayName("사용자 식별이 없으면 401 LOGIN_REQUIRED")
+    @DisplayName("사용자 식별이 없으면 401 LOGIN_REQUIRED로 답한다")
     void loginRequired() throws Exception {
         mockMvc.perform(post("/api/performances/{pid}/holds", 1L)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -271,15 +260,4 @@ class HoldApiControllerTest {
                 .content(body));
     }
 
-    private double dbCounterTotal() {
-        return meterRegistry.find(Metrics.HOLD_DB).counters().stream().mapToDouble(Counter::count).sum();
-    }
-
-    private List<Long> seatIds(long pid) {
-        return jdbcTemplate.queryForList("SELECT id FROM seat WHERE performance_id = ? ORDER BY id", Long.class, pid);
-    }
-
-    private JsonNode body(MvcResult result) throws Exception {
-        return jsonMapper.readTree(result.getResponse().getContentAsString());
-    }
 }

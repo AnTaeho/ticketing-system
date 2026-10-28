@@ -3,23 +3,14 @@ package com.example.ticketing.queue.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.example.ticketing.common.config.TicketingProperties;
 import com.example.ticketing.common.error.ApiException;
 import com.example.ticketing.common.error.ErrorCode;
 import com.example.ticketing.common.redis.RedisUnavailableException;
-import com.example.ticketing.common.redis.TestTicketingRedis;
-import com.example.ticketing.common.redis.TicketingRedis;
-import com.example.ticketing.common.time.DbClock;
-import com.example.ticketing.queue.repository.QueueRedisStore;
-import com.example.ticketing.seat.service.SeatCatalog;
 import com.example.ticketing.support.CapturedLogs;
 import com.example.ticketing.support.Fixtures;
 import com.example.ticketing.support.IntegrationTest;
-import io.micrometer.core.instrument.MeterRegistry;
-import java.io.IOException;
-import java.net.ServerSocket;
-import java.time.Clock;
-import org.junit.jupiter.api.AfterEach;
+import com.example.ticketing.support.TestRedis;
+import com.example.ticketing.support.TestServices;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -33,33 +24,21 @@ class QueueFailureTest {
     private static final long USER = 7_200_000_001L;
 
     @Autowired
-    private MeterRegistry meterRegistry;
-    @Autowired
-    private TicketingProperties props;
-    @Autowired
-    private SeatCatalog seatCatalog;
-    @Autowired
     private Fixtures fixtures;
     @Autowired
-    private DbClock dbClock;
+    private TestRedis testRedis;
+    @Autowired
+    private TestServices services;
 
-    private TicketingRedis deadRedis;
     private QueueService deadService;
 
     @BeforeEach
-    void setUp() throws IOException {
-        deadRedis = TestTicketingRedis.connectTo("localhost", closedPort(), props);
-        deadService = new QueueService(new QueueRedisStore(deadRedis), seatCatalog, dbClock, Clock.systemDefaultZone(),
-                System::nanoTime, props, meterRegistry);
-    }
-
-    @AfterEach
-    void tearDown() {
-        deadRedis.destroy();
+    void setUp() {
+        deadService = services.queueService().store(TestServices.queueStore(testRedis.dead())).build();
     }
 
     @Test
-    @DisplayName("진입·조회는 Redis 장애 때 503 QUEUE_UNAVAILABLE(fail-closed)")
+    @DisplayName("Redis가 죽으면 진입·조회는 503 QUEUE_UNAVAILABLE로 막는다")
     void enterAndStatusFailClosed() {
         long pid = fixtures.newPerformance(1, 1, 1);
 
@@ -91,17 +70,12 @@ class QueueFailureTest {
         }
     }
 
+    // 선점 쪽이 이 예외를 받아 fail-open으로 처리한다
     @Test
-    @DisplayName("isAdmitted는 Redis 장애를 원인을 담은 RedisUnavailableException으로 던진다(선점 쪽에서 fail-open 처리)")
+    @DisplayName("처리열 토큰 확인(isAdmitted)은 Redis 장애를 RedisUnavailableException으로 던진다")
     void isAdmittedThrows() {
         assertThatThrownBy(() -> deadService.isAdmitted(USER, 1L, USER + ".token"))
                 .isInstanceOf(RedisUnavailableException.class)
                 .hasCauseInstanceOf(DataAccessException.class);
-    }
-
-    private static int closedPort() throws IOException {
-        try (ServerSocket socket = new ServerSocket(0)) {
-            return socket.getLocalPort();
-        }
     }
 }

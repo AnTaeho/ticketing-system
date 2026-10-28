@@ -9,49 +9,39 @@ import com.example.ticketing.common.error.ErrorCode;
 import com.example.ticketing.common.metrics.Metrics;
 import com.example.ticketing.common.metrics.Metrics.Tag;
 import com.example.ticketing.common.redis.RedisKeys;
-import com.example.ticketing.common.redis.TicketingRedis;
 import com.example.ticketing.hold.dto.CreateHoldCommand;
 import com.example.ticketing.hold.dto.CreateHoldResult;
-import com.example.ticketing.hold.repository.SeatGateRedisStore;
+import com.example.ticketing.support.Counters;
 import com.example.ticketing.support.Fixtures;
 import com.example.ticketing.support.IntegrationTest;
-import com.example.ticketing.support.RedisKeyCleaner;
-import io.micrometer.core.instrument.MeterRegistry;
+import com.example.ticketing.support.TestDb;
+import com.example.ticketing.support.TestRedis;
+import com.example.ticketing.support.TestServices;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.jdbc.core.JdbcTemplate;
 
 @IntegrationTest
 class SeatHoldGateTest {
 
     @Autowired
-    private HoldMetrics holdMetrics;
-    @Autowired
-    private SeatGateReflector gateReflector;
-    @Autowired
     private SeatHoldService seatHoldService;
-    @Autowired
-    private HoldExpiryTransaction expiryTransaction;
-    @Autowired
-    private SeatGateRedisStore gate;
     @Autowired
     private TicketingProperties properties;
     @Autowired
     private Fixtures fixtures;
     @Autowired
-    private JdbcTemplate jdbcTemplate;
+    private TestDb db;
     @Autowired
-    private MeterRegistry meterRegistry;
+    private TestRedis testRedis;
     @Autowired
-    private TicketingRedis bookingRedis;
+    private TestServices services;
     @Autowired
-    private RedisKeyCleaner redisKeyCleaner;
+    private Counters counters;
 
     private StringRedisTemplate redis;
     private long pid;
@@ -59,49 +49,42 @@ class SeatHoldGateTest {
 
     @BeforeEach
     void setUp() {
-        redis = bookingRedis.template();
+        redis = testRedis.template();
         pid = fixtures.newPerformance(1, 1, 4);
-        ids = jdbcTemplate.queryForList("SELECT id FROM seat WHERE performance_id = ? ORDER BY id", Long.class, pid);
-    }
-
-    @AfterEach
-    void tearDown() {
-        redisKeyCleaner.clean(pid);
+        ids = db.seatIds(pid);
     }
 
     @Test
-    @DisplayName("게이트 키를 지우면 B는 게이트를 통과하지만 DB가 SEAT_STATE_CHANGED로 거절하고, B가 쓴 키는 지워진다")
+    @DisplayName("게이트 키가 지워져도 DB가 SEAT_STATE_CHANGED로 막고 B가 쓴 키는 지운다")
     void deletedGateKeyFallsBackToDb() {
         List<Long> target = ids.subList(0, 2);
         long userA = fixtures.newUser();
         long userB = fixtures.newUser();
         CreateHoldResult holdA = seatHoldService.hold(
                 new CreateHoldCommand(userA, pid, target, fixtures.admit(pid, userA)));
-        String tokenA = holdToken(holdA.holdId());
+        String tokenA = db.holdToken(holdA.holdId());
         assertThat(redis.opsForValue().get(RedisKeys.seat(pid, target.get(0)))).isEqualTo(tokenA);
 
         redis.delete(target.stream().map(seatId -> RedisKeys.seat(pid, seatId)).toList());
-        double gateOkBefore = gateCounter("ok");
-        double stateChangedBefore = dbCounter("state_changed");
+        double gateOkBefore = counters.count(Metrics.HOLD_GATE, Tag.RESULT, "ok");
+        double stateChangedBefore = counters.count(Metrics.HOLD_DB, Tag.RESULT, "state_changed");
 
         String queueToken = fixtures.admit(pid, userB);
         assertThatThrownBy(() -> seatHoldService.hold(new CreateHoldCommand(userB, pid, target, queueToken)))
                 .isInstanceOf(ApiException.class)
                 .extracting("code").isEqualTo(ErrorCode.SEAT_STATE_CHANGED);
 
-        assertThat(gateCounter("ok") - gateOkBefore).isEqualTo(1);
-        assertThat(dbCounter("state_changed") - stateChangedBefore).isEqualTo(1);
+        assertThat(counters.count(Metrics.HOLD_GATE, Tag.RESULT, "ok") - gateOkBefore).isEqualTo(1);
+        assertThat(counters.count(Metrics.HOLD_DB, Tag.RESULT, "state_changed") - stateChangedBefore).isEqualTo(1);
         // B가 게이트에 쓴 userhold·좌석 키는 release로 지워졌고 A의 userhold는 남는다
         assertThat(redis.hasKey(RedisKeys.userHold(userB, pid))).isFalse();
         assertThat(target).allSatisfy(seatId -> assertThat(redis.hasKey(RedisKeys.seat(pid, seatId))).isFalse());
         assertThat(redis.opsForValue().get(RedisKeys.userHold(userA, pid))).isEqualTo(tokenA);
 
-        assertThat(holdStatus(holdA.holdId())).isEqualTo("HELD");
-        assertThat(heldSeats(holdA.holdId())).containsExactlyElementsOf(target);
-        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM seat_hold WHERE performance_id = ?",
-                Long.class, pid)).isEqualTo(1);
-        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM seat WHERE performance_id = ? AND status = 'HELD'",
-                Long.class, pid)).isEqualTo(2);
+        assertThat(db.holdStatus(holdA.holdId())).isEqualTo("HELD");
+        assertThat(db.heldSeats(pid, holdA.holdId())).containsExactlyElementsOf(target);
+        assertThat(db.holdCount(pid)).isEqualTo(1);
+        assertThat(db.heldSeatCount(pid)).isEqualTo(2);
     }
 
     @Test
@@ -109,39 +92,37 @@ class SeatHoldGateTest {
     void userHasHoldStopsAtGate() {
         long userId = fixtures.newUser();
         seatHoldService.hold(new CreateHoldCommand(userId, pid, List.of(ids.get(0)), fixtures.admit(pid, userId)));
-        double dbBefore = dbTotal();
-        double gateBefore = gateCounter("user_has_hold");
+        double dbBefore = counters.sum(Metrics.HOLD_DB);
+        double gateBefore = counters.count(Metrics.HOLD_GATE, Tag.RESULT, "user_has_hold");
 
         String queueToken = fixtures.admit(pid, userId);
         assertThatThrownBy(() -> seatHoldService.hold(
                 new CreateHoldCommand(userId, pid, List.of(ids.get(1)), queueToken)))
                 .extracting("code").isEqualTo(ErrorCode.USER_HAS_HOLD);
 
-        assertThat(dbTotal() - dbBefore).isZero();
-        assertThat(gateCounter("user_has_hold") - gateBefore).isEqualTo(1);
+        assertThat(counters.sum(Metrics.HOLD_DB) - dbBefore).isZero();
+        assertThat(counters.count(Metrics.HOLD_GATE, Tag.RESULT, "user_has_hold") - gateBefore).isEqualTo(1);
         assertThat(redis.hasKey(RedisKeys.seat(pid, ids.get(1)))).isFalse();
-        assertThat(seatStatus(ids.get(1))).isEqualTo("AVAILABLE");
+        assertThat(db.seatStatus(ids.get(1))).isEqualTo("AVAILABLE");
     }
 
     @Test
-    @DisplayName("만료되면 게이트 키가 지워지고 쿨다운이 걸려, 같은 사용자는 409 COOLDOWN이고 다른 사용자는 잡는다")
+    @DisplayName("선점이 만료되면 같은 사용자만 그 좌석을 COOLDOWN으로 다시 못 잡는다")
     void reholdCooldownAfterExpiry() {
         long seat = ids.get(0);
         long userA = fixtures.newUser();
         long userB = fixtures.newUser();
         CreateHoldResult holdA = seatHoldService.hold(
                 new CreateHoldCommand(userA, pid, List.of(seat), fixtures.admit(pid, userA)));
-        jdbcTemplate.update("UPDATE seat_hold SET expires_at = NOW(6) - INTERVAL 1 MINUTE WHERE id = ?", holdA.holdId());
-        jdbcTemplate.update("UPDATE seat SET held_until = NOW(6) - INTERVAL 1 MINUTE WHERE hold_id = ?", holdA.holdId());
+        db.expireHoldAndSeats(holdA.holdId());
 
-        // 테스트 컨텍스트에서는 스케줄러 빈이 꺼져 있어 같은 빈들로 직접 만든다. 다른 테스트가 남긴 만료 hold가 앞에 있을 수 있어 치워질 때까지 돈다
-        HoldExpiryScheduler scheduler = new HoldExpiryScheduler(expiryTransaction, gateReflector, holdMetrics,
-                properties);
-        for (int i = 0; i < 20 && !"EXPIRED".equals(holdStatus(holdA.holdId())); i++) {
+        // 스케줄러 빈은 테스트에서 꺼져 있다. 남이 남긴 만료 선점이 앞에 있을 수 있어 치워질 때까지 돈다
+        HoldExpiryScheduler scheduler = services.holdExpiryScheduler();
+        for (int i = 0; i < 20 && !"EXPIRED".equals(db.holdStatus(holdA.holdId())); i++) {
             scheduler.run();
         }
 
-        assertThat(holdStatus(holdA.holdId())).isEqualTo("EXPIRED");
+        assertThat(db.holdStatus(holdA.holdId())).isEqualTo("EXPIRED");
         assertThat(redis.hasKey(RedisKeys.seat(pid, seat))).isFalse();
         assertThat(redis.hasKey(RedisKeys.userHold(userA, pid))).isFalse();
         String cooldownKey = RedisKeys.rehold(userA, pid, seat);
@@ -149,7 +130,7 @@ class SeatHoldGateTest {
         assertThat(redis.getExpire(cooldownKey, TimeUnit.SECONDS))
                 .isGreaterThan(properties.hold().reholdCooldown().minusSeconds(10).toSeconds())
                 .isLessThanOrEqualTo(properties.hold().reholdCooldown().toSeconds());
-        double dbBefore = dbTotal();
+        double dbBefore = counters.sum(Metrics.HOLD_DB);
 
         String queueToken = fixtures.admit(pid, userA);
         assertThatThrownBy(() -> seatHoldService.hold(new CreateHoldCommand(userA, pid, List.of(seat), queueToken)))
@@ -159,15 +140,15 @@ class SeatHoldGateTest {
                     assertThat(be.getCode()).isEqualTo(ErrorCode.COOLDOWN);
                     assertThat(be.getDetail()).containsEntry("seatId", seat);
                 });
-        assertThat(dbTotal() - dbBefore).isZero();
+        assertThat(counters.sum(Metrics.HOLD_DB) - dbBefore).isZero();
 
         CreateHoldResult holdB = seatHoldService.hold(
                 new CreateHoldCommand(userB, pid, List.of(seat), fixtures.admit(pid, userB)));
-        assertThat(heldSeats(holdB.holdId())).containsExactly(seat);
+        assertThat(db.heldSeats(pid, holdB.holdId())).containsExactly(seat);
         // 쿨다운은 놓친 좌석에만 걸린다
         CreateHoldResult holdA2 = seatHoldService.hold(
                 new CreateHoldCommand(userA, pid, List.of(ids.get(1)), fixtures.admit(pid, userA)));
-        assertThat(heldSeats(holdA2.holdId())).containsExactly(ids.get(1));
+        assertThat(db.heldSeats(pid, holdA2.holdId())).containsExactly(ids.get(1));
     }
 
     @Test
@@ -178,45 +159,15 @@ class SeatHoldGateTest {
         long userB = fixtures.newUser();
         CreateHoldResult holdA = seatHoldService.hold(
                 new CreateHoldCommand(userA, pid, target, fixtures.admit(pid, userA)));
-        assertThat(redisKeyCleaner.gateKeys(pid)).hasSize(3);
+        assertThat(testRedis.gateKeys(pid)).hasSize(3);
 
         seatHoldService.release(userA, holdA.holdId());
 
-        assertThat(redisKeyCleaner.gateKeys(pid)).isEmpty();
+        assertThat(testRedis.gateKeys(pid)).isEmpty();
         CreateHoldResult holdB = seatHoldService.hold(
                 new CreateHoldCommand(userB, pid, target, fixtures.admit(pid, userB)));
-        assertThat(heldSeats(holdB.holdId())).containsExactlyElementsOf(target);
+        assertThat(db.heldSeats(pid, holdB.holdId())).containsExactlyElementsOf(target);
         assertThat(redis.opsForValue().get(RedisKeys.seat(pid, target.get(0))))
-                .isEqualTo(holdToken(holdB.holdId()));
-    }
-
-    private String holdToken(long holdId) {
-        return jdbcTemplate.queryForObject("SELECT hold_token FROM seat_hold WHERE id = ?", String.class, holdId);
-    }
-
-    private String holdStatus(long holdId) {
-        return jdbcTemplate.queryForObject("SELECT status FROM seat_hold WHERE id = ?", String.class, holdId);
-    }
-
-    private String seatStatus(long seatId) {
-        return jdbcTemplate.queryForObject("SELECT status FROM seat WHERE id = ?", String.class, seatId);
-    }
-
-    private List<Long> heldSeats(long holdId) {
-        return jdbcTemplate.queryForList(
-                "SELECT id FROM seat WHERE performance_id = ? AND hold_id = ? AND status = 'HELD' ORDER BY id",
-                Long.class, pid, holdId);
-    }
-
-    private double dbTotal() {
-        return dbCounter("ok") + dbCounter("state_changed") + dbCounter("user_has_hold");
-    }
-
-    private double dbCounter(String result) {
-        return meterRegistry.counter(Metrics.HOLD_DB, Tag.RESULT, result).count();
-    }
-
-    private double gateCounter(String result) {
-        return meterRegistry.counter(Metrics.HOLD_GATE, Tag.RESULT, result).count();
+                .isEqualTo(db.holdToken(holdB.holdId()));
     }
 }

@@ -1,26 +1,22 @@
 package com.example.ticketing.payment.controller;
 
+import static com.example.ticketing.support.TestMvc.USER;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.example.ticketing.common.config.TicketingProperties;
-import com.example.ticketing.hold.dto.CreateHoldCommand;
-import com.example.ticketing.hold.dto.CreateHoldResult;
-import com.example.ticketing.hold.service.SeatGateReflector;
-import com.example.ticketing.hold.service.SeatHoldService;
 import com.example.ticketing.payment.client.HttpPgClient;
 import com.example.ticketing.payment.client.OddPgTestConfig;
 import com.example.ticketing.payment.client.PgClient;
 import com.example.ticketing.payment.client.PgStatus;
 import com.example.ticketing.payment.dto.PaymentStart.Started;
-import com.example.ticketing.payment.service.PaymentReconcileScheduler;
-import com.example.ticketing.payment.service.PaymentReconcileTransaction;
 import com.example.ticketing.payment.service.PaymentTransaction;
+import com.example.ticketing.support.Await;
 import com.example.ticketing.support.Fixtures;
+import com.example.ticketing.support.Fixtures.Held;
 import com.example.ticketing.support.HttpIntegrationTest;
-import com.example.ticketing.support.PaymentDb;
-import com.example.ticketing.support.RedisKeyCleaner;
-import io.micrometer.core.instrument.MeterRegistry;
-import java.util.List;
+import com.example.ticketing.support.TestDb;
+import com.example.ticketing.support.TestServices;
+import java.time.Duration;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.DisplayName;
@@ -43,183 +39,132 @@ class PaymentHttpTest {
     @Autowired
     private PgClient pgClient;
     @Autowired
-    private SeatHoldService seatHoldService;
+    private PaymentTransaction paymentTransaction;
     @Autowired
     private Fixtures fixtures;
     @Autowired
-    private JdbcTemplate jdbcTemplate;
+    private TestDb db;
     @Autowired
-    private RedisKeyCleaner redisKeyCleaner;
+    private TestServices services;
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
     @Autowired
     private Environment environment;
     @Autowired
     private JsonMapper jsonMapper;
     @Autowired
-    private PaymentReconcileTransaction reconcileTransaction;
-    @Autowired
-    private PaymentTransaction paymentTransaction;
-    @Autowired
-    private SeatGateReflector gate;
-    @Autowired
     private TicketingProperties properties;
-    @Autowired
-    private MeterRegistry meterRegistry;
 
     @Test
-    @DisplayName("실제 HTTP: 결제 API → HttpPgClient → Fake PG(SUCCESS) → 200 CONFIRMED, Fake PG 행 APPROVED")
+    @DisplayName("결제 API를 실제 HTTP로 부르면 Fake PG 승인을 거쳐 200 CONFIRMED다")
     void payOverHttpWithFakePg() {
         assertThat(pgClient).isInstanceOf(HttpPgClient.class);
         long pid = fixtures.newPerformance(1, 1, 4);
-        try {
-            long userId = fixtures.newUser();
-            List<Long> seats = jdbcTemplate.queryForList("SELECT id FROM seat WHERE performance_id = ? ORDER BY id",
-                    Long.class, pid).subList(0, 2);
-            CreateHoldResult hold = seatHoldService.hold(
-                    new CreateHoldCommand(userId, pid, seats, fixtures.admit(pid, userId)));
-            RestClient client = RestClient.create("http://localhost:" + environment.getProperty("local.server.port"));
+        Held held = fixtures.held(pid, db.seatIds(pid).subList(0, 2));
 
-            ResponseEntity<String> response = client.post()
-                    .uri("/api/holds/{holdId}/payments", hold.holdId())
-                    .header("X-User-Id", String.valueOf(userId))
-                    .header("Idempotency-Key", UUID.randomUUID().toString())
-                    .header("X-Fake-Pg-Scenario", "SUCCESS")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .body("{\"method\":\"CARD\"}")
-                    .retrieve()
-                    .toEntity(String.class);
-            System.out.println("[S4.3] 실제 HTTP 결제 응답: " + response.getStatusCode() + " " + response.getBody());
+        ResponseEntity<String> response = client().post()
+                .uri("/api/holds/{holdId}/payments", held.holdId())
+                .header(USER, String.valueOf(held.userId()))
+                .header("Idempotency-Key", UUID.randomUUID().toString())
+                .header("X-Fake-Pg-Scenario", "SUCCESS")
+                .contentType(MediaType.APPLICATION_JSON)
+                .body("{\"method\":\"CARD\"}")
+                .retrieve()
+                .toEntity(String.class);
 
-            assertThat(response.getStatusCode().value()).isEqualTo(200);
-            JsonNode body = jsonMapper.readTree(response.getBody());
-            assertThat(body.get("status").asString()).isEqualTo("CONFIRMED");
-            long paymentId = body.get("paymentId").asLong();
-            String orderId = jdbcTemplate.queryForObject("SELECT order_id FROM booking_payment WHERE id = ?",
-                    String.class, paymentId);
-            assertThat(jdbcTemplate.queryForObject("SELECT status FROM fake_pg_transaction WHERE order_id = ?",
-                    String.class, orderId)).isEqualTo("APPROVED");
-            assertThat(jdbcTemplate.queryForObject("SELECT pg_tx_id FROM booking_payment WHERE id = ?",
-                    String.class, paymentId)).isEqualTo(jdbcTemplate.queryForObject(
-                    "SELECT pg_tx_id FROM fake_pg_transaction WHERE order_id = ?", String.class, orderId));
-            assertThat(jdbcTemplate.queryForObject("SELECT status FROM seat_hold WHERE id = ?",
-                    String.class, hold.holdId())).isEqualTo("CONFIRMED");
-            assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM booking WHERE hold_id = ?",
-                    Long.class, hold.holdId())).isEqualTo(1);
-        } finally {
-            redisKeyCleaner.clean(pid);
-        }
+        assertThat(response.getStatusCode().value()).isEqualTo(200);
+        JsonNode body = jsonMapper.readTree(response.getBody());
+        assertThat(body.get("status").asString()).isEqualTo("CONFIRMED");
+        long paymentId = body.get("paymentId").asLong();
+        String orderId = (String) db.payment(paymentId).get("order_id");
+        assertThat(fakePgStatus(orderId)).isEqualTo("APPROVED");
+        assertThat(db.payment(paymentId).get("pg_tx_id")).isEqualTo(fakePgTxId(orderId));
+        assertThat(db.holdStatus(held.holdId())).isEqualTo("CONFIRMED");
+        assertThat(db.bookingCountOfHold(held.holdId())).isEqualTo(1);
     }
 
     @Test
-    @DisplayName("실제 HTTP: SLOW_SUCCESS 결제 → 202 UNKNOWN → Fake PG 승인 완료 뒤 대사 → GET /api/payments/{id} APPROVED + 예매번호")
-    void slowSuccessIsConfirmedByReconcile() throws Exception {
+    @DisplayName("느린 승인 결제 → 202 UNKNOWN → 대사 → 조회 흐름에서 결제가 APPROVED로 확정된다")
+    void slowSuccessIsConfirmedByReconcile() {
         assertThat(pgClient).isInstanceOf(HttpPgClient.class);
         long pid = fixtures.newPerformance(1, 1, 4);
-        try {
-            long userId = fixtures.newUser();
-            CreateHoldResult hold = seatHoldService.hold(new CreateHoldCommand(userId, pid, seatIds(pid).subList(0, 2),
-                    fixtures.admit(pid, userId)));
-            RestClient client = client();
+        Held held = fixtures.held(pid, db.seatIds(pid).subList(0, 2));
+        RestClient client = client();
 
-            ResponseEntity<String> response = client.post()
-                    .uri("/api/holds/{holdId}/payments", hold.holdId())
-                    .header("X-User-Id", String.valueOf(userId))
-                    .header("Idempotency-Key", UUID.randomUUID().toString())
-                    .header("X-Fake-Pg-Scenario", "SLOW_SUCCESS")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .body("{\"method\":\"CARD\"}")
-                    .retrieve()
-                    .toEntity(String.class);
-            System.out.println("[S5.1] SLOW_SUCCESS 결제 응답: " + response.getStatusCode() + " " + response.getBody());
-            assertThat(response.getStatusCode().value()).isEqualTo(202);
-            JsonNode body = jsonMapper.readTree(response.getBody());
-            assertThat(body.get("status").asString()).isEqualTo("UNKNOWN");
-            long paymentId = body.get("paymentId").asLong();
-            String orderId = orderIdOf(paymentId);
-            assertThat(awaitFakePgSettled(orderId)).isEqualTo("APPROVED");
+        ResponseEntity<String> response = client.post()
+                .uri("/api/holds/{holdId}/payments", held.holdId())
+                .header(USER, String.valueOf(held.userId()))
+                .header("Idempotency-Key", UUID.randomUUID().toString())
+                .header("X-Fake-Pg-Scenario", "SLOW_SUCCESS")
+                .contentType(MediaType.APPLICATION_JSON)
+                .body("{\"method\":\"CARD\"}")
+                .retrieve()
+                .toEntity(String.class);
 
-            PaymentDb db = new PaymentDb(jdbcTemplate);
-            db.parkUnsettledPayments();
-            db.makeDue(paymentId);
-            reconcileScheduler().run();
+        assertThat(response.getStatusCode().value()).isEqualTo(202);
+        JsonNode body = jsonMapper.readTree(response.getBody());
+        assertThat(body.get("status").asString()).isEqualTo("UNKNOWN");
+        long paymentId = body.get("paymentId").asLong();
+        String orderId = (String) db.payment(paymentId).get("order_id");
+        assertThat(awaitFakePgSettled(orderId)).isEqualTo("APPROVED");
 
-            ResponseEntity<String> view = client.get()
-                    .uri("/api/payments/{paymentId}", paymentId)
-                    .header("X-User-Id", String.valueOf(userId))
-                    .retrieve()
-                    .toEntity(String.class);
-            System.out.println("[S5.1] 대사 뒤 결제 조회: " + view.getStatusCode() + " " + view.getBody());
-            JsonNode viewBody = jsonMapper.readTree(view.getBody());
-            assertThat(view.getStatusCode().value()).isEqualTo(200);
-            assertThat(viewBody.get("status").asString()).isEqualTo("APPROVED");
-            assertThat(viewBody.get("holdStatus").asString()).isEqualTo("CONFIRMED");
-            assertThat(viewBody.get("bookingNumber").asString()).matches("B\\d{8}-\\d{6,}");
-            assertThat(jdbcTemplate.queryForObject("SELECT pg_tx_id FROM booking_payment WHERE id = ?",
-                    String.class, paymentId)).isEqualTo(jdbcTemplate.queryForObject(
-                    "SELECT pg_tx_id FROM fake_pg_transaction WHERE order_id = ?", String.class, orderId));
-        } finally {
-            redisKeyCleaner.clean(pid);
-        }
+        db.parkUnsettledPayments();
+        db.makePaymentDue(paymentId);
+        services.paymentReconcileScheduler().run();
+
+        ResponseEntity<String> view = client.get()
+                .uri("/api/payments/{paymentId}", paymentId)
+                .header(USER, String.valueOf(held.userId()))
+                .retrieve()
+                .toEntity(String.class);
+
+        JsonNode viewBody = jsonMapper.readTree(view.getBody());
+        assertThat(view.getStatusCode().value()).isEqualTo(200);
+        assertThat(viewBody.get("status").asString()).isEqualTo("APPROVED");
+        assertThat(viewBody.get("holdStatus").asString()).isEqualTo("CONFIRMED");
+        assertThat(viewBody.get("bookingNumber").asString()).matches("B\\d{8}-\\d{6,}");
+        assertThat(db.payment(paymentId).get("pg_tx_id")).isEqualTo(fakePgTxId(orderId));
     }
 
     @Test
-    @DisplayName("실제 HTTP: PG 호출 전에 멈춘 REQUESTED 고아를 생성 30초 뒤 대사가 망취소 → Fake PG 묘비 CANCELLED, 결제 CANCELLED, "
-            + "hold RELEASED, 뒤늦은 승인은 DECLINED")
+    @DisplayName("PG 호출 전에 멈춘 고아 결제를 대사가 망취소하면 Fake PG가 뒤늦은 승인을 거절한다")
     void orphanLeavesTombstone() {
         long pid = fixtures.newPerformance(1, 1, 4);
-        try {
-            long userId = fixtures.newUser();
-            CreateHoldResult hold = seatHoldService.hold(new CreateHoldCommand(userId, pid, seatIds(pid).subList(0, 1),
-                    fixtures.admit(pid, userId)));
-            Started started = (Started) paymentTransaction.start(userId, hold.holdId(), UUID.randomUUID().toString());
-            PaymentDb db = new PaymentDb(jdbcTemplate);
-            db.parkUnsettledPayments();
-            db.ageCreatedAt(started.paymentId(), 60);
-            db.makeDue(started.paymentId());
+        Held held = fixtures.held(pid, db.seatIds(pid).subList(0, 1));
+        Started started = (Started) paymentTransaction.start(held.userId(), held.holdId(),
+                UUID.randomUUID().toString());
+        db.parkUnsettledPayments();
+        db.agePayment(started.paymentId(), 60);
+        db.makePaymentDue(started.paymentId());
 
-            reconcileScheduler().run();
+        services.paymentReconcileScheduler().run();
 
-            assertThat(jdbcTemplate.queryForList("SELECT status, amount FROM fake_pg_transaction WHERE order_id = ?",
-                    started.orderId())).singleElement()
-                    .satisfies(row -> assertThat(row).containsEntry("status", "CANCELLED").containsEntry("amount", 0));
-            assertThat(db.payment(started.paymentId())).containsEntry("status", "CANCELLED");
-            assertThat(db.holdStatus(hold.holdId())).isEqualTo("RELEASED");
-            assertThat(pgClient.approve(started.orderId(), started.amount(), Optional.empty()).status())
-                    .isEqualTo(PgStatus.DECLINED);
-        } finally {
-            redisKeyCleaner.clean(pid);
-        }
-    }
-
-    private PaymentReconcileScheduler reconcileScheduler() {
-        return new PaymentReconcileScheduler(reconcileTransaction, paymentTransaction, pgClient, gate, properties,
-                meterRegistry);
+        assertThat(jdbcTemplate.queryForList("SELECT status, amount FROM fake_pg_transaction WHERE order_id = ?",
+                started.orderId())).singleElement()
+                .satisfies(row -> assertThat(row).containsEntry("status", "CANCELLED").containsEntry("amount", 0));
+        assertThat(db.payment(started.paymentId())).containsEntry("status", "CANCELLED");
+        assertThat(db.holdStatus(held.holdId())).isEqualTo("RELEASED");
+        assertThat(pgClient.approve(started.orderId(), started.amount(), Optional.empty()).status())
+                .isEqualTo(PgStatus.DECLINED);
     }
 
     private RestClient client() {
         return RestClient.create("http://localhost:" + environment.getProperty("local.server.port"));
     }
 
-    private List<Long> seatIds(long pid) {
-        return jdbcTemplate.queryForList("SELECT id FROM seat WHERE performance_id = ? ORDER BY id", Long.class, pid);
-    }
-
-    private String orderIdOf(long paymentId) {
-        return jdbcTemplate.queryForObject("SELECT order_id FROM booking_payment WHERE id = ?", String.class, paymentId);
-    }
-
     // 서버 쪽 SLOW_SUCCESS 지연(5초)이 끝나 Fake PG 행이 결론 날 때까지 기다린다
-    private String awaitFakePgSettled(String orderId) throws InterruptedException {
-        long deadline = System.nanoTime() + properties.fakePg().slowDelay().plusSeconds(5).toNanos();
-        String status = fakePgStatus(orderId);
-        while ("PROCESSING".equals(status) && System.nanoTime() < deadline) {
-            Thread.sleep(100);
-            status = fakePgStatus(orderId);
-        }
-        return status;
+    private String awaitFakePgSettled(String orderId) {
+        return Await.until(properties.fakePg().slowDelay().plusSeconds(5), Duration.ofMillis(100),
+                () -> fakePgStatus(orderId), status -> !"PROCESSING".equals(status));
     }
 
     private String fakePgStatus(String orderId) {
         return jdbcTemplate.queryForObject("SELECT status FROM fake_pg_transaction WHERE order_id = ?",
+                String.class, orderId);
+    }
+
+    private String fakePgTxId(String orderId) {
+        return jdbcTemplate.queryForObject("SELECT pg_tx_id FROM fake_pg_transaction WHERE order_id = ?",
                 String.class, orderId);
     }
 }

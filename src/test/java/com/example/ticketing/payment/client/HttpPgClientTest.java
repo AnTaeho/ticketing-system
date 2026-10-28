@@ -4,15 +4,18 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.example.ticketing.common.config.TicketingProperties;
 import com.example.ticketing.payment.dto.PgScenario;
+import com.example.ticketing.support.Await;
+import com.example.ticketing.support.Concurrently;
+import com.example.ticketing.support.Concurrently.Results;
+import com.example.ticketing.support.Concurrently.Running;
 import com.example.ticketing.support.HttpIntegrationTest;
+import com.example.ticketing.support.TestProperties;
+import com.example.ticketing.support.TestServices;
 import java.io.IOException;
 import java.net.ServerSocket;
 import java.time.Duration;
 import java.util.Optional;
 import java.util.UUID;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.TimeUnit;
-import java.util.function.Supplier;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -21,7 +24,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Import;
 import org.springframework.core.env.Environment;
 import org.springframework.mock.env.MockEnvironment;
-import tools.jackson.databind.json.JsonMapper;
 
 @HttpIntegrationTest
 @Import(OddPgTestConfig.class)
@@ -36,10 +38,10 @@ class HttpPgClientTest {
     @Autowired
     private Environment environment;
     @Autowired
-    private JsonMapper jsonMapper;
+    private TestServices services;
 
     @Test
-    @DisplayName("base-url이 비어 있어도 실행 중 포트로 Fake PG에 닿는다. SUCCESS → APPROVED + pgTxId, 조회도 APPROVED")
+    @DisplayName("설정에 PG 주소가 없어도 실행 중 포트의 Fake PG로 승인하고 조회한다")
     void approveSuccess() {
         assertThat(properties.pg().baseUrl()).isEmpty();
         String orderId = newOrderId();
@@ -53,7 +55,7 @@ class HttpPgClientTest {
     }
 
     @Test
-    @DisplayName("DECLINE → DECLINED, pgTxId 없음")
+    @DisplayName("거절 시나리오로 승인하면 PG 거래 번호 없이 DECLINED다")
     void approveDecline() {
         PgResult declined = pgClient.approve(newOrderId(), AMOUNT, Optional.of(PgScenario.DECLINE.name()));
 
@@ -61,7 +63,7 @@ class HttpPgClientTest {
     }
 
     @Test
-    @DisplayName("같은 orderId로 다시 승인하면 같은 결과를 돌려준다")
+    @DisplayName("같은 주문 번호로 다시 승인하면 같은 결과를 돌려준다")
     void repeatedApproveReturnsSameResult() {
         String approvedOrder = newOrderId();
         PgResult first = pgClient.approve(approvedOrder, AMOUNT, Optional.of(PgScenario.SUCCESS.name()));
@@ -74,31 +76,30 @@ class HttpPgClientTest {
     }
 
     @Test
-    @DisplayName("SLOW_SUCCESS → read timeout(3초)에 걸려 UNKNOWN. 서버 쪽 승인이 끝나면 조회는 APPROVED")
+    @DisplayName("느린 승인은 읽기 제한 시간(3초)에 걸려 UNKNOWN이고 끝나면 조회는 APPROVED다")
     void slowSuccessTimesOutAsUnknownThenQueryApproved() {
         String orderId = newOrderId();
 
         long started = System.nanoTime();
         PgResult result = pgClient.approve(orderId, AMOUNT, Optional.of(PgScenario.SLOW_SUCCESS.name()));
         long elapsedMs = elapsedMs(started);
-        System.out.println("[HttpPgClientTest] SLOW_SUCCESS approve elapsedMs=" + elapsedMs + " detail=" + result.detail());
 
         assertThat(result.status()).isEqualTo(PgStatus.UNKNOWN);
         assertThat(result.detail()).isNotBlank();
         assertThat(elapsedMs).isBetween(2_800L, 4_500L);
-        PgResult settled = awaitSettled(() -> pgClient.query(orderId));
+        PgResult settled = awaitSettled(orderId);
         assertThat(settled.status()).isEqualTo(PgStatus.APPROVED);
         assertThat(settled.pgTxId()).isNotBlank();
     }
 
     @Test
-    @DisplayName("조회: 없는 주문 → NOT_FOUND")
+    @DisplayName("없는 주문을 조회하면 NOT_FOUND다")
     void queryMissing() {
         assertThat(pgClient.query(newOrderId())).isEqualTo(PgResult.of(PgStatus.NOT_FOUND, null));
     }
 
     @Test
-    @DisplayName("취소: 없는 주문 → CANCELLED(묘비), 그 뒤 승인은 DECLINED")
+    @DisplayName("없는 주문을 취소하면 묘비가 남아 그 뒤 승인은 DECLINED다")
     void cancelMissingLeavesTombstone() {
         String orderId = newOrderId();
 
@@ -109,7 +110,7 @@ class HttpPgClientTest {
     }
 
     @Test
-    @DisplayName("취소: 승인된 주문 → CANCELLED, pgTxId 유지")
+    @DisplayName("승인된 주문을 취소하면 PG 거래 번호를 둔 채 CANCELLED다")
     void cancelApproved() {
         String orderId = newOrderId();
         PgResult approved = pgClient.approve(orderId, AMOUNT, Optional.of(PgScenario.SUCCESS.name()));
@@ -118,30 +119,35 @@ class HttpPgClientTest {
     }
 
     @Test
-    @DisplayName("취소: PROCESSING 중 → CONFLICT. 승인이 끝나면 APPROVED")
-    void cancelWhileProcessingConflicts() throws Exception {
+    @DisplayName("처리 중인 주문을 취소하면 CONFLICT이고 승인이 끝나면 APPROVED다")
+    void cancelWhileProcessingConflicts() {
         String orderId = newOrderId();
-        CompletableFuture<PgResult> slowApprove = CompletableFuture.supplyAsync(
-                () -> pgClient.approve(orderId, AMOUNT, Optional.of(PgScenario.SLOW_SUCCESS.name())));
-        try {
-            assertThat(awaitStatus(() -> pgClient.query(orderId), PgStatus.PROCESSING).status())
-                    .isEqualTo(PgStatus.PROCESSING);
+
+        try (Running<PgResult> slowApprove = Concurrently.of(1).within(Duration.ofSeconds(10))
+                .start(i -> pgClient.approve(orderId, AMOUNT, Optional.of(PgScenario.SLOW_SUCCESS.name())))) {
+            PgResult processing = Await.until(Duration.ofSeconds(3), Duration.ofMillis(100),
+                    () -> pgClient.query(orderId), r -> r.status() == PgStatus.PROCESSING);
+            assertThat(processing.status()).isEqualTo(PgStatus.PROCESSING);
 
             assertThat(pgClient.cancel(orderId)).isEqualTo(PgResult.of(PgStatus.CONFLICT, null));
+
+            Results<PgResult> approved = slowApprove.await();
+            assertThat(approved.errors()).isEmpty();
+            assertThat(approved.values()).singleElement()
+                    .satisfies(r -> assertThat(r.status()).isEqualTo(PgStatus.UNKNOWN));
         } finally {
-            assertThat(slowApprove.get(10, TimeUnit.SECONDS).status()).isEqualTo(PgStatus.UNKNOWN);
-            assertThat(awaitSettled(() -> pgClient.query(orderId)).status()).isEqualTo(PgStatus.APPROVED);
+            assertThat(awaitSettled(orderId).status()).isEqualTo(PgStatus.APPROVED);
         }
     }
 
     @Test
-    @DisplayName("닫힌 포트 → 예외 없이 UNKNOWN, connect timeout 안에 돌아온다")
-    void closedPortIsUnknown() throws IOException {
-        int closedPort;
+    @DisplayName("PG 포트가 닫혀 있으면 예외 없이 연결 제한 시간 안에 UNKNOWN이다")
+    void unreachablePortIsUnknown() throws IOException {
+        int unusedPort;
         try (ServerSocket socket = new ServerSocket(0)) {
-            closedPort = socket.getLocalPort();
+            unusedPort = socket.getLocalPort();
         }
-        PgClient client = clientFor("http://127.0.0.1:" + closedPort + "/fake-pg");
+        PgClient client = clientFor("http://127.0.0.1:" + unusedPort + "/fake-pg");
 
         long started = System.nanoTime();
         PgResult approve = client.approve(newOrderId(), AMOUNT, Optional.of(PgScenario.SUCCESS.name()));
@@ -155,9 +161,9 @@ class HttpPgClientTest {
     }
 
     @Test
-    @DisplayName("base-url도 local.server.port도 없으면 호출하지 않고 UNKNOWN")
+    @DisplayName("PG 주소도 실행 포트도 없으면 호출하지 않고 UNKNOWN이다")
     void noBaseUrlIsUnknown() {
-        PgClient client = new HttpPgClient(withPg(""), new MockEnvironment(), jsonMapper, System::nanoTime);
+        PgClient client = services.httpPgClient(withPg(""), new MockEnvironment());
 
         PgResult result = client.query(newOrderId());
 
@@ -166,7 +172,7 @@ class HttpPgClientTest {
     }
 
     @ParameterizedTest(name = "{0}: 승인 {1}, 조회 {2}, 취소 {3}")
-    @DisplayName("예상 밖 응답은 본문 status보다 HTTP 상태가 먼저다. 확정할 수 없으면 UNKNOWN")
+    @DisplayName("예상 밖 응답은 본문보다 HTTP 상태를 먼저 보고 확정할 수 없으면 UNKNOWN이다")
     @CsvSource({
             "server-error,            UNKNOWN,  UNKNOWN,   UNKNOWN",
             "not-json,                UNKNOWN,  UNKNOWN,   UNKNOWN",
@@ -193,45 +199,17 @@ class HttpPgClientTest {
     }
 
     private PgClient clientFor(String baseUrl) {
-        return new HttpPgClient(withPg(baseUrl), environment, jsonMapper, System::nanoTime);
+        return services.httpPgClient(withPg(baseUrl), environment);
     }
 
     private TicketingProperties withPg(String baseUrl) {
-        TicketingProperties.Pg pg = properties.pg();
-        return new TicketingProperties(properties.seed(), properties.redis(), properties.hold(), properties.payment(),
-                properties.gate(), properties.queue(), properties.seatmap(), properties.outbox(), properties.ops(),
-                new TicketingProperties.Pg(baseUrl, pg.connectTimeout(), pg.readTimeout()), properties.fakePg());
+        return TestProperties.from(properties).pgBaseUrl(baseUrl).build();
     }
 
     // 서버 쪽 지연(slow-delay-ms)이 끝나 행이 확정될 때까지 기다려 다음 테스트에 섞이지 않게 한다
-    private PgResult awaitSettled(Supplier<PgResult> query) {
-        Duration limit = properties.fakePg().slowDelay().plusSeconds(5);
-        long deadline = System.nanoTime() + limit.toNanos();
-        PgResult last = query.get();
-        while (last.status() == PgStatus.PROCESSING && System.nanoTime() < deadline) {
-            pause();
-            last = query.get();
-        }
-        return last;
-    }
-
-    private PgResult awaitStatus(Supplier<PgResult> query, PgStatus expected) {
-        long deadline = System.nanoTime() + Duration.ofSeconds(3).toNanos();
-        PgResult last = query.get();
-        while (last.status() != expected && System.nanoTime() < deadline) {
-            pause();
-            last = query.get();
-        }
-        return last;
-    }
-
-    private static void pause() {
-        try {
-            Thread.sleep(100);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new IllegalStateException(e);
-        }
+    private PgResult awaitSettled(String orderId) {
+        return Await.until(properties.fakePg().slowDelay().plusSeconds(5), Duration.ofMillis(100),
+                () -> pgClient.query(orderId), r -> r.status() != PgStatus.PROCESSING);
     }
 
     private static long elapsedMs(long startedNanos) {

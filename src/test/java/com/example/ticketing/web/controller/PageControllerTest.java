@@ -15,6 +15,7 @@ import com.example.ticketing.common.config.TicketingProperties;
 import com.example.ticketing.common.error.ApiExceptionHandler;
 import com.example.ticketing.common.web.DemoMode;
 import com.example.ticketing.support.IntegrationTest;
+import com.example.ticketing.support.TestMvc;
 import com.example.ticketing.web.PageExceptionHandler;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -34,15 +35,17 @@ class PageControllerTest {
 
     @Autowired
     private WebApplicationContext context;
+    @Autowired
+    private TestMvc testMvc;
 
     private MockMvc mockMvc;
 
     @BeforeEach
     void setUp() {
-        mockMvc = MockMvcBuilders.webAppContextSetup(context).build();
+        mockMvc = testMvc.mockMvc();
     }
 
-    @ParameterizedTest(name = "{0} → {1}")
+    @ParameterizedTest(name = "{0} 경로는 {1} 뷰를 그린다")
     @CsvSource({
             "/booking/login, booking/login, /booking/js/login.js",
             "/booking/shows, booking/shows, /booking/js/shows.js",
@@ -53,7 +56,7 @@ class PageControllerTest {
             "/booking/bookings, booking/bookings, /booking/js/bookings.js",
             "/booking/ops/performances/9, booking/ops, /booking/js/ops.js"
     })
-    @DisplayName("각 화면 경로는 200과 해당 뷰를 돌려주고, 레이아웃의 공통 머리·스타일·스크립트가 함께 렌더링된다")
+    @DisplayName("각 화면 경로는 해당 뷰를 공통 레이아웃과 함께 그린다")
     void rendersPage(String path, String viewName, String pageScript) throws Exception {
         mockMvc.perform(get(path))
                 .andExpect(status().isOk())
@@ -68,7 +71,7 @@ class PageControllerTest {
     }
 
     @Test
-    @DisplayName("공연 상세는 경로의 공연 번호를 화면에 넘기고 뒤로 가기를 공연 목록에 걸며, 없는 공연이면 보일 안내와 공연 목록 단추를 둔다")
+    @DisplayName("공연 상세는 경로의 공연 번호를 넘기고 없는 공연일 때 보일 안내를 둔다")
     void showPassesShowId() throws Exception {
         mockMvc.perform(get("/booking/shows/7"))
                 .andExpect(model().attribute("showId", 7L))
@@ -122,7 +125,7 @@ class PageControllerTest {
     }
 
     @Test
-    @DisplayName("prod에서는 결제 화면에 시연 상자를 그리지 않는다")
+    @DisplayName("운영(prod)에서는 결제 화면에 시연 상자를 그리지 않는다")
     void checkoutHidesDemoBoxInProd() throws Exception {
         MockEnvironment prod = new MockEnvironment();
         prod.setActiveProfiles("prod");
@@ -186,7 +189,7 @@ class PageControllerTest {
             "/booking/holds/abc/checkout",
             "/booking/ops/performances/abc"
     })
-    @DisplayName("화면 경로의 번호가 숫자가 아니면 JSON 대신 404 오류 화면과 공연 목록 단추를 보여 준다")
+    @DisplayName("화면 경로의 번호가 숫자가 아니면 404 오류 화면을 보여 준다")
     void badNumberInPagePathShowsErrorPage(String path) throws Exception {
         mockMvc.perform(get(path))
                 .andExpect(status().isNotFound())
@@ -205,7 +208,7 @@ class PageControllerTest {
     }
 
     @Test
-    @DisplayName("API 경로의 잘못된 번호는 지금처럼 예매 JSON 400으로 답한다")
+    @DisplayName("잘못된 번호가 든 API 경로는 예매 JSON 400으로 답한다")
     void badNumberInApiPathStaysJson() throws Exception {
         mockMvc.perform(get("/api/shows/abc"))
                 .andExpect(status().isBadRequest())
@@ -240,7 +243,7 @@ class PageControllerTest {
     }
 
     @Test
-    @DisplayName("/booking은 공연 목록으로 보낸다")
+    @DisplayName("첫 화면 경로(/booking)는 공연 목록으로 보낸다")
     void homeRedirectsToShows() throws Exception {
         mockMvc.perform(get("/booking"))
                 .andExpect(status().is3xxRedirection())

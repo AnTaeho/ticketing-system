@@ -18,6 +18,7 @@ import com.example.ticketing.show.controller.ShowAdminApiController;
 import com.example.ticketing.show.controller.ShowApiController;
 import com.example.ticketing.support.IntegrationTest;
 import com.example.ticketing.support.ProbeConfig;
+import com.example.ticketing.support.TestMvc;
 import com.example.ticketing.user.controller.DemoLoginApiController;
 import com.example.ticketing.web.PageExceptionHandler;
 import com.example.ticketing.web.controller.OpsPageController;
@@ -33,7 +34,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
-import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.util.ClassUtils;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.context.WebApplicationContext;
@@ -47,16 +47,18 @@ class ApiExceptionHandlerTest {
 
     @Autowired
     private WebApplicationContext context;
+    @Autowired
+    private TestMvc testMvc;
 
     private MockMvc mockMvc;
 
     @BeforeEach
     void setUp() {
-        mockMvc = MockMvcBuilders.webAppContextSetup(context).build();
+        mockMvc = testMvc.mockMvc();
     }
 
     @Test
-    @DisplayName("사용자 정보가 없으면 예매 처리기가 401 LOGIN_REQUIRED로 응답하고 error 키는 없다")
+    @DisplayName("사용자 정보가 없으면 예매 처리기가 401로 답한다")
     void loginRequired() throws Exception {
         mockMvc.perform(get(PROBE + "/me"))
                 .andExpect(status().isUnauthorized())
@@ -69,15 +71,15 @@ class ApiExceptionHandlerTest {
     @Test
     @DisplayName("숫자가 아닌 X-User-Id는 로그인 안 한 것으로 본다")
     void invalidUserIdHeader() throws Exception {
-        mockMvc.perform(get(PROBE + "/me").header("X-User-Id", "abc"))
+        mockMvc.perform(get(PROBE + "/me").header(TestMvc.USER, "abc"))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.code").value("LOGIN_REQUIRED"));
     }
 
     @Test
-    @DisplayName("X-User-Id 헤더가 bk_uid 쿠키보다 먼저 쓰인다")
+    @DisplayName("사용자 헤더(X-User-Id)가 쿠키(bk_uid)보다 먼저 쓰인다")
     void headerBeforeCookie() throws Exception {
-        mockMvc.perform(get(PROBE + "/me").header("X-User-Id", "11").cookie(new Cookie("bk_uid", "22")))
+        mockMvc.perform(get(PROBE + "/me").header(TestMvc.USER, "11").cookie(new Cookie("bk_uid", "22")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.userId").value(11));
     }
@@ -91,9 +93,9 @@ class ApiExceptionHandlerTest {
     }
 
     @Test
-    @DisplayName("예매 컨트롤러가 던진 ApiException은 코드의 상태와 {code, message, detail}로 응답한다")
+    @DisplayName("예매 컨트롤러가 ApiException을 던지면 코드에 맞는 상태로 답한다")
     void bookingException() throws Exception {
-        mockMvc.perform(get(PROBE + "/seat-taken").header("X-User-Id", "1"))
+        mockMvc.perform(get(PROBE + "/seat-taken").header(TestMvc.USER, "1"))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("SEAT_TAKEN"))
                 .andExpect(jsonPath("$.message").value(ErrorCode.SEAT_TAKEN.getDefaultMessage()))
@@ -103,9 +105,9 @@ class ApiExceptionHandlerTest {
     }
 
     @Test
-    @DisplayName("필수 헤더가 없으면 400 INVALID_REQUEST와 헤더 이름으로 응답한다")
+    @DisplayName("필수 헤더가 없으면 빠진 헤더 이름을 담아 400으로 답한다")
     void missingRequiredHeader() throws Exception {
-        mockMvc.perform(post(PROBE + "/required-header").header("X-User-Id", "1"))
+        mockMvc.perform(post(PROBE + "/required-header").header(TestMvc.USER, "1"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("INVALID_REQUEST"))
                 .andExpect(jsonPath("$.detail.header").value("X-Probe"))
@@ -113,9 +115,9 @@ class ApiExceptionHandlerTest {
     }
 
     @Test
-    @DisplayName("요청 본문 검증 실패는 400 INVALID_REQUEST와 필드 목록으로 응답한다")
+    @DisplayName("요청 본문 검증이 실패하면 틀린 필드를 담아 400으로 답한다")
     void validationFailure() throws Exception {
-        mockMvc.perform(post(PROBE + "/validate").header("X-User-Id", "1")
+        mockMvc.perform(post(PROBE + "/validate").header(TestMvc.USER, "1")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"nickname\":\"\"}"))
                 .andExpect(status().isBadRequest())
@@ -127,7 +129,7 @@ class ApiExceptionHandlerTest {
     @Test
     @DisplayName("예매 처리기가 다루지 않는 예외는 잡지 않고 넘겨 Boot 기본 오류 처리에 맡긴다")
     void unhandledIsNotCaught() {
-        assertThatThrownBy(() -> mockMvc.perform(get(PROBE + "/boom").header("X-User-Id", "1")))
+        assertThatThrownBy(() -> mockMvc.perform(get(PROBE + "/boom").header(TestMvc.USER, "1")))
                 .hasRootCauseInstanceOf(IllegalStateException.class)
                 .hasRootCauseMessage("boom");
     }

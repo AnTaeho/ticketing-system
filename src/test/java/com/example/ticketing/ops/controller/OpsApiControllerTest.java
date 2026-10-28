@@ -8,6 +8,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.example.ticketing.common.metrics.Metrics;
 import com.example.ticketing.support.Fixtures;
 import com.example.ticketing.support.IntegrationTest;
+import com.example.ticketing.support.TestMvc;
 import com.example.ticketing.web.controller.OpsPageController;
 import java.util.Arrays;
 import org.junit.jupiter.api.BeforeEach;
@@ -20,14 +21,12 @@ import org.springframework.context.annotation.AnnotatedBeanDefinitionReader;
 import org.springframework.context.support.GenericApplicationContext;
 import org.springframework.mock.env.MockEnvironment;
 import org.springframework.test.web.servlet.MockMvc;
-import org.springframework.test.web.servlet.setup.MockMvcBuilders;
-import org.springframework.web.context.WebApplicationContext;
 
 @IntegrationTest
 class OpsApiControllerTest {
 
     @Autowired
-    private WebApplicationContext context;
+    private TestMvc testMvc;
     @Autowired
     private Fixtures fixtures;
 
@@ -35,11 +34,11 @@ class OpsApiControllerTest {
 
     @BeforeEach
     void setUp() {
-        mockMvc = MockMvcBuilders.webAppContextSetup(context).build();
+        mockMvc = testMvc.mockMvc();
     }
 
     @Test
-    @DisplayName("로그인 없이 회차 집계를 JSON으로 돌려준다")
+    @DisplayName("로그인 없이 요청해도 회차 집계를 JSON으로 돌려준다")
     void summaryShape() throws Exception {
         long pid = fixtures.newPerformance(1, 1, 3);
 
@@ -66,14 +65,14 @@ class OpsApiControllerTest {
     }
 
     @Test
-    @DisplayName("없는 회차는 404 PERFORMANCE_NOT_FOUND")
+    @DisplayName("없는 회차의 집계를 요청하면 404로 답한다")
     void unknownPerformance() throws Exception {
         mockMvc.perform(get("/api/ops/performances/{pid}/summary", Long.MAX_VALUE - 7))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("PERFORMANCE_NOT_FOUND"));
     }
 
-    @ParameterizedTest(name = "{0} → {1}개")
+    @ParameterizedTest(name = "{0} 프로필이면 {1}개가 등록된다")
     @CsvSource({"prod, 0", "local, 2", "test, 2"})
     @DisplayName("집계 API와 운영 화면 컨트롤러는 prod 프로필에서 등록되지 않는다")
     void registeredOnlyOutsideProd(String profile, int expected) {

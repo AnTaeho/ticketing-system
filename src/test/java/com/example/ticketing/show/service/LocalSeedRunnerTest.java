@@ -30,13 +30,13 @@ class LocalSeedRunnerTest {
     private JdbcTemplate jdbcTemplate;
 
     @Test
-    @DisplayName("ticketing.seed.enabled=false면 시드 러너 빈이 없다")
+    @DisplayName("시드 스위치(ticketing.seed.enabled)가 꺼져 있으면 시드 러너 빈이 없다")
     void noBeanWhenDisabled() {
         assertThat(context.getBeanNamesForType(LocalSeedRunner.class)).isEmpty();
     }
 
     @Test
-    @DisplayName("시드를 두 번 돌려도 공연 1개, 회차 2개(예매 중·10분 뒤 오픈), 각 800석만 생긴다")
+    @DisplayName("시드를 두 번 돌려도 공연 1개와 회차 2개만 생긴다")
     void seedIsIdempotent() {
         deleteExistingSeed();
         LocalSeedRunner runner = new LocalSeedRunner(showAdminService, showRepository, dbClock);

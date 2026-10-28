@@ -46,7 +46,7 @@ class ShowQueryServiceTest {
     }
 
     @Test
-    @DisplayName("공연 목록의 nextPerformance는 아직 시작하지 않은 가장 이른 회차, 없으면 null")
+    @DisplayName("공연 목록의 nextPerformance는 아직 시작하지 않은 가장 이른 회차이고 없으면 null이다")
     void nextPerformance() {
         long showId = fixtures.newShow();
         LocalDateTime now = fixtures.dbNow();
@@ -66,7 +66,7 @@ class ShowQueryServiceTest {
     }
 
     @Test
-    @DisplayName("없는 공연은 SHOW_NOT_FOUND")
+    @DisplayName("없는 공연을 조회하면 SHOW_NOT_FOUND로 거절한다")
     void unknownShow() {
         assertThatThrownBy(() -> showQueryService.getShow(Long.MAX_VALUE))
                 .isInstanceOf(ApiException.class)

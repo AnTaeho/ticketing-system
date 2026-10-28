@@ -15,31 +15,24 @@ import com.example.ticketing.common.config.TicketingProperties;
 import com.example.ticketing.common.error.ApiException;
 import com.example.ticketing.common.error.ErrorCode;
 import com.example.ticketing.common.metrics.Metrics;
+import com.example.ticketing.common.metrics.Metrics.RebuildSource;
 import com.example.ticketing.common.metrics.Metrics.Tag;
-import com.example.ticketing.common.redis.InstanceId;
 import com.example.ticketing.common.redis.RedisKeys;
 import com.example.ticketing.common.redis.RedisUnavailableException;
-import com.example.ticketing.common.redis.TicketingRedis;
-import com.example.ticketing.seat.repository.SeatJdbcRepository;
 import com.example.ticketing.seat.repository.SeatMapRedisStore;
+import com.example.ticketing.support.Concurrently;
+import com.example.ticketing.support.Concurrently.Results;
+import com.example.ticketing.support.Concurrently.Running;
+import com.example.ticketing.support.Counters;
 import com.example.ticketing.support.Fixtures;
 import com.example.ticketing.support.IntegrationTest;
-import com.example.ticketing.support.RedisKeyCleaner;
-import io.micrometer.core.instrument.MeterRegistry;
-import java.time.Clock;
+import com.example.ticketing.support.TestRedis;
+import com.example.ticketing.support.TestServices;
 import java.time.Duration;
-import java.util.ArrayList;
 import java.util.List;
-import java.util.Optional;
 import java.util.Set;
-import java.util.concurrent.Callable;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -53,323 +46,275 @@ import tools.jackson.databind.json.JsonMapper;
 class SeatMapQueryServiceTest {
 
     @Autowired
-    private SeatJdbcRepository seatJdbcRepository;
+    private SeatMapBuilder seatMapBuilder;
     @Autowired
-    private SeatCatalog seatCatalog;
+    private SeatMapRedisStore seatMapRedisStore;
     @Autowired
-    private SeatMapBuilder builder;
-    @Autowired
-    private SeatMapRedisStore store;
-    @Autowired
-    private InstanceId instanceId;
-    @Autowired
-    private TicketingProperties props;
-    @Autowired
-    private MeterRegistry meterRegistry;
+    private TicketingProperties properties;
     @Autowired
     private Fixtures fixtures;
     @Autowired
-    private RedisKeyCleaner cleaner;
+    private TestServices services;
     @Autowired
-    private TicketingRedis bookingRedis;
+    private TestRedis testRedis;
+    @Autowired
+    private Counters counters;
     @Autowired
     private JdbcTemplate jdbcTemplate;
     @Autowired
     private JsonMapper jsonMapper;
 
-    private final List<Long> pids = new ArrayList<>();
-
-    @AfterEach
-    void tearDown() {
-        pids.forEach(cleaner::clean);
-    }
-
     @Test
-    @DisplayName("스냅샷이 없을 때 50건 동시 조회: 재생성(miss) 1회, 50건 모두 같은 generatedAt")
-    void concurrentMissRebuildsOnce() throws Exception {
-        long pid = performance();
-        SeatMapQueryService service = service(store, builder);
-        double missBefore = rebuilds("miss");
+    @DisplayName("스냅샷이 없을 때 50건이 동시에 조회하면 한 번만 다시 만든다")
+    void concurrentMissRebuildsOnce() {
+        long pid = fixtures.newPerformance(1, 2, 5);
+        SeatMapQueryService service = services.seatMapQueryService(seatMapRedisStore, seatMapBuilder);
+        double missBefore = counters.count(Metrics.SEATMAP_REBUILD, Tag.SOURCE, RebuildSource.MISS);
 
-        List<String> results = runConcurrently(50, () -> service.get(pid));
+        Results<String> results = Concurrently.of(50).within(Duration.ofSeconds(10)).run(i -> service.get(pid));
 
-        Set<Long> generatedAts = results.stream().map(this::generatedAt).collect(Collectors.toSet());
-        System.out.println("[S7.1] 동시 50건 miss 재생성 수: " + (rebuilds("miss") - missBefore)
-                + ", generatedAt 종류: " + generatedAts);
-        assertThat(rebuilds("miss") - missBefore).isEqualTo(1.0);
-        assertThat(results).hasSize(50);
+        assertThat(results.errors()).isEmpty();
+        List<String> snapshots = results.values();
+        Set<Long> generatedAts = snapshots.stream().map(this::generatedAt).collect(Collectors.toSet());
+        assertThat(counters.count(Metrics.SEATMAP_REBUILD, Tag.SOURCE, RebuildSource.MISS) - missBefore)
+                .isEqualTo(1.0);
+        assertThat(snapshots).hasSize(50);
         assertThat(generatedAts).hasSize(1);
-        assertThat(store.get(pid)).isEqualTo(results.get(0));
-        assertThat(bookingRedis.template().hasKey(RedisKeys.seatMapLease(pid))).isFalse();
+        assertThat(seatMapRedisStore.get(pid)).isEqualTo(snapshots.get(0));
+        assertThat(testRedis.template().hasKey(RedisKeys.seatMapLease(pid))).isFalse();
     }
 
     @Test
     @DisplayName("Redis에 스냅샷이 있으면 빌드하지 않고 그 값을 그대로 돌려준다")
     void returnsRedisSnapshotAsIs() {
-        long pid = performance();
+        long pid = fixtures.newPerformance(1, 2, 5);
         String stored = "{\"performanceId\":" + pid + ",\"generatedAt\":1,\"sections\":[]}";
-        store.put(pid, stored, Duration.ofSeconds(30));
-        double missBefore = rebuilds("miss");
+        seatMapRedisStore.put(pid, stored, Duration.ofSeconds(30));
+        double missBefore = counters.count(Metrics.SEATMAP_REBUILD, Tag.SOURCE, RebuildSource.MISS);
 
-        assertThat(service(store, builder).get(pid)).isEqualTo(stored);
-        assertThat(rebuilds("miss")).isEqualTo(missBefore);
+        String snapshot = services.seatMapQueryService(seatMapRedisStore, seatMapBuilder).get(pid);
+
+        assertThat(snapshot).isEqualTo(stored);
+        assertThat(counters.count(Metrics.SEATMAP_REBUILD, Tag.SOURCE, RebuildSource.MISS)).isEqualTo(missBefore);
     }
 
     @Test
-    @DisplayName("로컬 캐시 1초 안에서는 Redis를 다시 읽지 않고, 지나면 다시 읽는다")
+    @DisplayName("로컬 캐시 1초 안에는 Redis를 다시 읽지 않고 지나면 다시 읽는다")
     void localCacheSkipsRedisWithinOneSecond() throws InterruptedException {
-        long pid = performance();
+        long pid = fixtures.newPerformance(1, 2, 5);
         SeatMapRedisStore mockStore = mock(SeatMapRedisStore.class);
         when(mockStore.get(pid)).thenReturn("v1", "v2");
-        SeatMapQueryService service = service(mockStore, builder);
+        SeatMapQueryService service = services.seatMapQueryService(mockStore, seatMapBuilder);
 
         assertThat(service.get(pid)).isEqualTo("v1");
         assertThat(service.get(pid)).isEqualTo("v1");
         assertThat(service.get(pid)).isEqualTo("v1");
         verify(mockStore, times(1)).get(pid);
 
-        Thread.sleep(props.seatmap().localCache().toMillis() + 100);
+        Thread.sleep(properties.seatmap().localCache().toMillis() + 100);
         assertThat(service.get(pid)).isEqualTo("v2");
         verify(mockStore, times(2)).get(pid);
     }
 
     @Test
-    @DisplayName("다른 인스턴스가 리스를 잡고 끝내 저장하지 않으면 50ms×10회 재조회 뒤 503 SEATMAP_UNAVAILABLE")
+    @DisplayName("다른 인스턴스가 리스를 쥔 채 저장하지 않으면 재조회 끝에 503이다")
     void unavailableWhenLeaseHeldElsewhere() {
-        long pid = performance();
-        bookingRedis.template().opsForValue().set(RedisKeys.seatMapLease(pid), "other-instance", Duration.ofSeconds(5));
-        double missBefore = rebuilds("miss");
+        long pid = fixtures.newPerformance(1, 2, 5);
+        testRedis.template().opsForValue().set(RedisKeys.seatMapLease(pid), "other-instance", Duration.ofSeconds(5));
+        double missBefore = counters.count(Metrics.SEATMAP_REBUILD, Tag.SOURCE, RebuildSource.MISS);
+        SeatMapQueryService service = services.seatMapQueryService(seatMapRedisStore, seatMapBuilder);
 
         long started = System.nanoTime();
-        assertThatThrownBy(() -> service(store, builder).get(pid))
+        assertThatThrownBy(() -> service.get(pid))
                 .isInstanceOf(ApiException.class)
                 .extracting(e -> ((ApiException) e).getCode())
                 .isEqualTo(ErrorCode.SEATMAP_UNAVAILABLE);
         long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started);
 
-        assertThat(elapsedMs).isGreaterThanOrEqualTo(SeatMapQueryService.MAX_POLLS * SeatMapQueryService.POLL_INTERVAL_MS);
-        assertThat(rebuilds("miss")).isEqualTo(missBefore);
-        assertThat(bookingRedis.template().opsForValue().get(RedisKeys.seatMapLease(pid))).isEqualTo("other-instance");
+        assertThat(elapsedMs)
+                .isGreaterThanOrEqualTo(SeatMapQueryService.MAX_POLLS * SeatMapQueryService.POLL_INTERVAL_MS);
+        assertThat(counters.count(Metrics.SEATMAP_REBUILD, Tag.SOURCE, RebuildSource.MISS)).isEqualTo(missBefore);
+        assertThat(testRedis.template().opsForValue().get(RedisKeys.seatMapLease(pid))).isEqualTo("other-instance");
     }
 
     @Test
-    @DisplayName("리스 대기 중 다른 인스턴스가 저장하면 그 스냅샷을 받는다")
-    void pollsUntilOtherInstancePuts() throws Exception {
-        long pid = performance();
-        bookingRedis.template().opsForValue().set(RedisKeys.seatMapLease(pid), "other-instance", Duration.ofSeconds(5));
-        String stored = builder.build(pid).orElseThrow();
-        ExecutorService pool = Executors.newSingleThreadExecutor();
-        try {
-            Future<String> result = pool.submit(() -> service(store, builder).get(pid));
+    @DisplayName("리스를 기다리는 중 다른 인스턴스가 저장하면 그 스냅샷을 받는다")
+    void pollsUntilOtherInstancePuts() throws InterruptedException {
+        long pid = fixtures.newPerformance(1, 2, 5);
+        testRedis.template().opsForValue().set(RedisKeys.seatMapLease(pid), "other-instance", Duration.ofSeconds(5));
+        String stored = seatMapBuilder.build(pid).orElseThrow();
+        SeatMapQueryService service = services.seatMapQueryService(seatMapRedisStore, seatMapBuilder);
+
+        Results<String> results;
+        try (Running<String> running = Concurrently.of(1).within(Duration.ofSeconds(5)).start(i -> service.get(pid))) {
             Thread.sleep(150);
-            store.put(pid, stored, Duration.ofSeconds(30));
-            assertThat(result.get(5, TimeUnit.SECONDS)).isEqualTo(stored);
-        } finally {
-            pool.shutdownNow();
+            seatMapRedisStore.put(pid, stored, Duration.ofSeconds(30));
+            results = running.await();
         }
+
+        assertThat(results.errors()).isEmpty();
+        assertThat(results.values()).containsExactly(stored);
     }
 
     @Test
-    @DisplayName("Redis 예외 + 1초 지난 로컬 캐시: DB로 다시 빌드(fallback +1, 새 generatedAt)하고, 1초 안의 반복은 다시 빌드하지 않는다")
+    @DisplayName("Redis가 죽고 로컬 캐시가 낡았으면 DB로 한 번 다시 만들어 1초 동안 쓴다")
     void redisFailureRebuildsStaleLocalCache() throws InterruptedException {
-        long pid = performance();
-        String old = builder.build(pid).orElseThrow();
+        long pid = fixtures.newPerformance(1, 2, 5);
+        String old = seatMapBuilder.build(pid).orElseThrow();
         SeatMapRedisStore mockStore = mock(SeatMapRedisStore.class);
         when(mockStore.get(pid)).thenReturn(old).thenThrow(redisDown());
-        SeatMapQueryService service = service(mockStore, builder);
-        double fallbackBefore = rebuilds("fallback");
+        SeatMapQueryService service = services.seatMapQueryService(mockStore, seatMapBuilder);
+        double fallbackBefore = counters.count(Metrics.SEATMAP_REBUILD, Tag.SOURCE, RebuildSource.FALLBACK);
 
         assertThat(service.get(pid)).isEqualTo(old);
-        Thread.sleep(props.seatmap().localCache().toMillis() + 100);
+        Thread.sleep(properties.seatmap().localCache().toMillis() + 100);
 
         String rebuilt = service.get(pid);
         assertThat(generatedAt(rebuilt)).isGreaterThan(generatedAt(old));
-        assertThat(rebuilds("fallback") - fallbackBefore).isEqualTo(1.0);
+        assertThat(counters.count(Metrics.SEATMAP_REBUILD, Tag.SOURCE, RebuildSource.FALLBACK) - fallbackBefore)
+                .isEqualTo(1.0);
 
         for (int i = 0; i < 5; i++) {
             assertThat(service.get(pid)).isEqualTo(rebuilt);
         }
-        assertThat(rebuilds("fallback") - fallbackBefore).isEqualTo(1.0);
+        assertThat(counters.count(Metrics.SEATMAP_REBUILD, Tag.SOURCE, RebuildSource.FALLBACK) - fallbackBefore)
+                .isEqualTo(1.0);
         verify(mockStore, times(2)).get(pid);
     }
 
     @Test
-    @DisplayName("Redis 예외 + 1초 지난 로컬 캐시 + DB 빌드 실패: 오래된 캐시를 돌려주고, 1초 안에는 DB를 다시 읽지 않는다")
+    @DisplayName("Redis와 DB가 모두 실패하면 낡은 캐시를 주고 1초 안에는 DB를 다시 읽지 않는다")
     void redisFailureKeepsStaleCacheWhenBuildFails() throws InterruptedException {
-        long pid = performance();
+        long pid = fixtures.newPerformance(1, 2, 5);
         SeatMapRedisStore mockStore = mock(SeatMapRedisStore.class);
         when(mockStore.get(pid)).thenReturn("cached-v1").thenThrow(redisDown());
         SeatMapBuilder failingBuilder = mock(SeatMapBuilder.class);
         when(failingBuilder.build(pid)).thenThrow(new DataAccessResourceFailureException("db down"));
-        SeatMapQueryService service = service(mockStore, failingBuilder);
+        SeatMapQueryService service = services.seatMapQueryService(mockStore, failingBuilder);
 
         assertThat(service.get(pid)).isEqualTo("cached-v1");
-        Thread.sleep(props.seatmap().localCache().toMillis() + 100);
+        Thread.sleep(properties.seatmap().localCache().toMillis() + 100);
 
         assertThat(service.get(pid)).isEqualTo("cached-v1");
         assertThat(service.get(pid)).isEqualTo("cached-v1");
         verify(failingBuilder, times(1)).build(pid);
 
-        Thread.sleep(props.seatmap().localCache().toMillis() + 100);
+        Thread.sleep(properties.seatmap().localCache().toMillis() + 100);
         assertThat(service.get(pid)).isEqualTo("cached-v1");
         verify(failingBuilder, times(2)).build(pid);
     }
 
     @Test
-    @DisplayName("Redis 예외 + 1초 지난 로컬 캐시 + 동시 20건: fallback 빌드는 1번, 20건 모두 새 generatedAt 하나")
-    void concurrentStaleFallbackIsSingleFlight() throws Exception {
-        long pid = performance();
-        String old = builder.build(pid).orElseThrow();
+    @DisplayName("Redis가 죽고 로컬 캐시가 낡았을 때 20건이 동시에 오면 한 번만 다시 만든다")
+    void concurrentStaleFallbackIsSingleFlight() throws InterruptedException {
+        long pid = fixtures.newPerformance(1, 2, 5);
+        String old = seatMapBuilder.build(pid).orElseThrow();
         SeatMapRedisStore mockStore = mock(SeatMapRedisStore.class);
         when(mockStore.get(pid)).thenReturn(old).thenThrow(redisDown());
-        SeatMapQueryService service = service(mockStore, slowBuilder(200));
+        SeatMapQueryService service = services.seatMapQueryService(mockStore, services.slowSeatMapBuilder(200));
         assertThat(service.get(pid)).isEqualTo(old);
-        Thread.sleep(props.seatmap().localCache().toMillis() + 100);
-        double fallbackBefore = rebuilds("fallback");
+        Thread.sleep(properties.seatmap().localCache().toMillis() + 100);
+        double fallbackBefore = counters.count(Metrics.SEATMAP_REBUILD, Tag.SOURCE, RebuildSource.FALLBACK);
 
-        List<String> results = runConcurrently(20, () -> service.get(pid));
+        Results<String> results = Concurrently.of(20).within(Duration.ofSeconds(10)).run(i -> service.get(pid));
 
-        Set<Long> generatedAts = results.stream().map(this::generatedAt).collect(Collectors.toSet());
-        System.out.println("[S9.1] 오래된 캐시 + 동시 20건 fallback 재생성 수: " + (rebuilds("fallback") - fallbackBefore));
-        assertThat(rebuilds("fallback") - fallbackBefore).isEqualTo(1.0);
+        assertThat(results.errors()).isEmpty();
+        Set<Long> generatedAts = results.values().stream().map(this::generatedAt).collect(Collectors.toSet());
+        assertThat(counters.count(Metrics.SEATMAP_REBUILD, Tag.SOURCE, RebuildSource.FALLBACK) - fallbackBefore)
+                .isEqualTo(1.0);
         assertThat(generatedAts).hasSize(1).doesNotContain(generatedAt(old));
     }
 
     @Test
-    @DisplayName("Redis 예외 + 로컬 캐시 없음: DB로 빌드(fallback)하고 로컬 캐시에 넣는다")
+    @DisplayName("Redis가 죽고 로컬 캐시가 없으면 DB로 만들어 로컬 캐시에 넣는다")
     void redisFailureWithoutLocalCacheBuildsFromDb() {
-        long pid = performance();
+        long pid = fixtures.newPerformance(1, 2, 5);
         SeatMapRedisStore mockStore = mock(SeatMapRedisStore.class);
         when(mockStore.get(anyLong())).thenThrow(redisDown());
-        SeatMapQueryService service = service(mockStore, builder);
-        double fallbackBefore = rebuilds("fallback");
+        SeatMapQueryService service = services.seatMapQueryService(mockStore, seatMapBuilder);
+        double fallbackBefore = counters.count(Metrics.SEATMAP_REBUILD, Tag.SOURCE, RebuildSource.FALLBACK);
 
         String json = service.get(pid);
 
         assertThat(jsonMapper.readTree(json).get("performanceId").asLong()).isEqualTo(pid);
-        assertThat(rebuilds("fallback") - fallbackBefore).isEqualTo(1.0);
+        assertThat(counters.count(Metrics.SEATMAP_REBUILD, Tag.SOURCE, RebuildSource.FALLBACK) - fallbackBefore)
+                .isEqualTo(1.0);
         assertThat(service.get(pid)).isEqualTo(json);
         verify(mockStore, times(1)).get(pid);
-        assertThat(rebuilds("fallback") - fallbackBefore).isEqualTo(1.0);
+        assertThat(counters.count(Metrics.SEATMAP_REBUILD, Tag.SOURCE, RebuildSource.FALLBACK) - fallbackBefore)
+                .isEqualTo(1.0);
     }
 
     @Test
-    @DisplayName("Redis 예외 + 로컬 캐시 없음 + 동시 20건: fallback 빌드는 1번, 20건 모두 같은 generatedAt")
-    void concurrentFallbackIsSingleFlight() throws Exception {
-        long pid = performance();
+    @DisplayName("Redis가 죽고 로컬 캐시가 없을 때 20건이 동시에 오면 한 번만 만든다")
+    void concurrentFallbackIsSingleFlight() {
+        long pid = fixtures.newPerformance(1, 2, 5);
         SeatMapRedisStore mockStore = mock(SeatMapRedisStore.class);
         when(mockStore.get(anyLong())).thenThrow(redisDown());
-        SeatMapQueryService service = service(mockStore, slowBuilder(200));
-        double fallbackBefore = rebuilds("fallback");
+        SeatMapQueryService service = services.seatMapQueryService(mockStore, services.slowSeatMapBuilder(200));
+        double fallbackBefore = counters.count(Metrics.SEATMAP_REBUILD, Tag.SOURCE, RebuildSource.FALLBACK);
 
-        List<String> results = runConcurrently(20, () -> service.get(pid));
+        Results<String> results = Concurrently.of(20).within(Duration.ofSeconds(10)).run(i -> service.get(pid));
 
-        Set<Long> generatedAts = results.stream().map(this::generatedAt).collect(Collectors.toSet());
-        System.out.println("[S7.1] 동시 20건 fallback 재생성 수: " + (rebuilds("fallback") - fallbackBefore));
-        assertThat(rebuilds("fallback") - fallbackBefore).isEqualTo(1.0);
-        assertThat(results).hasSize(20);
+        assertThat(results.errors()).isEmpty();
+        List<String> snapshots = results.values();
+        Set<Long> generatedAts = snapshots.stream().map(this::generatedAt).collect(Collectors.toSet());
+        assertThat(counters.count(Metrics.SEATMAP_REBUILD, Tag.SOURCE, RebuildSource.FALLBACK) - fallbackBefore)
+                .isEqualTo(1.0);
+        assertThat(snapshots).hasSize(20);
         assertThat(generatedAts).hasSize(1);
     }
 
     @Test
-    @DisplayName("tryLease에서 Redis 예외가 나도 fallback 빌드로 넘어간다")
+    @DisplayName("리스를 잡다가(tryLease) Redis 예외가 나도 DB 빌드로 넘어간다")
     void redisFailureOnLeaseFallsBack() {
-        long pid = performance();
+        long pid = fixtures.newPerformance(1, 2, 5);
         SeatMapRedisStore mockStore = mock(SeatMapRedisStore.class);
         when(mockStore.get(pid)).thenReturn(null);
         when(mockStore.tryLease(eq(pid), anyString(), any())).thenThrow(redisDown());
-        double fallbackBefore = rebuilds("fallback");
+        double fallbackBefore = counters.count(Metrics.SEATMAP_REBUILD, Tag.SOURCE, RebuildSource.FALLBACK);
 
-        String json = service(mockStore, builder).get(pid);
+        String json = services.seatMapQueryService(mockStore, seatMapBuilder).get(pid);
 
         assertThat(jsonMapper.readTree(json).get("performanceId").asLong()).isEqualTo(pid);
-        assertThat(rebuilds("fallback") - fallbackBefore).isEqualTo(1.0);
+        assertThat(counters.count(Metrics.SEATMAP_REBUILD, Tag.SOURCE, RebuildSource.FALLBACK) - fallbackBefore)
+                .isEqualTo(1.0);
     }
 
     @Test
-    @DisplayName("없는 회차는 404 PERFORMANCE_NOT_FOUND이고 Redis를 읽지 않는다")
+    @DisplayName("없는 회차는 Redis를 읽지 않고 404다")
     void unknownPerformance() {
         SeatMapRedisStore mockStore = mock(SeatMapRedisStore.class);
+        SeatMapQueryService service = services.seatMapQueryService(mockStore, seatMapBuilder);
 
-        assertThatThrownBy(() -> service(mockStore, builder).get(Long.MAX_VALUE))
+        assertThatThrownBy(() -> service.get(Long.MAX_VALUE))
                 .isInstanceOf(ApiException.class)
                 .extracting(e -> ((ApiException) e).getCode())
                 .isEqualTo(ErrorCode.PERFORMANCE_NOT_FOUND);
+
         verify(mockStore, times(0)).get(anyLong());
     }
 
     @Test
-    @DisplayName("좌석이 없는 회차는 빈 좌석맵 대신 503 SEATMAP_UNAVAILABLE")
+    @DisplayName("좌석이 없는 회차는 빈 좌석맵 대신 503이다")
     void emptySeatMapIsNotReturned() {
-        long pid = performance();
+        long pid = fixtures.newPerformance(1, 2, 5);
         jdbcTemplate.update("DELETE FROM seat WHERE performance_id = ?", pid);
-        assertThatThrownBy(() -> service(store, builder).get(pid))
+        SeatMapQueryService service = services.seatMapQueryService(seatMapRedisStore, seatMapBuilder);
+
+        assertThatThrownBy(() -> service.get(pid))
                 .isInstanceOf(ApiException.class)
                 .extracting(e -> ((ApiException) e).getCode())
                 .isEqualTo(ErrorCode.SEATMAP_UNAVAILABLE);
-        assertThat(store.get(pid)).isNull();
+
+        assertThat(seatMapRedisStore.get(pid)).isNull();
     }
 
     private static RedisUnavailableException redisDown() {
         return new RedisUnavailableException(new QueryTimeoutException("redis timeout"));
     }
 
-    private SeatMapQueryService service(SeatMapRedisStore seatMapStore, SeatMapBuilder seatMapBuilder) {
-        return new SeatMapQueryService(seatCatalog, seatMapBuilder, seatMapStore, instanceId, System::nanoTime, props,
-                meterRegistry);
-    }
-
-    // 동시 요청이 single-flight 안에서 겹치도록 빌드를 늦춘다
-    private SeatMapBuilder slowBuilder(long delayMs) {
-        return new SeatMapBuilder(seatJdbcRepository, jsonMapper, Clock.systemDefaultZone()) {
-            @Override
-            public Optional<String> build(long performanceId) {
-                try {
-                    Thread.sleep(delayMs);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                }
-                return super.build(performanceId);
-            }
-        };
-    }
-
-    private <T> List<T> runConcurrently(int threads, Callable<T> task) throws Exception {
-        ExecutorService pool = Executors.newFixedThreadPool(threads);
-        CountDownLatch ready = new CountDownLatch(threads);
-        CountDownLatch start = new CountDownLatch(1);
-        try {
-            List<Future<T>> futures = new ArrayList<>();
-            for (int i = 0; i < threads; i++) {
-                futures.add(pool.submit(() -> {
-                    ready.countDown();
-                    start.await();
-                    return task.call();
-                }));
-            }
-            ready.await();
-            start.countDown();
-            List<T> results = new ArrayList<>();
-            for (Future<T> future : futures) {
-                results.add(future.get(10, TimeUnit.SECONDS));
-            }
-            return results;
-        } finally {
-            pool.shutdownNow();
-        }
-    }
-
     private long generatedAt(String json) {
         return jsonMapper.readTree(json).get("generatedAt").asLong();
-    }
-
-    private double rebuilds(String source) {
-        return meterRegistry.counter(Metrics.SEATMAP_REBUILD, Tag.SOURCE, source).count();
-    }
-
-    private long performance() {
-        long pid = fixtures.newPerformance(1, 2, 5);
-        pids.add(pid);
-        return pid;
     }
 }

@@ -1,5 +1,6 @@
 package com.example.ticketing.booking.service;
 
+import static com.example.ticketing.support.ApiErrors.catchApiException;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
@@ -15,43 +16,27 @@ import com.example.ticketing.common.config.TicketingProperties;
 import com.example.ticketing.common.error.ApiException;
 import com.example.ticketing.common.error.ErrorCode;
 import com.example.ticketing.common.redis.RedisKeys;
-import com.example.ticketing.common.redis.TicketingRedis;
 import com.example.ticketing.hold.domain.GateHold;
-import com.example.ticketing.hold.dto.CreateHoldCommand;
-import com.example.ticketing.hold.dto.CreateHoldResult;
 import com.example.ticketing.hold.repository.SeatGateRedisStore;
 import com.example.ticketing.hold.service.SeatGateReflector;
-import com.example.ticketing.hold.service.SeatHoldService;
-import com.example.ticketing.notification.service.TicketIssuedHandler;
-import com.example.ticketing.outbox.service.OutboxDispatchScheduler;
-import com.example.ticketing.outbox.service.OutboxTaskTransaction;
-import com.example.ticketing.payment.service.RefundRequestedHandler;
 import com.example.ticketing.payment.client.PgResult;
 import com.example.ticketing.payment.client.PgStatus;
-import com.example.ticketing.payment.dto.PayCommand;
-import com.example.ticketing.payment.dto.PaymentOutcome;
-import com.example.ticketing.payment.dto.PaymentResult;
-import com.example.ticketing.payment.service.PaymentService;
 import com.example.ticketing.seat.service.SeatCatalog;
+import com.example.ticketing.support.Concurrently;
+import com.example.ticketing.support.Concurrently.Results;
 import com.example.ticketing.support.Fixtures;
+import com.example.ticketing.support.Fixtures.Confirmed;
+import com.example.ticketing.support.Fixtures.Held;
 import com.example.ticketing.support.IntegrationTest;
-import com.example.ticketing.support.PaymentDb;
-import com.example.ticketing.support.RedisKeyCleaner;
 import com.example.ticketing.support.StubPgClient;
 import com.example.ticketing.support.StubPgTestConfig;
-import io.micrometer.core.instrument.MeterRegistry;
+import com.example.ticketing.support.TestDb;
+import com.example.ticketing.support.TestProperties;
+import com.example.ticketing.support.TestRedis;
+import com.example.ticketing.support.TestServices;
+import java.time.Duration;
 import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Map;
-import java.util.Optional;
-import java.util.UUID;
-import java.util.concurrent.Callable;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
-import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -70,246 +55,209 @@ class BookingCancelTest {
     @Autowired
     private BookingService bookingService;
     @Autowired
-    private BookingTransaction bookingTransaction;
-    @Autowired
-    private BookingReader viewReader;
-    @Autowired
-    private PaymentService paymentService;
-    @Autowired
-    private SeatHoldService seatHoldService;
-    @Autowired
     private SeatCatalog seatCatalog;
-    @Autowired
-    private OutboxTaskTransaction taskTransaction;
-    @Autowired
-    private TicketIssuedHandler ticketIssuedHandler;
-    @Autowired
-    private RefundRequestedHandler refundRequestedHandler;
     @Autowired
     private StubPgClient stubPg;
     @Autowired
     private Fixtures fixtures;
     @Autowired
+    private TestDb db;
+    @Autowired
+    private TestRedis testRedis;
+    @Autowired
+    private TestServices services;
+    @Autowired
     private JdbcTemplate jdbcTemplate;
-    @Autowired
-    private TicketingRedis bookingRedis;
-    @Autowired
-    private RedisKeyCleaner redisKeyCleaner;
     @Autowired
     private JsonMapper jsonMapper;
     @Autowired
     private TicketingProperties properties;
-    @Autowired
-    private MeterRegistry meterRegistry;
 
-    private final List<Long> performances = new ArrayList<>();
-    private PaymentDb db;
     private StringRedisTemplate redis;
 
     @BeforeEach
     void setUp() {
         stubPg.reset();
-        db = new PaymentDb(jdbcTemplate);
-        redis = bookingRedis.template();
+        redis = testRedis.template();
     }
 
     @AfterEach
     void tearDown() {
         stubPg.reset();
-        performances.forEach(redisKeyCleaner::clean);
     }
 
     @Test
-    @DisplayName("확정 예매 취소: booking CANCELLED·cancelled_at, 좌석 AVAILABLE·hold_id NULL, outbox REFUND_REQUESTED 1"
-            + "({paymentId, orderId}), 좌석 게이트 키 삭제, 결제는 아직 APPROVED, hold CONFIRMED 그대로, "
-            + "다른 사용자가 바로 그 좌석을 선점")
+    @DisplayName("확정 예매를 취소하면 좌석이 풀리고 환불 작업이 쌓여 다른 사용자가 바로 잡을 수 있다")
     void cancelConfirmedBooking() {
-        Confirmed c = confirmed(2);
-        c.seatIds.forEach(seatId -> assertThat(redis.opsForValue().get(RedisKeys.seat(c.pid, seatId)))
-                .isEqualTo(c.holdToken));
+        Confirmed c = fixtures.confirmed(2);
+        c.seatIds().forEach(seatId -> assertThat(redis.opsForValue().get(RedisKeys.seat(c.pid(), seatId)))
+                .isEqualTo(c.holdToken()));
 
-        CancelResult response = bookingService.cancel(c.userId, c.bookingId);
+        CancelResult response = bookingService.cancel(c.userId(), c.bookingId());
 
-        assertThat(response).isEqualTo(new CancelResult(c.bookingId, BookingStatus.CANCELLED, RefundStatus.REQUESTED));
+        assertThat(response)
+                .isEqualTo(new CancelResult(c.bookingId(), BookingStatus.CANCELLED, RefundStatus.REQUESTED));
         Map<String, Object> booking = jdbcTemplate.queryForMap(
-                "SELECT status, cancelled_at FROM booking WHERE id = ?", c.bookingId);
+                "SELECT status, cancelled_at FROM booking WHERE id = ?", c.bookingId());
         assertThat(booking).containsEntry("status", "CANCELLED");
         assertThat(booking.get("cancelled_at")).isNotNull();
-        c.seatIds.forEach(seatId -> assertThat(db.seat(seatId)).containsEntry("status", "AVAILABLE")
+        c.seatIds().forEach(seatId -> assertThat(db.seat(seatId)).containsEntry("status", "AVAILABLE")
                 .containsEntry("hold_id", null).containsEntry("held_until", null));
-        assertThat(db.outboxCount("REFUND_REQUESTED", c.paymentId)).isEqualTo(1);
-        Map<String, Object> task = db.outbox("REFUND_REQUESTED", c.paymentId);
+        assertThat(db.outboxCount("REFUND_REQUESTED", c.paymentId())).isEqualTo(1);
+        Map<String, Object> task = db.outboxTask("REFUND_REQUESTED", c.paymentId());
         assertThat(task).containsEntry("status", "PENDING").containsEntry("attempt", 0);
         JsonNode payload = jsonMapper.readTree((String) task.get("payload"));
-        assertThat(payload.get("paymentId").asLong()).isEqualTo(c.paymentId);
-        assertThat(payload.get("orderId").asString()).isEqualTo(db.payment(c.paymentId).get("order_id"));
-        c.seatIds.forEach(seatId -> assertThat(redis.hasKey(RedisKeys.seat(c.pid, seatId))).isFalse());
-        assertThat(db.payment(c.paymentId)).containsEntry("status", "APPROVED");
-        assertThat(db.holdStatus(c.holdId)).isEqualTo("CONFIRMED");
+        assertThat(payload.get("paymentId").asLong()).isEqualTo(c.paymentId());
+        assertThat(payload.get("orderId").asString()).isEqualTo(db.payment(c.paymentId()).get("order_id"));
+        c.seatIds().forEach(seatId -> assertThat(redis.hasKey(RedisKeys.seat(c.pid(), seatId))).isFalse());
+        assertThat(db.payment(c.paymentId())).containsEntry("status", "APPROVED");
+        assertThat(db.holdStatus(c.holdId())).isEqualTo("CONFIRMED");
         assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM booking_seat WHERE booking_id = ?", Long.class,
-                c.bookingId)).isEqualTo(2);
+                c.bookingId())).isEqualTo(2);
 
-        long other = fixtures.newUser();
-        CreateHoldResult retaken = seatHoldService.hold(
-                new CreateHoldCommand(other, c.pid, c.seatIds, fixtures.admit(c.pid, other)));
+        Held retaken = fixtures.held(c.pid(), c.seatIds());
 
-        c.seatIds.forEach(seatId -> assertThat(db.seat(seatId)).containsEntry("status", "HELD")
+        c.seatIds().forEach(seatId -> assertThat(db.seat(seatId)).containsEntry("status", "HELD")
                 .containsEntry("hold_id", retaken.holdId()));
-        assertThat(redis.opsForValue().get(RedisKeys.seat(c.pid, c.seatIds.get(0))))
-                .isEqualTo(db.holdToken(retaken.holdId()));
+        assertThat(redis.opsForValue().get(RedisKeys.seat(c.pid(), c.seatIds().get(0))))
+                .isEqualTo(retaken.holdToken());
     }
 
     @Test
-    @DisplayName("순차로 두 번 취소: 두 번째도 예외 없이 같은 응답, 환불 작업 1건. 그새 남이 잡은 좌석의 게이트 키를 지우지 않는다")
+    @DisplayName("차례로 두 번 취소해도 같은 응답이고 그새 남이 잡은 좌석 키를 지우지 않는다")
     void cancelTwiceSequentially() {
-        Confirmed c = confirmed(1);
+        Confirmed c = fixtures.confirmed(1);
 
-        CancelResult first = bookingService.cancel(c.userId, c.bookingId);
-        long other = fixtures.newUser();
-        CreateHoldResult retaken = seatHoldService.hold(
-                new CreateHoldCommand(other, c.pid, c.seatIds, fixtures.admit(c.pid, other)));
-        LocalDateTime cancelledAt = cancelledAt(c.bookingId);
-        CancelResult second = bookingService.cancel(c.userId, c.bookingId);
+        CancelResult first = bookingService.cancel(c.userId(), c.bookingId());
+        Held retaken = fixtures.held(c.pid(), c.seatIds());
+        LocalDateTime cancelledAt = cancelledAt(c.bookingId());
+        CancelResult second = bookingService.cancel(c.userId(), c.bookingId());
 
         assertThat(second).isEqualTo(first);
-        assertThat(db.outboxCount("REFUND_REQUESTED", c.paymentId)).isEqualTo(1);
-        assertThat(cancelledAt(c.bookingId)).isEqualTo(cancelledAt);
-        assertThat(db.seat(c.seatIds.get(0))).containsEntry("status", "HELD")
+        assertThat(db.outboxCount("REFUND_REQUESTED", c.paymentId())).isEqualTo(1);
+        assertThat(cancelledAt(c.bookingId())).isEqualTo(cancelledAt);
+        assertThat(db.seat(c.seatIds().get(0))).containsEntry("status", "HELD")
                 .containsEntry("hold_id", retaken.holdId());
-        assertThat(redis.opsForValue().get(RedisKeys.seat(c.pid, c.seatIds.get(0))))
-                .isEqualTo(db.holdToken(retaken.holdId()));
+        assertThat(redis.opsForValue().get(RedisKeys.seat(c.pid(), c.seatIds().get(0))))
+                .isEqualTo(retaken.holdToken());
     }
 
     @Test
-    @DisplayName("2스레드 동시 취소: 둘 다 예외 없이 같은 응답(CANCELLED·REQUESTED), 환불 작업 1건, 좌석 AVAILABLE")
-    void cancelConcurrently() throws Exception {
-        Confirmed c = confirmed(2);
+    @DisplayName("2스레드가 동시에 취소하면 둘 다 같은 응답을 받고 환불 작업은 1건이다")
+    void cancelConcurrently() {
+        Confirmed c = fixtures.confirmed(2);
 
-        List<CancelResult> responses = runTogether(2, () -> bookingService.cancel(c.userId, c.bookingId));
+        Results<CancelResult> results = Concurrently.of(2)
+                .readyWithin(Duration.ofSeconds(10))
+                .within(Duration.ofSeconds(30))
+                .run(i -> bookingService.cancel(c.userId(), c.bookingId()));
 
-        assertThat(responses).hasSize(2).containsOnly(
-                new CancelResult(c.bookingId, BookingStatus.CANCELLED, RefundStatus.REQUESTED));
-        assertThat(db.outboxCount("REFUND_REQUESTED", c.paymentId)).isEqualTo(1);
-        c.seatIds.forEach(seatId -> assertThat(db.seat(seatId)).containsEntry("status", "AVAILABLE")
+        assertThat(results.errors()).isEmpty();
+        assertThat(results.values()).hasSize(2).containsOnly(
+                new CancelResult(c.bookingId(), BookingStatus.CANCELLED, RefundStatus.REQUESTED));
+        assertThat(db.outboxCount("REFUND_REQUESTED", c.paymentId())).isEqualTo(1);
+        c.seatIds().forEach(seatId -> assertThat(db.seat(seatId)).containsEntry("status", "AVAILABLE")
                 .containsEntry("hold_id", null));
-        assertThat(redisKeyCleaner.gateKeys(c.pid)).isEmpty();
+        assertThat(testRedis.gateKeys(c.pid())).isEmpty();
     }
 
     @Test
-    @DisplayName("회차 시작 후 취소: 409 CANCEL_NOT_ALLOWED. SeatCatalog 캐시는 아직 시작 전이어도 DB 시각으로 판정, 아무것도 바뀌지 않음")
+    @DisplayName("회차가 시작된 뒤 취소하면 카탈로그 캐시와 상관없이 409로 거절한다")
     void cancelAfterStartIsRejected() {
-        Confirmed c = confirmed(1);
-        LocalDateTime cachedStartsAt = seatCatalog.performance(c.pid).startsAt();
-        startPerformance(c.pid);
+        Confirmed c = fixtures.confirmed(1);
+        LocalDateTime cachedStartsAt = seatCatalog.performance(c.pid()).startsAt();
+        startPerformance(c.pid());
         assertThat(cachedStartsAt).isAfter(db.dbNow());
-        assertThat(seatCatalog.performance(c.pid).startsAt()).isEqualTo(cachedStartsAt);
+        assertThat(seatCatalog.performance(c.pid()).startsAt()).isEqualTo(cachedStartsAt);
 
-        ApiException e = catchBooking(() -> bookingService.cancel(c.userId, c.bookingId));
+        ApiException e = catchApiException(() -> bookingService.cancel(c.userId(), c.bookingId()));
 
         assertThat(e.getCode()).isEqualTo(ErrorCode.CANCEL_NOT_ALLOWED);
-        assertThat(jdbcTemplate.queryForMap("SELECT status, cancelled_at FROM booking WHERE id = ?", c.bookingId))
+        assertThat(jdbcTemplate.queryForMap("SELECT status, cancelled_at FROM booking WHERE id = ?", c.bookingId()))
                 .containsEntry("status", "CONFIRMED").containsEntry("cancelled_at", null);
-        assertThat(db.seat(c.seatIds.get(0))).containsEntry("status", "SOLD").containsEntry("hold_id", c.holdId);
-        assertThat(db.outboxCount("REFUND_REQUESTED", c.paymentId)).isZero();
-        assertThat(redis.opsForValue().get(RedisKeys.seat(c.pid, c.seatIds.get(0)))).isEqualTo(c.holdToken);
-        assertThat(bookingService.detail(c.userId, c.bookingId).cancellable()).isFalse();
+        assertThat(db.seat(c.seatIds().get(0))).containsEntry("status", "SOLD").containsEntry("hold_id", c.holdId());
+        assertThat(db.outboxCount("REFUND_REQUESTED", c.paymentId())).isZero();
+        assertThat(redis.opsForValue().get(RedisKeys.seat(c.pid(), c.seatIds().get(0)))).isEqualTo(c.holdToken());
+        assertThat(bookingService.detail(c.userId(), c.bookingId()).cancellable()).isFalse();
     }
 
     @Test
-    @DisplayName("이미 취소한 예매는 회차가 시작된 뒤에 다시 보내도 409가 아니라 현재 상태(200)를 돌려준다")
+    @DisplayName("이미 취소한 예매는 회차가 시작된 뒤 다시 보내도 현재 상태를 돌려준다")
     void cancelledBookingStaysIdempotentAfterStart() {
-        Confirmed c = confirmed(1);
-        CancelResult first = bookingService.cancel(c.userId, c.bookingId);
-        startPerformance(c.pid);
+        Confirmed c = fixtures.confirmed(1);
+        CancelResult first = bookingService.cancel(c.userId(), c.bookingId());
+        startPerformance(c.pid());
 
-        assertThat(bookingService.cancel(c.userId, c.bookingId)).isEqualTo(first);
-        assertThat(db.outboxCount("REFUND_REQUESTED", c.paymentId)).isEqualTo(1);
+        assertThat(bookingService.cancel(c.userId(), c.bookingId())).isEqualTo(first);
+        assertThat(db.outboxCount("REFUND_REQUESTED", c.paymentId())).isEqualTo(1);
     }
 
     @Test
-    @DisplayName("남의 예매 취소·조회와 없는 예매는 404 BOOKING_NOT_FOUND, 아무것도 바뀌지 않음")
+    @DisplayName("남의 예매나 없는 예매를 취소·조회하면 404로 답하고 아무것도 바꾸지 않는다")
     void othersBookingIsNotFound() {
-        Confirmed c = confirmed(1);
+        Confirmed c = fixtures.confirmed(1);
         long stranger = fixtures.newUser();
 
-        assertThat(catchBooking(() -> bookingService.cancel(stranger, c.bookingId)).getCode())
+        assertThat(catchApiException(() -> bookingService.cancel(stranger, c.bookingId())).getCode())
                 .isEqualTo(ErrorCode.BOOKING_NOT_FOUND);
-        assertThat(catchBooking(() -> bookingService.detail(stranger, c.bookingId)).getCode())
+        assertThat(catchApiException(() -> bookingService.detail(stranger, c.bookingId())).getCode())
                 .isEqualTo(ErrorCode.BOOKING_NOT_FOUND);
-        assertThat(catchBooking(() -> bookingService.cancel(c.userId, Long.MAX_VALUE)).getCode())
+        assertThat(catchApiException(() -> bookingService.cancel(c.userId(), Long.MAX_VALUE)).getCode())
                 .isEqualTo(ErrorCode.BOOKING_NOT_FOUND);
         assertThat(bookingService.list(stranger)).isEmpty();
 
-        assertThat(jdbcTemplate.queryForObject("SELECT status FROM booking WHERE id = ?", String.class, c.bookingId))
+        assertThat(jdbcTemplate.queryForObject("SELECT status FROM booking WHERE id = ?", String.class, c.bookingId()))
                 .isEqualTo("CONFIRMED");
-        assertThat(db.seat(c.seatIds.get(0))).containsEntry("status", "SOLD");
-        assertThat(db.outboxCount("REFUND_REQUESTED", c.paymentId)).isZero();
+        assertThat(db.seat(c.seatIds().get(0))).containsEntry("status", "SOLD");
+        assertThat(db.outboxCount("REFUND_REQUESTED", c.paymentId())).isZero();
     }
 
     @Test
-    @DisplayName("취소 → 워커 1회(PG 취소 CANCELLED) → 결제 CANCELLED, outbox DONE, 상세 환불 DONE, hold는 CONFIRMED 그대로(D14)")
+    @DisplayName("취소 → 환불 워커 처리 흐름에서 결제가 CANCELLED, 환불이 DONE이 된다")
     void refundCompletesAfterCancel() {
-        Confirmed c = confirmed(2);
-        bookingService.cancel(c.userId, c.bookingId);
-        assertThat(bookingService.detail(c.userId, c.bookingId).refund()).isEqualTo(RefundStatus.REQUESTED);
-        parkOtherTasks(c);
+        Confirmed c = fixtures.confirmed(2);
+        bookingService.cancel(c.userId(), c.bookingId());
+        assertThat(bookingService.detail(c.userId(), c.bookingId()).refund()).isEqualTo(RefundStatus.REQUESTED);
+        db.parkOutboxTasksExcept("REFUND_REQUESTED", c.paymentId());
         stubPg.cancelWith(PgResult.of(PgStatus.CANCELLED, null));
-        OutboxDispatchScheduler worker = new OutboxDispatchScheduler(taskTransaction,
-                List.of(ticketIssuedHandler, refundRequestedHandler), jsonMapper, System::nanoTime, properties,
-                meterRegistry);
 
-        worker.run();
+        services.outboxDispatchScheduler().run();
 
         assertThat(stubPg.cancelCalls()).isEqualTo(1);
-        assertThat(db.payment(c.paymentId)).containsEntry("status", "CANCELLED");
-        assertThat(db.outbox("REFUND_REQUESTED", c.paymentId)).containsEntry("status", "DONE");
-        assertThat(db.holdStatus(c.holdId)).isEqualTo("CONFIRMED");
-        BookingResult detail = bookingService.detail(c.userId, c.bookingId);
+        assertThat(db.payment(c.paymentId())).containsEntry("status", "CANCELLED");
+        assertThat(db.outboxTask("REFUND_REQUESTED", c.paymentId())).containsEntry("status", "DONE");
+        assertThat(db.holdStatus(c.holdId())).isEqualTo("CONFIRMED");
+        BookingResult detail = bookingService.detail(c.userId(), c.bookingId());
         assertThat(detail.status()).isEqualTo(BookingStatus.CANCELLED);
         assertThat(detail.refund()).isEqualTo(RefundStatus.DONE);
         assertThat(detail.cancellable()).isFalse();
         assertThat(detail.seats()).hasSize(2);
 
         // 환불이 끝난 뒤 다시 취소를 보내도 바뀌는 것 없이 DONE을 돌려준다
-        assertThat(bookingService.cancel(c.userId, c.bookingId))
-                .isEqualTo(new CancelResult(c.bookingId, BookingStatus.CANCELLED, RefundStatus.DONE));
-        assertThat(db.outboxCount("REFUND_REQUESTED", c.paymentId)).isEqualTo(1);
+        assertThat(bookingService.cancel(c.userId(), c.bookingId()))
+                .isEqualTo(new CancelResult(c.bookingId(), BookingStatus.CANCELLED, RefundStatus.DONE));
+        assertThat(db.outboxCount("REFUND_REQUESTED", c.paymentId())).isEqualTo(1);
     }
 
     @Test
-    @DisplayName("게이트: OFF면 취소해도 Redis를 부르지 않고, ON이면 실제로 취소한 호출만 좌석 키를 지운다")
+    @DisplayName("게이트가 꺼져 있으면 취소는 Redis를 부르지 않고, 켜져 있으면 실제 취소만 좌석 키를 지운다")
     void gateReflection() {
         SeatGateRedisStore offGate = mock(SeatGateRedisStore.class);
-        BookingService gateOff = new BookingService(bookingTransaction, viewReader, reflector(offGate, false));
-        Confirmed off = confirmed(1);
-        gateOff.cancel(off.userId, off.bookingId);
+        BookingService gateOff = services.bookingService(reflector(offGate, false));
+        Confirmed off = fixtures.confirmed(1);
+        gateOff.cancel(off.userId(), off.bookingId());
         verifyNoInteractions(offGate);
-        assertThat(db.seat(off.seatIds.get(0))).containsEntry("status", "AVAILABLE");
+        assertThat(db.seat(off.seatIds().get(0))).containsEntry("status", "AVAILABLE");
 
         SeatGateRedisStore onGate = mock(SeatGateRedisStore.class);
-        BookingService gateOn = new BookingService(bookingTransaction, viewReader, reflector(onGate, true));
-        Confirmed on = confirmed(2);
-        gateOn.cancel(on.userId, on.bookingId);
-        verify(onGate).releaseSeatsOnly(new GateHold(on.userId, on.pid, on.holdToken, on.seatIds));
+        BookingService gateOn = services.bookingService(reflector(onGate, true));
+        Confirmed on = fixtures.confirmed(2);
+        gateOn.cancel(on.userId(), on.bookingId());
+        verify(onGate).releaseSeatsOnly(new GateHold(on.userId(), on.pid(), on.holdToken(), on.seatIds()));
 
         SeatGateRedisStore againGate = mock(SeatGateRedisStore.class);
-        new BookingService(bookingTransaction, viewReader, reflector(againGate, true)).cancel(on.userId, on.bookingId);
+        services.bookingService(reflector(againGate, true)).cancel(on.userId(), on.bookingId());
         verify(againGate, never()).releaseSeatsOnly(any());
-    }
-
-    // 결제 승인까지 마친 예매. 좌석은 A구역 1열 1번부터 seatCount석
-    private Confirmed confirmed(int seatCount) {
-        long pid = fixtures.newPerformance(1, 1, 6);
-        performances.add(pid);
-        long userId = fixtures.newUser();
-        List<Long> seatIds = db.seatIds(pid).subList(0, seatCount);
-        CreateHoldResult hold = seatHoldService.hold(
-                new CreateHoldCommand(userId, pid, seatIds, fixtures.admit(pid, userId)));
-        PaymentResult paid = paymentService.pay(new PayCommand(userId, hold.holdId(), UUID.randomUUID().toString(),
-                Optional.empty()));
-        assertThat(paid.outcome()).isEqualTo(PaymentOutcome.CONFIRMED);
-        return new Confirmed(pid, userId, hold.holdId(), paid.paymentId(), paid.bookingId(), List.copyOf(seatIds),
-                db.holdToken(hold.holdId()));
     }
 
     private void startPerformance(long pid) {
@@ -321,62 +269,7 @@ class BookingCancelTest {
                 bookingId);
     }
 
-    // 이전 테스트·실행이 남긴 미완료 작업을 먼 미래로 미뤄 이 예매의 작업만 집히게 한다(테스트 전용 DB)
-    private void parkOtherTasks(Confirmed c) {
-        jdbcTemplate.update("UPDATE outbox_task SET next_attempt_at = '2999-12-31 00:00:00', "
-                + "locked_until = IF(status = 'PROCESSING', '2999-12-31 00:00:00', locked_until) "
-                + "WHERE status IN ('PENDING', 'PROCESSING') "
-                + "AND NOT (task_type = 'REFUND_REQUESTED' AND aggregate_id = ?)", c.paymentId);
-    }
-
     private SeatGateReflector reflector(SeatGateRedisStore store, boolean gateEnabled) {
-        return new SeatGateReflector(store, withGate(gateEnabled), meterRegistry, System::nanoTime);
-    }
-
-    private TicketingProperties withGate(boolean enabled) {
-        TicketingProperties p = properties;
-        return new TicketingProperties(p.seed(), p.redis(), p.hold(), p.payment(),
-                new TicketingProperties.Gate(enabled, p.gate().fallbackMaxConcurrency()), p.queue(), p.seatmap(),
-                p.outbox(), p.ops(), p.pg(), p.fakePg());
-    }
-
-    private static ApiException catchBooking(Runnable action) {
-        try {
-            action.run();
-        } catch (ApiException e) {
-            return e;
-        }
-        throw new AssertionError("ApiException이 나야 한다");
-    }
-
-    private static <T> List<T> runTogether(int threads, Callable<T> action) throws Exception {
-        ExecutorService executor = Executors.newFixedThreadPool(threads);
-        CountDownLatch ready = new CountDownLatch(threads);
-        CountDownLatch start = new CountDownLatch(1);
-        try {
-            List<Future<T>> futures = new ArrayList<>();
-            for (int i = 0; i < threads; i++) {
-                futures.add(executor.submit(() -> {
-                    ready.countDown();
-                    if (!start.await(30, TimeUnit.SECONDS)) {
-                        throw new IllegalStateException("래치 대기 시간 초과");
-                    }
-                    return action.call();
-                }));
-            }
-            assertThat(ready.await(10, TimeUnit.SECONDS)).isTrue();
-            start.countDown();
-            List<T> results = new ArrayList<>();
-            for (Future<T> future : futures) {
-                results.add(future.get(30, TimeUnit.SECONDS));
-            }
-            return results;
-        } finally {
-            executor.shutdownNow();
-        }
-    }
-
-    private record Confirmed(long pid, long userId, long holdId, long paymentId, long bookingId, List<Long> seatIds,
-                             String holdToken) {
+        return services.gateReflector(store, TestProperties.from(properties).gateEnabled(gateEnabled).build());
     }
 }

@@ -1,5 +1,6 @@
 package com.example.ticketing.hold.controller;
 
+import static com.example.ticketing.support.TestMvc.USER;
 import static org.hamcrest.Matchers.startsWith;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -9,7 +10,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.example.ticketing.support.Fixtures;
 import com.example.ticketing.support.IntegrationTest;
-import java.util.List;
+import com.example.ticketing.support.TestDb;
+import com.example.ticketing.support.TestMvc;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -18,33 +20,28 @@ import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
-import org.springframework.test.web.servlet.setup.MockMvcBuilders;
-import org.springframework.web.context.WebApplicationContext;
-import tools.jackson.databind.json.JsonMapper;
 
 @IntegrationTest
 class ActiveHoldApiControllerTest {
 
-    private static final String USER = "X-User-Id";
-
     @Autowired
-    private WebApplicationContext context;
+    private TestMvc testMvc;
     @Autowired
     private Fixtures fixtures;
     @Autowired
-    private JdbcTemplate jdbcTemplate;
+    private TestDb db;
     @Autowired
-    private JsonMapper jsonMapper;
+    private JdbcTemplate jdbcTemplate;
 
     private MockMvc mockMvc;
 
     @BeforeEach
     void setUp() {
-        mockMvc = MockMvcBuilders.webAppContextSetup(context).build();
+        mockMvc = testMvc.mockMvc();
     }
 
     @Test
-    @DisplayName("잡아 둔 자리가 없으면 404 HOLD_NOT_FOUND, 잡으면 200 holdId·status·expiresAt")
+    @DisplayName("잡아 둔 자리가 없으면 404이고 잡으면 그 선점을 돌려준다")
     void returnsMyActiveHold() throws Exception {
         long pid = fixtures.newPerformance(1, 1, 4);
         long userId = fixtures.newUser();
@@ -53,7 +50,7 @@ class ActiveHoldApiControllerTest {
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("HOLD_NOT_FOUND"));
 
-        long holdId = hold(userId, pid, seatIds(pid).get(0));
+        long holdId = hold(userId, pid, db.seatIds(pid).get(0));
         String expiresAt = jdbcTemplate.queryForObject(
                 "SELECT DATE_FORMAT(expires_at, '%Y-%m-%dT%H:%i:%s') FROM seat_hold WHERE id = ?", String.class, holdId);
 
@@ -65,11 +62,11 @@ class ActiveHoldApiControllerTest {
     }
 
     @Test
-    @DisplayName("결제 중(PAYING)인 선점도 돌려준다")
+    @DisplayName("결제 중인 선점도 내 선점으로 돌려준다")
     void includesPaying() throws Exception {
         long pid = fixtures.newPerformance(1, 1, 2);
         long userId = fixtures.newUser();
-        long holdId = hold(userId, pid, seatIds(pid).get(0));
+        long holdId = hold(userId, pid, db.seatIds(pid).get(0));
         jdbcTemplate.update("UPDATE seat_hold SET status = 'PAYING' WHERE id = ?", holdId);
 
         mine(userId, pid)
@@ -79,13 +76,13 @@ class ActiveHoldApiControllerTest {
     }
 
     @Test
-    @DisplayName("놓은 선점, 남의 선점, 다른 회차의 선점은 404 HOLD_NOT_FOUND")
+    @DisplayName("놓은 선점이나 남의 선점, 다른 회차의 선점은 404로 답한다")
     void ignoresInactiveAndOthers() throws Exception {
         long pid = fixtures.newPerformance(1, 1, 4);
         long otherPid = fixtures.newPerformance(1, 1, 2);
         long owner = fixtures.newUser();
         long stranger = fixtures.newUser();
-        long holdId = hold(owner, pid, seatIds(pid).get(0));
+        long holdId = hold(owner, pid, db.seatIds(pid).get(0));
 
         mine(stranger, pid)
                 .andExpect(status().isNotFound())
@@ -96,13 +93,14 @@ class ActiveHoldApiControllerTest {
 
         mockMvc.perform(delete("/api/holds/{holdId}", holdId).header(USER, owner))
                 .andExpect(status().isNoContent());
+
         mine(owner, pid)
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("HOLD_NOT_FOUND"));
     }
 
     @Test
-    @DisplayName("사용자 식별이 없으면 401 LOGIN_REQUIRED")
+    @DisplayName("사용자 식별이 없으면 401 LOGIN_REQUIRED로 답한다")
     void loginRequired() throws Exception {
         mockMvc.perform(get("/api/performances/{pid}/holds/mine", 1L))
                 .andExpect(status().isUnauthorized())
@@ -115,16 +113,11 @@ class ActiveHoldApiControllerTest {
 
     private long hold(long userId, long pid, long seatId) throws Exception {
         String body = "{\"seatIds\":[%d],\"queueToken\":\"%s\"}".formatted(seatId, fixtures.admit(pid, userId));
-        String response = mockMvc.perform(post("/api/performances/{pid}/holds", pid)
+        return testMvc.body(mockMvc.perform(post("/api/performances/{pid}/holds", pid)
                         .header(USER, userId)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isCreated())
-                .andReturn().getResponse().getContentAsString();
-        return jsonMapper.readTree(response).get("holdId").asLong();
-    }
-
-    private List<Long> seatIds(long pid) {
-        return jdbcTemplate.queryForList("SELECT id FROM seat WHERE performance_id = ? ORDER BY id", Long.class, pid);
+                .andReturn()).get("holdId").asLong();
     }
 }

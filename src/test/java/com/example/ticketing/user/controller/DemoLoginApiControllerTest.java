@@ -6,6 +6,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.example.ticketing.support.IntegrationTest;
+import com.example.ticketing.support.TestMvc;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -16,14 +17,12 @@ import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
-import org.springframework.test.web.servlet.setup.MockMvcBuilders;
-import org.springframework.web.context.WebApplicationContext;
 
 @IntegrationTest
 class DemoLoginApiControllerTest {
 
     @Autowired
-    private WebApplicationContext context;
+    private TestMvc testMvc;
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
@@ -31,7 +30,7 @@ class DemoLoginApiControllerTest {
 
     @BeforeEach
     void setUp() {
-        mockMvc = MockMvcBuilders.webAppContextSetup(context).build();
+        mockMvc = testMvc.mockMvc();
     }
 
     @Test
@@ -57,7 +56,7 @@ class DemoLoginApiControllerTest {
     }
 
     @Test
-    @DisplayName("닉네임이 2자 미만이거나 20자를 넘으면 400 INVALID_REQUEST")
+    @DisplayName("닉네임이 2자 미만이거나 20자를 넘으면 쿠키 없이 400으로 거절한다")
     void rejectsInvalidNickname() throws Exception {
         for (String body : new String[]{"{\"nickname\":\"가\"}", "{\"nickname\":\"%s\"}".formatted("가".repeat(21)),
                 "{\"nickname\":\"   \"}", "{}"}) {

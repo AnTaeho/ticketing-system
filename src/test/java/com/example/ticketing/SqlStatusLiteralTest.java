@@ -41,7 +41,7 @@ class SqlStatusLiteralTest {
     private static final Pattern LITERAL = Pattern.compile("'([A-Z_]+)'");
 
     @Test
-    @DisplayName("hold·seat·payment·booking·outbox 저장소 SQL의 상태 리터럴은 모두 그 테이블 상태 enum의 이름이다")
+    @DisplayName("저장소 SQL의 상태 리터럴은 모두 그 테이블 상태 enum의 이름이다")
     void statusLiteralsAreEnumNames() {
         assertLiterals(sqlOf(SeatHoldRepository.class), HoldStatus.class);
         // 게이트 키 대사는 별칭 s로 좌석 상태를 읽는다
@@ -76,7 +76,7 @@ class SqlStatusLiteralTest {
     }
 
     @Test
-    @DisplayName("결제 저장소와 운영 집계 SQL의 결제 상태 IN 목록은 모두 PaymentStatus.isOpen()인 상태와 같다")
+    @DisplayName("결제 상태 IN 목록은 모두 PaymentStatus.isOpen()인 상태와 같다")
     void openPaymentStatusListsMatchEnum() {
         List<String> open = Arrays.stream(PaymentStatus.values()).filter(PaymentStatus::isOpen).map(Enum::name)
                 .toList();
@@ -96,7 +96,7 @@ class SqlStatusLiteralTest {
     }
 
     @Test
-    @DisplayName("hold·seat·payment·booking 저장소의 조건부 UPDATE는 모두 flush·clear 옵션을 켠다")
+    @DisplayName("저장소의 조건부 UPDATE는 모두 flush·clear 옵션을 켠다")
     void modifyingOptionsAreConsistent() {
         List<Method> modifying = new ArrayList<>();
         for (Class<?> repository : List.of(SeatHoldRepository.class, SeatRepository.class, PaymentRepository.class,

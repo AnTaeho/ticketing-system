@@ -48,11 +48,8 @@ class ShowAdminServiceTest {
         long showId = fixtures.newShow();
         LocalDateTime now = fixtures.dbNow();
 
-        long started = System.nanoTime();
         CreatePerformanceResult created = showAdminService.createPerformance(
                 new CreatePerformanceCommand(showId, now.plusDays(1), now.minusMinutes(1), null, 4, 10, 20));
-        long elapsedMs = (System.nanoTime() - started) / 1_000_000;
-        System.out.printf("[S1.2] 회차 1건 + 좌석 800행 생성: %d ms%n", elapsedMs);
 
         assertThat(created.seatCount()).isEqualTo(800);
         assertThat(count("SELECT COUNT(*) FROM seat WHERE performance_id = ?", created.performanceId()))
@@ -75,7 +72,7 @@ class ShowAdminServiceTest {
     }
 
     @Test
-    @DisplayName("같은 위치 좌석을 다시 INSERT하면 uk_seat_position 유니크 위반")
+    @DisplayName("같은 위치 좌석을 다시 넣으면 uk_seat_position 유니크 위반으로 실패한다")
     void duplicatePositionViolatesUniqueKey() {
         long pid = fixtures.newPerformance(1, 2, 3);
         SeatSpec same = new SeatSpec("A", 1, 1, SeatGrade.VIP, SeatGrade.VIP.getPrice());
@@ -96,7 +93,7 @@ class ShowAdminServiceTest {
     }
 
     @Test
-    @DisplayName("gateCloseAt이 없으면 openAt + 24시간")
+    @DisplayName("게이트 마감 시각(gateCloseAt)이 없으면 오픈 24시간 뒤로 정한다")
     void gateCloseAtDefaultsToOpenPlus24h() {
         LocalDateTime openAt = fixtures.dbNow().plusHours(1);
         Performance performance = create(openAt, openAt.plusDays(3), null);
@@ -105,7 +102,7 @@ class ShowAdminServiceTest {
     }
 
     @Test
-    @DisplayName("기본값 openAt + 24시간이 startsAt보다 늦으면 startsAt으로 맞춘다")
+    @DisplayName("기본 gateCloseAt이 startsAt보다 늦으면 startsAt으로 맞춘다")
     void gateCloseAtDefaultClampedToStartsAt() {
         LocalDateTime openAt = fixtures.dbNow().plusHours(1);
         Performance performance = create(openAt, openAt.plusHours(2), null);
@@ -125,7 +122,7 @@ class ShowAdminServiceTest {
     }
 
     @Test
-    @DisplayName("openAt이 startsAt보다 앞서지 않으면 INVALID_REQUEST")
+    @DisplayName("오픈 시각이 시작 시각보다 앞서지 않으면 INVALID_REQUEST로 거절한다")
     void openAtMustPrecedeStartsAt() {
         long showId = fixtures.newShow();
         LocalDateTime now = fixtures.dbNow();
@@ -136,7 +133,7 @@ class ShowAdminServiceTest {
     }
 
     @Test
-    @DisplayName("구역·열·열당 좌석 수가 범위를 벗어나면 INVALID_REQUEST")
+    @DisplayName("구역·열·열당 좌석 수가 범위를 벗어나면 INVALID_REQUEST로 거절한다")
     void sizeOutOfRange() {
         long showId = fixtures.newShow();
         LocalDateTime now = fixtures.dbNow();
@@ -154,7 +151,7 @@ class ShowAdminServiceTest {
     }
 
     @Test
-    @DisplayName("없는 공연에 회차를 만들면 SHOW_NOT_FOUND")
+    @DisplayName("없는 공연에 회차를 만들면 SHOW_NOT_FOUND로 거절한다")
     void unknownShow() {
         LocalDateTime now = fixtures.dbNow();
 

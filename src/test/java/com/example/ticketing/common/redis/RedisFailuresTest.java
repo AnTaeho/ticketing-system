@@ -36,7 +36,7 @@ class RedisFailuresTest {
     }
 
     @Test
-    @DisplayName("describe는 번역 예외면 원인 문자열을, 아니면 예외 문자열을 돌려준다")
+    @DisplayName("장애 설명(describe)은 번역된 예외면 원인을, 아니면 그 예외를 글로 돌려준다")
     void describeShowsOriginalCause() {
         QueryTimeoutException cause = new QueryTimeoutException("redis timeout");
 

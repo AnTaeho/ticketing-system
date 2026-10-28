@@ -9,20 +9,15 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.example.ticketing.seat.repository.SeatMapRedisStore;
 import com.example.ticketing.support.Fixtures;
 import com.example.ticketing.support.IntegrationTest;
-import com.example.ticketing.support.RedisKeyCleaner;
+import com.example.ticketing.support.TestMvc;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
-import java.util.ArrayList;
-import java.util.List;
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
-import org.springframework.test.web.servlet.setup.MockMvcBuilders;
-import org.springframework.web.context.WebApplicationContext;
 
 @IntegrationTest
 class SeatMapApiControllerTest {
@@ -30,31 +25,23 @@ class SeatMapApiControllerTest {
     private static final String SEATS = "/api/performances/{pid}/seats";
 
     @Autowired
-    private WebApplicationContext context;
+    private TestMvc testMvc;
     @Autowired
     private Fixtures fixtures;
     @Autowired
-    private RedisKeyCleaner cleaner;
-    @Autowired
-    private SeatMapRedisStore store;
+    private SeatMapRedisStore seatMapRedisStore;
 
     private MockMvc mockMvc;
-    private final List<Long> pids = new ArrayList<>();
 
     @BeforeEach
     void setUp() {
-        mockMvc = MockMvcBuilders.webAppContextSetup(context).build();
-    }
-
-    @AfterEach
-    void tearDown() {
-        pids.forEach(cleaner::clean);
+        mockMvc = testMvc.mockMvc();
     }
 
     @Test
-    @DisplayName("200 application/json;charset=UTF-8, Cache-Control no-store, 스냅샷 형식")
+    @DisplayName("좌석맵을 조회하면 캐시하지 말라는 JSON 스냅샷으로 200을 준다")
     void returnsSnapshotJson() throws Exception {
-        long pid = performance();
+        long pid = fixtures.newPerformance(1, 2, 3);
 
         MvcResult result = mockMvc.perform(get(SEATS, pid))
                 .andExpect(status().isOk())
@@ -73,17 +60,17 @@ class SeatMapApiControllerTest {
                 .andExpect(jsonPath("$.sections[0].rows[0].seats[0].price").value(180_000))
                 .andExpect(jsonPath("$.sections[0].rows[0].seats[0].s").value("A"))
                 .andReturn();
+
         String body = result.getResponse().getContentAsString(StandardCharsets.UTF_8);
-        System.out.println("[S7.1] GET /seats 응답: " + body);
-        assertThat(store.get(pid)).isEqualTo(body);
+        assertThat(seatMapRedisStore.get(pid)).isEqualTo(body);
     }
 
     @Test
     @DisplayName("Redis에 든 스냅샷 문자열을 바꾸지 않고 그대로 낸다")
     void writesStoredStringVerbatim() throws Exception {
-        long pid = performance();
+        long pid = fixtures.newPerformance(1, 2, 3);
         String stored = "{\"performanceId\":" + pid + ",\"generatedAt\":42,\"sections\":[],\"note\":\"좌석\"}";
-        store.put(pid, stored, Duration.ofSeconds(30));
+        seatMapRedisStore.put(pid, stored, Duration.ofSeconds(30));
 
         MvcResult result = mockMvc.perform(get(SEATS, pid))
                 .andExpect(status().isOk())
@@ -93,16 +80,10 @@ class SeatMapApiControllerTest {
     }
 
     @Test
-    @DisplayName("없는 회차는 404 PERFORMANCE_NOT_FOUND")
+    @DisplayName("없는 회차면 404다")
     void unknownPerformance() throws Exception {
         mockMvc.perform(get(SEATS, Long.MAX_VALUE))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("PERFORMANCE_NOT_FOUND"));
-    }
-
-    private long performance() {
-        long pid = fixtures.newPerformance(1, 2, 3);
-        pids.add(pid);
-        return pid;
     }
 }

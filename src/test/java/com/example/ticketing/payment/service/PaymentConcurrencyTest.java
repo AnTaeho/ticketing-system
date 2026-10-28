@@ -4,30 +4,27 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.example.ticketing.common.error.ApiException;
 import com.example.ticketing.common.error.ErrorCode;
-import com.example.ticketing.hold.dto.CreateHoldCommand;
-import com.example.ticketing.hold.dto.CreateHoldResult;
-import com.example.ticketing.hold.service.SeatHoldService;
 import com.example.ticketing.payment.client.PgResult;
 import com.example.ticketing.payment.dto.PayCommand;
 import com.example.ticketing.payment.dto.PaymentOutcome;
 import com.example.ticketing.payment.dto.PaymentResult;
 import com.example.ticketing.payment.dto.PaymentSettlement;
+import com.example.ticketing.support.Await;
+import com.example.ticketing.support.Concurrently;
+import com.example.ticketing.support.Concurrently.Results;
+import com.example.ticketing.support.Concurrently.Running;
 import com.example.ticketing.support.Fixtures;
+import com.example.ticketing.support.Fixtures.Held;
 import com.example.ticketing.support.IntegrationTest;
-import com.example.ticketing.support.PaymentDb;
-import com.example.ticketing.support.RedisKeyCleaner;
 import com.example.ticketing.support.StubPgClient;
 import com.example.ticketing.support.StubPgTestConfig;
-import java.util.ArrayList;
+import com.example.ticketing.support.TestDb;
+import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
-import java.util.concurrent.Callable;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -48,123 +45,104 @@ class PaymentConcurrencyTest {
     @Autowired
     private PaymentTransaction paymentTransaction;
     @Autowired
-    private SeatHoldService seatHoldService;
-    @Autowired
     private StubPgClient stubPg;
     @Autowired
     private Fixtures fixtures;
     @Autowired
+    private TestDb db;
+    @Autowired
     private JdbcTemplate jdbcTemplate;
     @Autowired
     private PlatformTransactionManager transactionManager;
-    @Autowired
-    private RedisKeyCleaner redisKeyCleaner;
-
-    private final List<Long> performances = new ArrayList<>();
-    private PaymentDb db;
 
     @BeforeEach
     void setUp() {
         stubPg.reset();
-        db = new PaymentDb(jdbcTemplate);
     }
 
     @AfterEach
     void tearDown() {
         stubPg.reset();
-        performances.forEach(redisKeyCleaner::clean);
     }
 
     @Test
-    @DisplayName("같은 멱등키 10스레드(승인 지연 300ms): PG 승인 1회, 모든 응답의 paymentId 같음(202 PROCESSING 또는 200 CONFIRMED), "
-            + "끝난 뒤 재요청은 200 CONFIRMED·같은 예매번호, booking 1행")
-    void sameKeyTenThreads() throws Exception {
-        long pid = newPerformance();
-        long userId = fixtures.newUser();
-        CreateHoldResult hold = seatHoldService.hold(new CreateHoldCommand(userId, pid, db.seatIds(pid).subList(0, 2),
-                fixtures.admit(pid, userId)));
+    @DisplayName("같은 멱등키로 10스레드가 동시에 결제해도 PG 승인은 한 번이고 결제도 하나다")
+    void sameKeyTenThreads() {
+        long pid = fixtures.newPerformance(1, 1, 4);
+        Held held = fixtures.held(pid, db.seatIds(pid).subList(0, 2));
         stubPg.approveDelayMs(300);
         String key = UUID.randomUUID().toString();
 
-        List<Outcome> outcomes = runConcurrently(10,
-                i -> () -> paymentService.pay(new PayCommand(userId, hold.holdId(), key, Optional.empty())));
+        Results<PaymentResult> results = Concurrently.of(10).readyWithin(Duration.ofSeconds(10))
+                .within(Duration.ofSeconds(60))
+                .run(i -> paymentService.pay(new PayCommand(held.userId(), held.holdId(), key, Optional.empty())));
 
-        long processing = outcomes.stream().filter(o -> o.is(PaymentOutcome.PROCESSING)).count();
-        long confirmed = outcomes.stream().filter(o -> o.is(PaymentOutcome.CONFIRMED)).count();
-        System.out.printf("[S4.3] 같은 키 10스레드: 202 PROCESSING %d, 200 CONFIRMED %d, 기타 %s, PG 승인 호출 %d%n",
-                processing, confirmed,
-                outcomes.stream().filter(o -> o.response() == null).map(Outcome::describe).toList(),
-                stubPg.approveCalls());
-
-        assertThat(outcomes).allSatisfy(o -> assertThat(o.response()).isNotNull());
+        assertThat(results.errors()).isEmpty();
+        List<PaymentResult> responses = results.values();
+        long processing = responses.stream().filter(r -> r.outcome() == PaymentOutcome.PROCESSING).count();
+        long confirmed = responses.stream().filter(r -> r.outcome() == PaymentOutcome.CONFIRMED).count();
         assertThat(processing + confirmed).isEqualTo(10);
         assertThat(confirmed).isGreaterThanOrEqualTo(1);
-        assertThat(outcomes.stream().map(o -> o.response().paymentId()).distinct()).hasSize(1);
+        assertThat(responses.stream().map(PaymentResult::paymentId).distinct()).hasSize(1);
         assertThat(stubPg.approveCalls()).isEqualTo(1);
 
-        PaymentResult after = paymentService.pay(new PayCommand(userId, hold.holdId(), key, Optional.empty()));
-        PaymentResult winner = outcomes.stream().filter(o -> o.is(PaymentOutcome.CONFIRMED))
-                .findFirst().orElseThrow().response();
+        PaymentResult after = paymentService.pay(
+                new PayCommand(held.userId(), held.holdId(), key, Optional.empty()));
+
+        PaymentResult winner = responses.stream().filter(r -> r.outcome() == PaymentOutcome.CONFIRMED)
+                .findFirst().orElseThrow();
         assertThat(after.outcome()).isEqualTo(PaymentOutcome.CONFIRMED);
         assertThat(after.bookingNumber()).isEqualTo(winner.bookingNumber());
         assertThat(after.paymentId()).isEqualTo(winner.paymentId());
-        assertThat(db.bookingCountOfHold(hold.holdId())).isEqualTo(1);
-        assertThat(db.paymentCountOfHold(hold.holdId())).isEqualTo(1);
+        assertThat(db.bookingCountOfHold(held.holdId())).isEqualTo(1);
+        assertThat(db.paymentCountOfHold(held.holdId())).isEqualTo(1);
         assertThat(stubPg.approveCalls()).isEqualTo(1);
     }
 
     @Test
-    @DisplayName("다른 멱등키 2스레드(탭 두 개): 결제 행 1, 하나만 결제되고 다른 하나는 409 ALREADY_PAYING")
-    void differentKeysTwoTabs() throws Exception {
-        long pid = newPerformance();
-        long userId = fixtures.newUser();
-        CreateHoldResult hold = seatHoldService.hold(new CreateHoldCommand(userId, pid, db.seatIds(pid).subList(0, 2),
-                fixtures.admit(pid, userId)));
+    @DisplayName("탭 두 개가 다른 멱등키로 동시에 결제하면 하나만 결제되고 다른 하나는 409다")
+    void differentKeysTwoTabs() {
+        long pid = fixtures.newPerformance(1, 1, 4);
+        Held held = fixtures.held(pid, db.seatIds(pid).subList(0, 2));
         stubPg.approveDelayMs(300);
 
-        List<Outcome> outcomes = runConcurrently(2,
-                i -> () -> paymentService.pay(new PayCommand(userId, hold.holdId(), UUID.randomUUID().toString(),
+        Results<PaymentResult> results = Concurrently.of(2).readyWithin(Duration.ofSeconds(10))
+                .within(Duration.ofSeconds(60))
+                .run(i -> paymentService.pay(new PayCommand(held.userId(), held.holdId(), UUID.randomUUID().toString(),
                         Optional.empty())));
-        System.out.println("[S4.3] 다른 키 2스레드: " + outcomes.stream().map(Outcome::describe).toList());
 
-        assertThat(outcomes).filteredOn(o -> o.response() != null).singleElement()
-                .satisfies(o -> assertThat(o.response().outcome()).isEqualTo(PaymentOutcome.CONFIRMED));
-        assertThat(outcomes).filteredOn(o -> o.error() != null).singleElement()
-                .satisfies(o -> assertThat(o.error()).isInstanceOfSatisfying(ApiException.class,
-                        e -> assertThat(e.getCode()).isEqualTo(ErrorCode.ALREADY_PAYING)));
-        assertThat(db.paymentCountOfHold(hold.holdId())).isEqualTo(1);
-        assertThat(db.bookingCountOfHold(hold.holdId())).isEqualTo(1);
+        assertThat(results.values()).singleElement()
+                .satisfies(r -> assertThat(r.outcome()).isEqualTo(PaymentOutcome.CONFIRMED));
+        assertThat(results.errors()).singleElement()
+                .satisfies(e -> assertThat(e).isInstanceOfSatisfying(ApiException.class,
+                        api -> assertThat(api.getCode()).isEqualTo(ErrorCode.ALREADY_PAYING)));
+        assertThat(db.paymentCountOfHold(held.holdId())).isEqualTo(1);
+        assertThat(db.bookingCountOfHold(held.holdId())).isEqualTo(1);
         assertThat(stubPg.approveCalls()).isEqualTo(1);
     }
 
     @Test
-    @DisplayName("confirm 멱등: 같은 paymentId로 2스레드 동시 + 1번 더 → 효과는 한 번, booking 1·booking_seat N·TICKET_ISSUED 1")
-    void confirmIsIdempotent() throws Exception {
-        long pid = newPerformance();
-        long userId = fixtures.newUser();
-        List<Long> seats = db.seatIds(pid).subList(0, 3);
-        CreateHoldResult hold = seatHoldService.hold(
-                new CreateHoldCommand(userId, pid, seats, fixtures.admit(pid, userId)));
+    @DisplayName("같은 결제를 동시에 두 번, 이어서 한 번 더 확정해도 효과는 한 번이다")
+    void confirmIsIdempotent() {
+        long pid = fixtures.newPerformance(1, 1, 4);
+        Held held = fixtures.held(pid, db.seatIds(pid).subList(0, 3));
         stubPg.approveWith(PgResult.unknown("timeout"));
-        long paymentId = paymentService.pay(new PayCommand(userId, hold.holdId(), UUID.randomUUID().toString(),
+        long paymentId = paymentService.pay(new PayCommand(held.userId(), held.holdId(), UUID.randomUUID().toString(),
                 Optional.empty())).paymentId();
-
         List<PaymentSettlement> settlements = new CopyOnWriteArrayList<>();
-        List<Outcome> concurrent = runConcurrently(2, i -> () -> {
-            settlements.add(paymentTransaction.confirm(paymentId, "pg-tx-" + paymentId));
-            return null;
-        });
-        settlements.add(paymentTransaction.confirm(paymentId, "pg-tx-" + paymentId));
-        System.out.println("[S4.3] confirm 3회 좌석 변경: "
-                + settlements.stream().map(PaymentSettlement::changedSeats).toList());
 
-        assertThat(concurrent).allSatisfy(o -> assertThat(o.error()).isNull());
+        Results<Void> concurrent = Concurrently.of(2).readyWithin(Duration.ofSeconds(10))
+                .within(Duration.ofSeconds(60))
+                .runAll(i -> settlements.add(paymentTransaction.confirm(paymentId, "pg-tx-" + paymentId)));
+        settlements.add(paymentTransaction.confirm(paymentId, "pg-tx-" + paymentId));
+
+        assertThat(concurrent.errors()).isEmpty();
         assertThat(settlements).hasSize(3)
                 .allSatisfy(s -> assertThat(s.result().outcome()).isEqualTo(PaymentOutcome.CONFIRMED));
         assertThat(settlements).filteredOn(PaymentSettlement::changedSeats).hasSize(1);
         assertThat(settlements.stream().map(s -> s.result().bookingId()).distinct()).hasSize(1);
         long bookingId = settlements.get(0).result().bookingId();
-        assertThat(db.bookingCountOfHold(hold.holdId())).isEqualTo(1);
+        assertThat(db.bookingCountOfHold(held.holdId())).isEqualTo(1);
         assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM booking_seat WHERE booking_id = ?",
                 Long.class, bookingId)).isEqualTo(3);
         assertThat(db.outboxCount("TICKET_ISSUED", bookingId)).isEqualTo(1);
@@ -173,54 +151,50 @@ class PaymentConcurrencyTest {
     }
 
     @Test
-    @DisplayName("유니크 위반 안전망: 같은 사용자가 두 회차 hold를 같은 멱등키로 동시에 결제하면 "
-            + "uk_payment_idem 위반 쪽은 먼저 만든 결제를 Existing으로 돌려받는다")
+    @DisplayName("한 사용자가 두 선점을 같은 멱등키로 동시에 결제하면 늦은 쪽은 먼저 만든 결제를 돌려받는다")
     void idempotencyUniqueViolationFallsBackToExisting() throws Exception {
         long userId = fixtures.newUser();
-        long pidA = newPerformance();
-        long pidB = newPerformance();
-        CreateHoldResult holdA = seatHoldService.hold(
-                new CreateHoldCommand(userId, pidA, db.seatIds(pidA).subList(0, 1),
-                fixtures.admit(pidA, userId)));
-        CreateHoldResult holdB = seatHoldService.hold(
-                new CreateHoldCommand(userId, pidB, db.seatIds(pidB).subList(0, 1),
-                fixtures.admit(pidB, userId)));
+        long pidA = fixtures.newPerformance(1, 1, 4);
+        long pidB = fixtures.newPerformance(1, 1, 4);
+        long holdA = fixtures.held(pidA, userId, db.seatIds(pidA).subList(0, 1)).holdId();
+        long holdB = fixtures.held(pidB, userId, db.seatIds(pidB).subList(0, 1)).holdId();
+        List<Long> holdIds = List.of(holdA, holdB);
         stubPg.approveDelayMs(300);
         String key = UUID.randomUUID().toString();
-
-        // 두 hold 행을 잠가 두 요청이 1단계(멱등키 조회)를 모두 지난 뒤 hold 락에서 기다리게 한다
         CountDownLatch locked = new CountDownLatch(1);
         CountDownLatch release = new CountDownLatch(1);
-        ExecutorService blocker = Executors.newSingleThreadExecutor();
-        Future<?> blocking = blocker.submit(() -> new TransactionTemplate(transactionManager).executeWithoutResult(s -> {
-            jdbcTemplate.queryForList("SELECT id FROM seat_hold WHERE id IN (?, ?) ORDER BY id FOR UPDATE",
-                    Long.class, holdA.holdId(), holdB.holdId());
-            locked.countDown();
-            try {
-                release.await(30, TimeUnit.SECONDS);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
-        }));
-        assertThat(locked.await(10, TimeUnit.SECONDS)).isTrue();
+        boolean bothWaiting;
+        Results<PaymentResult> results;
 
-        ExecutorService payers = Executors.newFixedThreadPool(2);
-        Future<Outcome> payA = payers.submit(() -> attempt(
-                () -> paymentService.pay(new PayCommand(userId, holdA.holdId(), key, Optional.empty()))));
-        Future<Outcome> payB = payers.submit(() -> attempt(
-                () -> paymentService.pay(new PayCommand(userId, holdB.holdId(), key, Optional.empty()))));
-        boolean bothWaiting = awaitHoldLockWaits(holdA.holdId(), holdB.holdId());
-        release.countDown();
-        blocking.get(30, TimeUnit.SECONDS);
-        List<Outcome> outcomes = List.of(payA.get(30, TimeUnit.SECONDS), payB.get(30, TimeUnit.SECONDS));
-        payers.shutdownNow();
-        blocker.shutdownNow();
-        System.out.println("[S4.3] 같은 키·다른 hold 동시 결제(두 요청 모두 락 대기 확인=" + bothWaiting + "): "
-                + outcomes.stream().map(Outcome::describe).toList());
+        // 두 hold 행을 잠가 두 요청이 1단계(멱등키 조회)를 모두 지난 뒤 hold 락에서 기다리게 한다
+        try (Running<Void> blocker = Concurrently.of(1).within(Duration.ofSeconds(30)).start(i -> {
+            new TransactionTemplate(transactionManager).executeWithoutResult(s -> {
+                jdbcTemplate.queryForList("SELECT id FROM seat_hold WHERE id IN (?, ?) ORDER BY id FOR UPDATE",
+                        Long.class, holdA, holdB);
+                locked.countDown();
+                try {
+                    release.await(30, TimeUnit.SECONDS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            });
+            return null;
+        })) {
+            assertThat(locked.await(10, TimeUnit.SECONDS)).isTrue();
+            try (Running<PaymentResult> payers = Concurrently.of(2).within(Duration.ofSeconds(30)).start(i ->
+                    paymentService.pay(new PayCommand(userId, holdIds.get(i), key, Optional.empty())))) {
+                bothWaiting = awaitHoldLockWaits(holdA, holdB);
+                release.countDown();
+                assertThat(blocker.await().errors()).isEmpty();
+                results = payers.await();
+            }
+        } finally {
+            release.countDown();
+        }
 
         assertThat(bothWaiting).isTrue();
-        assertThat(outcomes).allSatisfy(o -> assertThat(o.response()).isNotNull());
-        assertThat(outcomes.stream().map(o -> o.response().paymentId()).distinct()).hasSize(1);
+        assertThat(results.errors()).isEmpty();
+        assertThat(results.values().stream().map(PaymentResult::paymentId).distinct()).hasSize(1);
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM booking_payment WHERE user_id = ? AND idempotency_key = ?",
                 Long.class, userId, key)).isEqualTo(1);
@@ -228,7 +202,7 @@ class PaymentConcurrencyTest {
         long paidHold = jdbcTemplate.queryForObject(
                 "SELECT hold_id FROM booking_payment WHERE user_id = ? AND idempotency_key = ?",
                 Long.class, userId, key);
-        long untouchedHold = paidHold == holdA.holdId() ? holdB.holdId() : holdA.holdId();
+        long untouchedHold = paidHold == holdA ? holdB : holdA;
         assertThat(db.holdStatus(paidHold)).isEqualTo("CONFIRMED");
         assertThat(db.holdStatus(untouchedHold)).isEqualTo("HELD");
         assertThat(db.payDeadline(untouchedHold)).isNull();
@@ -236,9 +210,8 @@ class PaymentConcurrencyTest {
     }
 
     // 락을 기다리는 동안 InnoDB 트랜잭션 목록에는 안 보일 때가 있어 실행 중인 문장으로 확인한다
-    private boolean awaitHoldLockWaits(long... holdIds) throws InterruptedException {
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
-        while (System.nanoTime() < deadline) {
+    private boolean awaitHoldLockWaits(long... holdIds) {
+        return Await.until(Duration.ofSeconds(10), Duration.ofMillis(20), () -> {
             int waiting = 0;
             for (long holdId : holdIds) {
                 Long count = jdbcTemplate.queryForObject(
@@ -246,68 +219,7 @@ class PaymentConcurrencyTest {
                         "SELECT * FROM seat_hold WHERE id = " + holdId + " AND user_id = % FOR UPDATE");
                 waiting += count == null ? 0 : count.intValue();
             }
-            if (waiting >= holdIds.length) {
-                return true;
-            }
-            Thread.sleep(20);
-        }
-        return false;
-    }
-
-    private List<Outcome> runConcurrently(int threads, java.util.function.IntFunction<Callable<PaymentResult>> task)
-            throws InterruptedException {
-        ExecutorService executor = Executors.newFixedThreadPool(threads);
-        CountDownLatch ready = new CountDownLatch(threads);
-        CountDownLatch start = new CountDownLatch(1);
-        CountDownLatch done = new CountDownLatch(threads);
-        List<Outcome> outcomes = new CopyOnWriteArrayList<>();
-        for (int i = 0; i < threads; i++) {
-            Callable<PaymentResult> callable = task.apply(i);
-            executor.submit(() -> {
-                try {
-                    ready.countDown();
-                    start.await();
-                    outcomes.add(attempt(callable));
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                } finally {
-                    done.countDown();
-                }
-            });
-        }
-        assertThat(ready.await(10, TimeUnit.SECONDS)).isTrue();
-        start.countDown();
-        assertThat(done.await(60, TimeUnit.SECONDS)).isTrue();
-        executor.shutdownNow();
-        assertThat(outcomes).hasSize(threads);
-        return outcomes;
-    }
-
-    private static Outcome attempt(Callable<PaymentResult> callable) {
-        try {
-            return new Outcome(callable.call(), null);
-        } catch (Throwable e) {
-            return new Outcome(null, e);
-        }
-    }
-
-    private long newPerformance() {
-        long pid = fixtures.newPerformance(1, 1, 4);
-        performances.add(pid);
-        return pid;
-    }
-
-    private record Outcome(PaymentResult response, Throwable error) {
-
-        boolean is(PaymentOutcome outcome) {
-            return response != null && response.outcome() == outcome;
-        }
-
-        String describe() {
-            if (response != null) {
-                return response.outcome() + "#" + response.paymentId();
-            }
-            return error instanceof ApiException be ? be.getCode().name() : String.valueOf(error);
-        }
+            return waiting >= holdIds.length;
+        });
     }
 }

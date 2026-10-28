@@ -12,7 +12,7 @@ import org.slf4j.LoggerFactory;
 class ThrottledWarnTest {
 
     @Test
-    @DisplayName("10초 안의 실패는 warn 한 줄로 묶고, 10초가 지나면 그사이 생략한 건수를 붙여 다시 한 줄 남긴다")
+    @DisplayName("10초 안의 실패는 warn 한 줄로 묶고 지나면 생략 건수를 붙여 다시 남긴다")
     void oneWarnPerInterval() {
         AtomicLong clock = new AtomicLong(0);
         ThrottledWarn warn = new ThrottledWarn(LoggerFactory.getLogger(ThrottledWarnTest.class), clock::get);
@@ -22,6 +22,7 @@ class ThrottledWarnTest {
                 warn.warn("실패 {}", i);
                 clock.addAndGet(Duration.ofSeconds(1).toNanos());
             }
+
             assertThat(logs.warnings()).containsExactly("실패 0 (앞서 생략 0건)");
 
             clock.set(Duration.ofSeconds(10).toNanos());

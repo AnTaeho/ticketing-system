@@ -10,12 +10,13 @@ import com.example.ticketing.seat.domain.PerformanceInfo;
 import com.example.ticketing.seat.domain.SeatGrade;
 import com.example.ticketing.seat.domain.SeatInfo;
 import com.example.ticketing.seat.dto.SeatSelection;
-import com.example.ticketing.seat.repository.SeatJdbcRepository;
 import com.example.ticketing.show.domain.Performance;
 import com.example.ticketing.show.domain.PerformanceState;
 import com.example.ticketing.show.repository.PerformanceRepository;
 import com.example.ticketing.support.Fixtures;
 import com.example.ticketing.support.IntegrationTest;
+import com.example.ticketing.support.TestDb;
+import com.example.ticketing.support.TestServices;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -29,8 +30,6 @@ import org.springframework.jdbc.core.JdbcTemplate;
 class SeatCatalogTest {
 
     @Autowired
-    private SeatJdbcRepository seatJdbcRepository;
-    @Autowired
     private SeatCatalog seatCatalog;
     @Autowired
     private PerformanceRepository performanceRepository;
@@ -40,6 +39,10 @@ class SeatCatalogTest {
     private JdbcTemplate jdbcTemplate;
     @Autowired
     private TicketingProperties properties;
+    @Autowired
+    private TestDb db;
+    @Autowired
+    private TestServices services;
 
     @Test
     @DisplayName("캐시한 좌석의 가격·등급·위치와 회차 시각이 DB와 같다")
@@ -69,7 +72,7 @@ class SeatCatalogTest {
     @DisplayName("처음 조회 때 한 번 적재한 뒤에는 DB를 다시 읽지 않는다")
     void loadsOnce() {
         long pid = fixtures.newPerformance(1, 1, 2);
-        List<Long> seatIds = seatIds(pid);
+        List<Long> seatIds = db.seatIdsInLayoutOrder(pid);
         seatCatalog.performance(pid);
 
         jdbcTemplate.update("DELETE FROM seat WHERE performance_id = ?", pid);
@@ -81,7 +84,7 @@ class SeatCatalogTest {
     @DisplayName("고른 좌석을 정렬해 돌려주고 총액을 계산한다")
     void validSelection() {
         long pid = fixtures.newPerformance(1, 10, 2);
-        List<Long> ids = seatIds(pid);
+        List<Long> ids = db.seatIdsInLayoutOrder(pid);
         Long vip = ids.get(0);
         Long r = ids.get(4);
         Long a = ids.get(19);
@@ -101,7 +104,7 @@ class SeatCatalogTest {
     void maxSeatsAllowed() {
         long pid = fixtures.newPerformance(1, 1, 6);
         int maxSeats = properties.hold().maxSeats();
-        List<Long> ids = seatIds(pid).subList(0, maxSeats);
+        List<Long> ids = db.seatIdsInLayoutOrder(pid).subList(0, maxSeats);
 
         SeatSelection selection = seatCatalog.validateSeats(pid, ids);
 
@@ -110,12 +113,12 @@ class SeatCatalogTest {
     }
 
     @Test
-    @DisplayName("0석, 최대 매수 초과, 중복, 다른 회차 좌석, 없는 좌석은 INVALID_SEAT_SELECTION")
+    @DisplayName("0석·최대 매수 초과·중복·다른 회차·없는 좌석을 고르면 400이다")
     void invalidSelections() {
         long pid = fixtures.newPerformance(1, 1, 6);
         long otherPid = fixtures.newPerformance(1, 1, 2);
-        List<Long> ids = seatIds(pid);
-        Long otherSeat = seatIds(otherPid).get(0);
+        List<Long> ids = db.seatIdsInLayoutOrder(pid);
+        Long otherSeat = db.seatIdsInLayoutOrder(otherPid).get(0);
 
         assertInvalidSelection(pid, List.of());
         assertInvalidSelection(pid, null);
@@ -130,7 +133,7 @@ class SeatCatalogTest {
     }
 
     @Test
-    @DisplayName("없는 회차는 PERFORMANCE_NOT_FOUND")
+    @DisplayName("없는 회차면 404다")
     void unknownPerformance() {
         assertThatThrownBy(() -> seatCatalog.validateSeats(Long.MAX_VALUE, List.of(1L)))
                 .isInstanceOf(ApiException.class)
@@ -139,9 +142,9 @@ class SeatCatalogTest {
     }
 
     @Test
-    @DisplayName("예매 중인 회차 목록은 open_at <= 지금 < starts_at인 회차만 담고 10초 동안 다시 읽지 않는다")
+    @DisplayName("예매 중인 회차 목록은 예매 기간 안의 회차만 담고 10초 동안 다시 읽지 않는다")
     void openPerformanceIds() {
-        SeatCatalog fresh = new SeatCatalog(seatJdbcRepository, properties, System::nanoTime);
+        SeatCatalog fresh = services.freshCatalog();
         long showId = fixtures.newShow();
         LocalDateTime now = fixtures.dbNow();
         long open = fixtures.newPerformance(showId, now.minusMinutes(1), now.plusDays(1), 1, 1, 1);
@@ -157,7 +160,7 @@ class SeatCatalogTest {
     }
 
     @Test
-    @DisplayName("requireOpen은 넘긴 시각이 open_at 이상 starts_at 미만일 때만 회차를 돌려주고 그 밖은 409 NOT_OPEN이다")
+    @DisplayName("예매 확인(requireOpen)은 넘긴 시각이 예매 기간 밖이면 409다")
     void requireOpenUsesGivenTime() {
         long pid = fixtures.newPerformance(1, 1, 1);
         PerformanceInfo info = seatCatalog.performance(pid);
@@ -175,11 +178,6 @@ class SeatCatalogTest {
                 .isInstanceOf(ApiException.class)
                 .extracting(e -> ((ApiException) e).getCode())
                 .isEqualTo(ErrorCode.NOT_OPEN);
-    }
-
-    private List<Long> seatIds(long pid) {
-        return jdbcTemplate.queryForList(
-                "SELECT id FROM seat WHERE performance_id = ? ORDER BY row_no, section, seat_no", Long.class, pid);
     }
 
     private void assertInvalidSelection(long pid, Collection<Long> seatIds) {

@@ -8,12 +8,14 @@ import com.example.ticketing.fakepg.domain.FakePgStatus;
 import com.example.ticketing.fakepg.dto.FakePgReply;
 import com.example.ticketing.support.FakePgTestConfig;
 import com.example.ticketing.support.FakePgTestConfig.GatedSleeper;
+import com.example.ticketing.support.Concurrently;
+import com.example.ticketing.support.Concurrently.Results;
+import com.example.ticketing.support.Concurrently.Running;
 import com.example.ticketing.support.IntegrationTest;
+import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -62,7 +64,7 @@ class FakePgServiceTest {
     }
 
     @Test
-    @DisplayName("거절된 주문에 승인이 다시 오면 그대로 DECLINED이고 지연 없이 바로 답한다")
+    @DisplayName("거절된 주문에 승인이 다시 오면 지연 없이 거절로 답한다")
     void declineTwice() {
         String orderId = newOrderId();
 
@@ -76,7 +78,7 @@ class FakePgServiceTest {
     }
 
     @Test
-    @DisplayName("취소가 먼저 오면 CANCELLED 묘비를 남기고, 뒤늦은 승인은 DECLINED(reason CANCELLED)로 거절한다")
+    @DisplayName("취소가 먼저 오면 묘비를 남겨 뒤늦은 승인을 거절한다")
     void tombstoneRejectsLateApprove() {
         String orderId = newOrderId();
 
@@ -92,27 +94,33 @@ class FakePgServiceTest {
     }
 
     @Test
-    @DisplayName("PROCESSING 중 취소는 PROCESSING(409)으로 거절, 승인 재요청은 PROCESSING, 끝나면 APPROVED, 그 뒤 취소는 CANCELLED")
+    @DisplayName("승인이 지연되는 동안 온 취소는 거절하고 승인이 끝난 뒤의 취소는 받는다")
     void cancelWhileProcessing() throws Exception {
         String orderId = newOrderId();
         sleeper.close();
-        CompletableFuture<FakePgReply> slow = CompletableFuture.supplyAsync(
-                () -> fakePgService.approve(orderId, 70_000, FakePgScenario.SLOW_SUCCESS));
-        try {
-            assertThat(sleeper.awaitEntered(1)).isTrue();
 
-            assertThat(fakePgService.query(orderId)).isEqualTo(new FakePgReply(orderId, "PROCESSING", null, null));
-            FakePgReply cancelDuring = fakePgService.cancel(orderId);
-            assertThat(cancelDuring.is(FakePgStatus.PROCESSING)).isTrue();
-            assertThat(cancelDuring).isEqualTo(new FakePgReply(orderId, "PROCESSING", null, null));
-            assertThat(fakePgService.approve(orderId, 70_000, FakePgScenario.SUCCESS))
-                    .isEqualTo(new FakePgReply(orderId, "PROCESSING", null, null));
-            assertThat(row(orderId).get(0)).isEqualTo("PROCESSING");
-        } finally {
-            sleeper.open();
+        Results<FakePgReply> results;
+        try (Running<FakePgReply> slow = Concurrently.of(1).within(Duration.ofSeconds(10))
+                .start(i -> fakePgService.approve(orderId, 70_000, FakePgScenario.SLOW_SUCCESS))) {
+            try {
+                assertThat(sleeper.awaitEntered(1)).isTrue();
+
+                assertThat(fakePgService.query(orderId))
+                        .isEqualTo(new FakePgReply(orderId, "PROCESSING", null, null));
+                FakePgReply cancelDuring = fakePgService.cancel(orderId);
+                assertThat(cancelDuring.is(FakePgStatus.PROCESSING)).isTrue();
+                assertThat(cancelDuring).isEqualTo(new FakePgReply(orderId, "PROCESSING", null, null));
+                assertThat(fakePgService.approve(orderId, 70_000, FakePgScenario.SUCCESS))
+                        .isEqualTo(new FakePgReply(orderId, "PROCESSING", null, null));
+                assertThat(row(orderId).get(0)).isEqualTo("PROCESSING");
+            } finally {
+                sleeper.open();
+            }
+            results = slow.await();
         }
 
-        FakePgReply approved = slow.get(10, TimeUnit.SECONDS);
+        assertThat(results.errors()).isEmpty();
+        FakePgReply approved = results.values().get(0);
         assertThat(approved.status()).isEqualTo("APPROVED");
         assertThat(approved.pgTxId()).isNotBlank();
         assertThat(sleeper.calls()).containsExactly(properties.fakePg().slowDelay().toMillis());
@@ -126,7 +134,7 @@ class FakePgServiceTest {
     }
 
     @Test
-    @DisplayName("승인 후 취소하면 CANCELLED, 다시 취소해도 CANCELLED다")
+    @DisplayName("승인한 주문은 몇 번 취소해도 같은 취소 결과를 돌려준다")
     void cancelApprovedIsIdempotent() {
         String orderId = newOrderId();
         FakePgReply approved = fakePgService.approve(orderId, 1000, FakePgScenario.SUCCESS);
@@ -163,7 +171,7 @@ class FakePgServiceTest {
     }
 
     @Test
-    @DisplayName("SLOW_DECLINE은 slow-delay-ms만큼 지연한 뒤 DECLINED를 저장한다")
+    @DisplayName("느린 거절(SLOW_DECLINE)은 정해진 지연 뒤에 거절을 저장한다")
     void slowDecline() {
         String orderId = newOrderId();
 
@@ -175,7 +183,7 @@ class FakePgServiceTest {
     }
 
     @Test
-    @DisplayName("시나리오가 없으면 설정 범위의 지연 뒤 APPROVED 또는 DECLINED로 끝난다")
+    @DisplayName("시나리오가 없으면 설정 범위만큼 지연한 뒤 승인이나 거절로 끝난다")
     void randomScenario() {
         TicketingProperties.FakePg config = properties.fakePg();
         for (int i = 0; i < 20; i++) {

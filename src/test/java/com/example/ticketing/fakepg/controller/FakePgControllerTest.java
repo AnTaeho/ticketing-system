@@ -14,10 +14,13 @@ import com.example.ticketing.fakepg.dto.FakePgReply;
 import com.example.ticketing.fakepg.service.FakePgService;
 import com.example.ticketing.support.FakePgTestConfig;
 import com.example.ticketing.support.FakePgTestConfig.GatedSleeper;
+import com.example.ticketing.support.Concurrently;
+import com.example.ticketing.support.Concurrently.Results;
+import com.example.ticketing.support.Concurrently.Running;
 import com.example.ticketing.support.IntegrationTest;
+import com.example.ticketing.support.TestMvc;
+import java.time.Duration;
 import java.util.UUID;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -27,9 +30,8 @@ import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.ResultActions;
-import org.springframework.test.web.servlet.setup.MockMvcBuilders;
-import org.springframework.web.context.WebApplicationContext;
 
 @IntegrationTest
 @Import(FakePgTestConfig.class)
@@ -38,7 +40,7 @@ class FakePgControllerTest {
     private static final String BASE = "/fake-pg/payments";
 
     @Autowired
-    private WebApplicationContext context;
+    private TestMvc testMvc;
     @Autowired
     private FakePgService fakePgService;
     @Autowired
@@ -52,7 +54,7 @@ class FakePgControllerTest {
 
     @BeforeEach
     void setUp() {
-        mockMvc = MockMvcBuilders.webAppContextSetup(context).build();
+        mockMvc = testMvc.mockMvc();
         sleeper.reset();
     }
 
@@ -62,19 +64,19 @@ class FakePgControllerTest {
     }
 
     @Test
-    @DisplayName("승인 SUCCESS: 200 {orderId, status APPROVED, pgTxId}, reason과 예매 에러 키는 없다. 조회도 같은 값")
+    @DisplayName("성공 시나리오로 승인하면 승인 번호를 주고 조회·재승인도 같은 번호를 준다")
     void approveSuccess() throws Exception {
         String orderId = newOrderId();
 
-        String pgTxId = approve(orderId, "SUCCESS")
+        MvcResult approved = approve(orderId, "SUCCESS")
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.orderId").value(orderId))
                 .andExpect(jsonPath("$.status").value("APPROVED"))
                 .andExpect(jsonPath("$.pgTxId").isNotEmpty())
                 .andExpect(jsonPath("$.reason").doesNotExist())
                 .andExpect(jsonPath("$.code").doesNotExist())
-                .andReturn().getResponse().getContentAsString()
-                .replaceAll(".*\"pgTxId\":\"([^\"]+)\".*", "$1");
+                .andReturn();
+        String pgTxId = testMvc.body(approved).get("pgTxId").asString();
 
         mockMvc.perform(get(BASE + "/" + orderId))
                 .andExpect(status().isOk())
@@ -87,7 +89,7 @@ class FakePgControllerTest {
     }
 
     @Test
-    @DisplayName("승인 DECLINE: 200 DECLINED, pgTxId 없음. 시나리오 헤더는 대소문자를 가리지 않는다")
+    @DisplayName("거절 시나리오는 대소문자와 상관없이 승인 번호 없는 거절로 답한다")
     void approveDecline() throws Exception {
         approve(newOrderId(), "decline")
                 .andExpect(status().isOk())
@@ -109,7 +111,7 @@ class FakePgControllerTest {
     }
 
     @Test
-    @DisplayName("없는 주문 조회는 404 {orderId, status NOT_FOUND}")
+    @DisplayName("없는 주문을 조회하면 404로 답한다")
     void queryMissing() throws Exception {
         String orderId = newOrderId();
 
@@ -122,7 +124,7 @@ class FakePgControllerTest {
     }
 
     @Test
-    @DisplayName("없는 주문 취소는 200 CANCELLED 묘비, 이후 승인은 200 DECLINED(reason CANCELLED)")
+    @DisplayName("없는 주문을 취소하면 묘비가 남아 뒤늦은 승인을 거절한다")
     void cancelMissingThenApprove() throws Exception {
         String orderId = newOrderId();
 
@@ -142,7 +144,7 @@ class FakePgControllerTest {
     }
 
     @Test
-    @DisplayName("승인된 주문 취소는 200 CANCELLED(pgTxId 유지), 다시 취소해도 200 CANCELLED")
+    @DisplayName("승인된 주문은 몇 번 취소해도 승인 번호를 유지한 채 취소로 답한다")
     void cancelApproved() throws Exception {
         String orderId = newOrderId();
         FakePgReply approved = fakePgService.approve(orderId, 1000, FakePgScenario.SUCCESS);
@@ -156,7 +158,7 @@ class FakePgControllerTest {
     }
 
     @Test
-    @DisplayName("거절된 주문 취소는 200 DECLINED")
+    @DisplayName("거절된 주문을 취소하면 거절 상태 그대로 답한다")
     void cancelDeclined() throws Exception {
         String orderId = newOrderId();
         fakePgService.approve(orderId, 1000, FakePgScenario.DECLINE);
@@ -167,32 +169,37 @@ class FakePgControllerTest {
     }
 
     @Test
-    @DisplayName("PROCESSING 중 취소는 409 {status PROCESSING}, 승인 재요청은 200 PROCESSING, 끝나면 APPROVED")
+    @DisplayName("승인이 지연되는 동안 취소하면 409로 거절하고 승인이 끝나면 취소를 받는다")
     void cancelWhileProcessing() throws Exception {
         String orderId = newOrderId();
         sleeper.close();
-        CompletableFuture<FakePgReply> slow = CompletableFuture.supplyAsync(
-                () -> fakePgService.approve(orderId, 1000, FakePgScenario.SLOW_SUCCESS));
-        try {
-            assertThat(sleeper.awaitEntered(1)).isTrue();
 
-            mockMvc.perform(post(BASE + "/" + orderId + "/cancel"))
-                    .andExpect(status().isConflict())
-                    .andExpect(jsonPath("$.orderId").value(orderId))
-                    .andExpect(jsonPath("$.status").value("PROCESSING"))
-                    .andExpect(jsonPath("$.pgTxId").doesNotExist())
-                    .andExpect(jsonPath("$.code").doesNotExist());
-            approve(orderId, "SLOW_SUCCESS")
-                    .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.status").value("PROCESSING"));
-            mockMvc.perform(get(BASE + "/" + orderId))
-                    .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.status").value("PROCESSING"));
-        } finally {
-            sleeper.open();
+        Results<FakePgReply> results;
+        try (Running<FakePgReply> slow = Concurrently.of(1).within(Duration.ofSeconds(10))
+                .start(i -> fakePgService.approve(orderId, 1000, FakePgScenario.SLOW_SUCCESS))) {
+            try {
+                assertThat(sleeper.awaitEntered(1)).isTrue();
+
+                mockMvc.perform(post(BASE + "/" + orderId + "/cancel"))
+                        .andExpect(status().isConflict())
+                        .andExpect(jsonPath("$.orderId").value(orderId))
+                        .andExpect(jsonPath("$.status").value("PROCESSING"))
+                        .andExpect(jsonPath("$.pgTxId").doesNotExist())
+                        .andExpect(jsonPath("$.code").doesNotExist());
+                approve(orderId, "SLOW_SUCCESS")
+                        .andExpect(status().isOk())
+                        .andExpect(jsonPath("$.status").value("PROCESSING"));
+                mockMvc.perform(get(BASE + "/" + orderId))
+                        .andExpect(status().isOk())
+                        .andExpect(jsonPath("$.status").value("PROCESSING"));
+            } finally {
+                sleeper.open();
+            }
+            results = slow.await();
         }
 
-        assertThat(slow.get(10, TimeUnit.SECONDS).status()).isEqualTo("APPROVED");
+        assertThat(results.errors()).isEmpty();
+        assertThat(results.values().get(0).status()).isEqualTo("APPROVED");
         mockMvc.perform(get(BASE + "/" + orderId))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("APPROVED"));
@@ -202,8 +209,7 @@ class FakePgControllerTest {
     }
 
     @Test
-    @DisplayName("승인 지연 중 앱이 죽어 남은 PROCESSING: slow-delay+stale-margin(30초)보다 오래되면 조회·취소가 DECLINED로 확정한다. "
-            + "최근 PROCESSING은 조회 200 PROCESSING, 취소 409 그대로")
+    @DisplayName("앱이 죽어 오래 남은 처리 중 주문은 조회·취소할 때 거절로 확정한다")
     void staleProcessingIsDeclined() throws Exception {
         long staleSeconds = properties.fakePg().slowDelay().plus(properties.fakePg().staleMargin()).toSeconds() + 1;
         String staleForQuery = insertProcessing(staleSeconds);
@@ -232,7 +238,7 @@ class FakePgControllerTest {
     }
 
     @Test
-    @DisplayName("모르는 시나리오·빈 orderId·40자 넘는 orderId·음수 금액은 400 INVALID_REQUEST(PG 응답 형식)이고 행을 만들지 않는다")
+    @DisplayName("잘못된 승인·취소 요청은 PG 응답 형식의 400으로 답하고 행을 만들지 않는다")
     void invalidRequests() throws Exception {
         approve(newOrderId(), "EXPLODE")
                 .andExpect(status().isBadRequest())

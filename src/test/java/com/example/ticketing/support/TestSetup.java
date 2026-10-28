@@ -4,6 +4,7 @@ import java.lang.annotation.ElementType;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.context.annotation.Import;
 import org.springframework.test.context.TestPropertySource;
 
@@ -22,6 +23,7 @@ import org.springframework.test.context.TestPropertySource;
         "spring.datasource.url=jdbc:mysql://localhost:3306/ticketing_booking_test"
                 + "?createDatabaseIfNotExist=true&serverTimezone=Asia/Seoul&characterEncoding=UTF-8"
 })
-@Import({Fixtures.class, RedisKeyCleaner.class})
+@Import({Fixtures.class, TestDb.class, TestRedis.class, TestServices.class, TestMvc.class, Counters.class})
+@ExtendWith(TestCleanup.class)
 @interface TestSetup {
 }

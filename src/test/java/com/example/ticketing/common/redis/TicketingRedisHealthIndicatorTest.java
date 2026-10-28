@@ -5,10 +5,9 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import com.example.ticketing.common.config.TicketingProperties;
 import com.example.ticketing.support.IntegrationTest;
-import java.io.IOException;
-import java.net.ServerSocket;
+import com.example.ticketing.support.TestMvc;
+import com.example.ticketing.support.TestRedis;
 import java.time.Duration;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -19,16 +18,12 @@ import org.springframework.boot.health.actuate.endpoint.StatusAggregator;
 import org.springframework.boot.health.contributor.Health;
 import org.springframework.boot.health.contributor.Status;
 import org.springframework.test.web.servlet.MockMvc;
-import org.springframework.test.web.servlet.setup.MockMvcBuilders;
-import org.springframework.web.context.WebApplicationContext;
 
 @IntegrationTest
 class TicketingRedisHealthIndicatorTest {
 
     @Autowired
-    private TicketingRedisHealthIndicator indicator;
-    @Autowired
-    private TicketingProperties props;
+    private TicketingRedisHealthIndicator ticketingRedisHealthIndicator;
     @Autowired
     private HealthEndpoint healthEndpoint;
     @Autowired
@@ -36,45 +31,45 @@ class TicketingRedisHealthIndicatorTest {
     @Autowired
     private HttpCodeStatusMapper httpCodeStatusMapper;
     @Autowired
-    private WebApplicationContext context;
+    private TestRedis testRedis;
+    @Autowired
+    private TestMvc testMvc;
 
     @Test
-    @DisplayName("예매 Redis에 PING이 되면 UP")
+    @DisplayName("예매 Redis가 PING에 답하면 UP이다")
     void upWhenRedisAnswers() {
-        assertThat(indicator.health().getStatus()).isEqualTo(Status.UP);
+        assertThat(ticketingRedisHealthIndicator.health().getStatus()).isEqualTo(Status.UP);
     }
 
     @Test
     @DisplayName("닫힌 포트면 1초 안에 DEGRADED와 원인을 돌려준다")
-    void degradedFastWhenRedisDown() throws IOException {
-        TicketingRedis dead = TestTicketingRedis.connectTo("localhost", closedPort(), props);
-        try {
-            long started = System.nanoTime();
-            Health health = new TicketingRedisHealthIndicator(dead).health();
-            Duration elapsed = Duration.ofNanos(System.nanoTime() - started);
+    void degradedFastWhenRedisDown() {
+        TicketingRedisHealthIndicator indicator = new TicketingRedisHealthIndicator(testRedis.dead());
 
-            assertThat(health.getStatus().getCode()).isEqualTo("DEGRADED");
-            assertThat(health.getDetails()).containsKey("error");
-            assertThat(elapsed).isLessThan(Duration.ofSeconds(1));
-        } finally {
-            dead.destroy();
-        }
+        long started = System.nanoTime();
+        Health health = indicator.health();
+        Duration elapsed = Duration.ofNanos(System.nanoTime() - started);
+
+        assertThat(health.getStatus().getCode()).isEqualTo("DEGRADED");
+        assertThat(health.getDetails()).containsKey("error");
+        assertThat(elapsed).isLessThan(Duration.ofSeconds(1));
     }
 
     @Test
-    @DisplayName("/actuator/health는 200 UP이고, 기본 redis 헬스 대신 bookingRedis가 들어 있다")
+    @DisplayName("헬스 확인(/actuator/health)은 기본 redis 대신 bookingRedis 항목으로 UP이다")
     void actuatorHealthUp() throws Exception {
-        MockMvc mockMvc = MockMvcBuilders.webAppContextSetup(context).build();
+        MockMvc mockMvc = testMvc.mockMvc();
 
         mockMvc.perform(get("/actuator/health"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("UP"));
+
         assertThat(healthEndpoint.healthForPath("bookingRedis").getStatus()).isEqualTo(Status.UP);
         assertThat(healthEndpoint.healthForPath("redis")).isNull();
     }
 
     @Test
-    @DisplayName("DEGRADED는 UP보다 앞서고 DOWN보다 뒤이며 HTTP 200, DOWN·OUT_OF_SERVICE는 그대로 503")
+    @DisplayName("상태가 DEGRADED면 UP과 DOWN 사이로 모이고 HTTP 200이다")
     void degradedStatusPolicy() {
         Status degraded = new Status("DEGRADED");
 
@@ -84,11 +79,5 @@ class TicketingRedisHealthIndicatorTest {
         assertThat(httpCodeStatusMapper.getStatusCode(Status.UP)).isEqualTo(200);
         assertThat(httpCodeStatusMapper.getStatusCode(Status.DOWN)).isEqualTo(503);
         assertThat(httpCodeStatusMapper.getStatusCode(Status.OUT_OF_SERVICE)).isEqualTo(503);
-    }
-
-    private static int closedPort() throws IOException {
-        try (ServerSocket socket = new ServerSocket(0)) {
-            return socket.getLocalPort();
-        }
     }
 }

@@ -35,14 +35,14 @@ class SeatLayoutTest {
         assertThat(perSection.values()).containsOnly(200L);
     }
 
-    @ParameterizedTest(name = "{0}열 → {1} {2}원")
+    @ParameterizedTest(name = "{0}열은 {1}석 {2}원이다")
     @CsvSource({
             "1, VIP, 180000", "2, VIP, 180000",
             "3, R, 150000", "4, R, 150000", "5, R, 150000",
             "6, S, 120000", "7, S, 120000", "8, S, 120000",
             "9, A, 90000", "10, A, 90000"
     })
-    @DisplayName("열별 등급과 가격")
+    @DisplayName("등급과 가격은 열 번호로 정해진다")
     void gradeAndPriceByRow(int rowNo, SeatGrade grade, int price) {
         List<SeatSpec> row = SeatLayout.generate(4, 10, 20).stream()
                 .filter(s -> s.rowNo() == rowNo)
@@ -56,7 +56,7 @@ class SeatLayoutTest {
     }
 
     @Test
-    @DisplayName("등급별 좌석 수: VIP 160, R 240, S 240, A 160")
+    @DisplayName("800석 배치에서 등급별 좌석 수는 열 배정을 따른다")
     void countByGrade() {
         Map<SeatGrade, Long> byGrade = SeatLayout.generate(4, 10, 20).stream()
                 .collect(Collectors.groupingBy(SeatSpec::grade, Collectors.counting()));

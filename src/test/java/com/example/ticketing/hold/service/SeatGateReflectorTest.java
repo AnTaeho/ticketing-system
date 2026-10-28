@@ -13,14 +13,13 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import com.example.ticketing.common.config.TicketingProperties;
 import com.example.ticketing.common.metrics.Metrics;
 import com.example.ticketing.common.metrics.Metrics.Tag;
-import com.example.ticketing.common.redis.TestTicketingRedis;
-import com.example.ticketing.common.redis.TicketingRedis;
 import com.example.ticketing.hold.domain.GateHold;
 import com.example.ticketing.hold.repository.SeatGateRedisStore;
+import com.example.ticketing.support.Counters;
 import com.example.ticketing.support.IntegrationTest;
-import io.micrometer.core.instrument.MeterRegistry;
-import java.io.IOException;
-import java.net.ServerSocket;
+import com.example.ticketing.support.TestProperties;
+import com.example.ticketing.support.TestRedis;
+import com.example.ticketing.support.TestServices;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -36,36 +35,35 @@ class SeatGateReflectorTest {
     private static final GateHold HOLD = new GateHold(1L, PID, "t", List.of(1L));
 
     @Autowired
-    private TicketingProperties props;
+    private TicketingProperties properties;
     @Autowired
-    private MeterRegistry meterRegistry;
+    private TestServices services;
+    @Autowired
+    private TestRedis testRedis;
+    @Autowired
+    private Counters counters;
 
     @Test
-    @DisplayName("Redis 장애면 반영은 예외를 삼키고 op별 실패 카운터를 올린다")
-    void swallowsAndCounts() throws IOException {
-        TicketingRedis deadRedis = TestTicketingRedis.connectTo("localhost", closedPort(), props);
-        try {
-            SeatGateReflector reflector = reflector(new SeatGateRedisStore(deadRedis), true);
-            double release = failures("release");
-            double extend = failures("extend");
-            double confirm = failures("confirm");
-            double cooldown = failures("cooldown");
+    @DisplayName("Redis 장애면 반영은 예외를 삼키고 작업별 실패를 센다")
+    void swallowsAndCounts() {
+        SeatGateReflector reflector = reflector(TestServices.gateStore(testRedis.dead()), true);
+        double release = counters.count(Metrics.REDIS_REFLECT_FAILURE, Tag.OP, "release");
+        double extend = counters.count(Metrics.REDIS_REFLECT_FAILURE, Tag.OP, "extend");
+        double confirm = counters.count(Metrics.REDIS_REFLECT_FAILURE, Tag.OP, "confirm");
+        double cooldown = counters.count(Metrics.REDIS_REFLECT_FAILURE, Tag.OP, "cooldown");
 
-            assertThatCode(() -> {
-                reflector.release(HOLD);
-                reflector.releaseSeatsOnly(HOLD);
-                reflector.extend(HOLD, Duration.ofMinutes(11));
-                reflector.confirm(HOLD, Instant.now().plusSeconds(3600));
-                reflector.expire(HOLD);
-            }).doesNotThrowAnyException();
+        assertThatCode(() -> {
+            reflector.release(HOLD);
+            reflector.releaseSeatsOnly(HOLD);
+            reflector.extend(HOLD, Duration.ofMinutes(11));
+            reflector.confirm(HOLD, Instant.now().plusSeconds(3600));
+            reflector.expire(HOLD);
+        }).doesNotThrowAnyException();
 
-            assertThat(failures("release") - release).isEqualTo(3);
-            assertThat(failures("extend") - extend).isEqualTo(1);
-            assertThat(failures("confirm") - confirm).isEqualTo(1);
-            assertThat(failures("cooldown") - cooldown).isEqualTo(1);
-        } finally {
-            deadRedis.destroy();
-        }
+        assertThat(counters.count(Metrics.REDIS_REFLECT_FAILURE, Tag.OP, "release") - release).isEqualTo(3);
+        assertThat(counters.count(Metrics.REDIS_REFLECT_FAILURE, Tag.OP, "extend") - extend).isEqualTo(1);
+        assertThat(counters.count(Metrics.REDIS_REFLECT_FAILURE, Tag.OP, "confirm") - confirm).isEqualTo(1);
+        assertThat(counters.count(Metrics.REDIS_REFLECT_FAILURE, Tag.OP, "cooldown") - cooldown).isEqualTo(1);
     }
 
     @Test
@@ -95,27 +93,13 @@ class SeatGateReflectorTest {
         reflector.expire(noSeats);
 
         InOrder order = inOrder(store);
-        order.verify(store).setReholdCooldown(HOLD, props.hold().reholdCooldown());
+        order.verify(store).setReholdCooldown(HOLD, properties.hold().reholdCooldown());
         order.verify(store).release(HOLD);
         verify(store).release(noSeats);
         verify(store, never()).setReholdCooldown(eq(noSeats), any());
     }
 
     private SeatGateReflector reflector(SeatGateRedisStore store, boolean gateEnabled) {
-        TicketingProperties p = props;
-        TicketingProperties withGate = new TicketingProperties(p.seed(), p.redis(), p.hold(), p.payment(),
-                new TicketingProperties.Gate(gateEnabled, p.gate().fallbackMaxConcurrency()), p.queue(), p.seatmap(),
-                p.outbox(), p.ops(), p.pg(), p.fakePg());
-        return new SeatGateReflector(store, withGate, meterRegistry, System::nanoTime);
-    }
-
-    private double failures(String op) {
-        return meterRegistry.counter(Metrics.REDIS_REFLECT_FAILURE, Tag.OP, op).count();
-    }
-
-    private static int closedPort() throws IOException {
-        try (ServerSocket socket = new ServerSocket(0)) {
-            return socket.getLocalPort();
-        }
+        return services.gateReflector(store, TestProperties.from(properties).gateEnabled(gateEnabled).build());
     }
 }

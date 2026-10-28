@@ -19,7 +19,7 @@ class FakePgDeciderTest {
             Duration.ofMillis(200), Duration.ofMillis(1200), 0.1, 0.05, Duration.ofSeconds(5), Duration.ofSeconds(30));
 
     @Test
-    @DisplayName("시나리오를 주면 SUCCESS·DECLINE은 지연 없이, SLOW_*는 slow-delay-ms 뒤에 결론낸다")
+    @DisplayName("시나리오를 주면 느린 시나리오만 정해진 지연 뒤에 결론낸다")
     void explicitScenarios() {
         FakePgDecider decider = new FakePgDecider(CONFIG, new Random(1));
 
@@ -46,7 +46,7 @@ class FakePgDeciderTest {
     }
 
     @Test
-    @DisplayName("시나리오가 없을 때 20만 번 뽑으면 거절 약 10%, 느린 응답 약 5%, 보통 지연은 200~1200ms")
+    @DisplayName("시나리오가 없으면 거절·느린 응답 비율과 지연 범위가 설정을 따른다")
     void ratiosFollowConfig() {
         FakePgDecider decider = new FakePgDecider(CONFIG, new Random(20261027L));
         int draws = 200_000;
@@ -66,8 +66,6 @@ class FakePgDeciderTest {
                 maxDelay = Math.max(maxDelay, plan.delayMs());
             }
         }
-        System.out.printf("[S4.1] 무작위 %d회: 거절 %.4f, 느림 %.4f, 보통 지연 %d~%dms%n",
-                draws, (double) declined / draws, (double) slow / draws, minDelay, maxDelay);
 
         assertThat((double) declined / draws).isCloseTo(0.1, within(0.005));
         assertThat((double) slow / draws).isCloseTo(0.05, within(0.004));

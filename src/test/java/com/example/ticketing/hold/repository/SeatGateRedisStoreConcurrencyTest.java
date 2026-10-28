@@ -1,23 +1,20 @@
 package com.example.ticketing.hold.repository;
 
+import static java.util.function.Function.identity;
+import static java.util.stream.Collectors.counting;
+import static java.util.stream.Collectors.groupingBy;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.example.ticketing.hold.domain.GateHold;
 import com.example.ticketing.hold.domain.GateResult;
+import com.example.ticketing.support.Concurrently;
+import com.example.ticketing.support.Concurrently.Results;
+import com.example.ticketing.support.Fixtures;
 import com.example.ticketing.support.IntegrationTest;
-import com.example.ticketing.support.RedisKeyCleaner;
+import com.example.ticketing.support.TestRedis;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ThreadLocalRandom;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -28,56 +25,29 @@ class SeatGateRedisStoreConcurrencyTest {
     private static final int THREAD_COUNT = 200;
 
     @Autowired
-    private SeatGateRedisStore gate;
+    private SeatGateRedisStore seatGateRedisStore;
     @Autowired
-    private RedisKeyCleaner cleaner;
-
-    private final long pid = ThreadLocalRandom.current().nextLong(1_000_000_000_000L, 9_000_000_000_000L);
-
-    @AfterEach
-    void tearDown() {
-        cleaner.clean(pid);
-    }
+    private Fixtures fixtures;
+    @Autowired
+    private TestRedis testRedis;
 
     @Test
-    @DisplayName("같은 2석에 200명이 동시에 tryHold하면 OK는 정확히 1, 나머지는 SEAT_TAKEN")
-    void sameSeatsTwoHundredUsers() throws InterruptedException {
+    @DisplayName("같은 2석에 200명이 동시에 잡으면 한 명만 성공하고 나머지는 SEAT_TAKEN이다")
+    void sameSeatsTwoHundredUsers() {
+        long pid = fixtures.redisOnlyPerformanceId();
         List<Long> seats = List.of(101L, 102L);
-        ExecutorService executor = Executors.newFixedThreadPool(THREAD_COUNT);
-        CountDownLatch ready = new CountDownLatch(THREAD_COUNT);
-        CountDownLatch start = new CountDownLatch(1);
-        CountDownLatch done = new CountDownLatch(THREAD_COUNT);
-        Map<GateResult, AtomicInteger> results = new ConcurrentHashMap<>();
-        List<Throwable> unexpected = new CopyOnWriteArrayList<>();
 
-        for (int i = 0; i < THREAD_COUNT; i++) {
-            long userId = i + 1;
-            executor.submit(() -> {
-                try {
-                    ready.countDown();
-                    start.await();
-                    GateResult result = gate.tryHold(
-                            new GateHold(userId, pid, "t-" + userId, seats), Duration.ofMinutes(5));
-                    results.computeIfAbsent(result, r -> new AtomicInteger()).incrementAndGet();
-                } catch (Throwable t) {
-                    unexpected.add(t);
-                } finally {
-                    done.countDown();
-                }
-            });
-        }
-        assertThat(ready.await(30, TimeUnit.SECONDS)).isTrue();
-        start.countDown();
-        boolean finished = done.await(30, TimeUnit.SECONDS);
-        executor.shutdownNow();
-        System.out.printf("[S3.1] 200명 동시 tryHold: %s, 예기치 못한 예외 %d%n", results, unexpected.size());
+        Results<GateResult> results = Concurrently.of(THREAD_COUNT)
+                .readyWithin(Duration.ofSeconds(30))
+                .within(Duration.ofSeconds(30))
+                .run(i -> seatGateRedisStore.tryHold(
+                        new GateHold(i + 1, pid, "t-" + (i + 1), seats), Duration.ofMinutes(5)));
 
-        assertThat(finished).isTrue();
-        unexpected.forEach(Throwable::printStackTrace);
-        assertThat(unexpected).isEmpty();
-        assertThat(results.get(GateResult.ok()).get()).isEqualTo(1);
-        assertThat(results).containsOnlyKeys(GateResult.ok(), GateResult.seatTaken(101L));
-        assertThat(results.get(GateResult.seatTaken(101L)).get()).isEqualTo(THREAD_COUNT - 1);
-        assertThat(cleaner.keys(pid)).hasSize(3);
+        assertThat(results.errors()).isEmpty();
+        Map<GateResult, Long> counts = results.values().stream().collect(groupingBy(identity(), counting()));
+        assertThat(counts.get(GateResult.ok())).isEqualTo(1);
+        assertThat(counts).containsOnlyKeys(GateResult.ok(), GateResult.seatTaken(101L));
+        assertThat(counts.get(GateResult.seatTaken(101L))).isEqualTo(THREAD_COUNT - 1);
+        assertThat(testRedis.keys(pid)).hasSize(3);
     }
 }

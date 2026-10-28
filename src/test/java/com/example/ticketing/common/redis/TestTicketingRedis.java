@@ -8,7 +8,7 @@ public final class TestTicketingRedis {
     private TestTicketingRedis() {
     }
 
-    public static TicketingRedis connectTo(String host, int port, TicketingProperties props) {
-        return new TicketingRedis(host, port, props);
+    public static TicketingRedis connectTo(String host, int port, TicketingProperties properties) {
+        return new TicketingRedis(host, port, properties);
     }
 }

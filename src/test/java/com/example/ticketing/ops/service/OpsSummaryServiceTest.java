@@ -10,8 +10,6 @@ import com.example.ticketing.common.metrics.Metrics;
 import com.example.ticketing.common.metrics.Metrics.OutboxResult;
 import com.example.ticketing.common.metrics.Metrics.Tag;
 import com.example.ticketing.common.redis.RedisKeys;
-import com.example.ticketing.common.redis.TestTicketingRedis;
-import com.example.ticketing.common.redis.TicketingRedis;
 import com.example.ticketing.ops.dto.OpsSummary;
 import com.example.ticketing.ops.dto.OpsSummary.FailedTask;
 import com.example.ticketing.ops.dto.OpsSummary.StalePayment;
@@ -19,10 +17,9 @@ import com.example.ticketing.ops.repository.OpsJdbcRepository;
 import com.example.ticketing.ops.repository.OpsRedisStore;
 import com.example.ticketing.support.Fixtures;
 import com.example.ticketing.support.IntegrationTest;
-import com.example.ticketing.support.RedisKeyCleaner;
+import com.example.ticketing.support.TestDb;
+import com.example.ticketing.support.TestRedis;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
-import java.io.IOException;
-import java.net.ServerSocket;
 import java.sql.PreparedStatement;
 import java.sql.Statement;
 import java.util.ArrayList;
@@ -44,24 +41,22 @@ import org.springframework.jdbc.support.KeyHolder;
 class OpsSummaryServiceTest {
 
     @Autowired
-    private OpsSummaryService service;
+    private OpsSummaryService opsSummaryService;
     @Autowired
     private Fixtures fixtures;
     @Autowired
-    private JdbcTemplate jdbc;
+    private TestDb db;
     @Autowired
-    private TicketingRedis bookingRedis;
+    private TestRedis testRedis;
     @Autowired
-    private TicketingProperties props;
+    private JdbcTemplate jdbcTemplate;
     @Autowired
-    private RedisKeyCleaner redisKeyCleaner;
+    private TicketingProperties properties;
 
-    private final List<Long> performances = new ArrayList<>();
     private final List<Long> holds = new ArrayList<>();
     private final List<Long> payments = new ArrayList<>();
     private final List<Long> bookings = new ArrayList<>();
     private final List<Long> tasks = new ArrayList<>();
-    private TicketingRedis deadRedis;
 
     @AfterEach
     void tearDown() {
@@ -69,17 +64,13 @@ class OpsSummaryServiceTest {
         delete("booking", bookings);
         delete("booking_payment", payments);
         delete("seat_hold", holds);
-        performances.forEach(redisKeyCleaner::clean);
-        if (deadRedis != null) {
-            deadRedis.destroy();
-        }
     }
 
     @Test
-    @DisplayName("좌석·선점·결제·예매·Outbox를 상태별로 세고, 사람이 볼 목록과 Redis 칸을 채운다")
+    @DisplayName("상태가 섞인 회차를 요약하면 상태별 수와 살펴볼 목록, Redis 칸을 채운다")
     void countsMixedPerformance() {
         Scenario s = mixedPerformance();
-        StringRedisTemplate redis = bookingRedis.template();
+        StringRedisTemplate redis = testRedis.template();
         long now = System.currentTimeMillis();
         redis.opsForZSet().add(RedisKeys.queueWaiting(s.pid), "w1", now);
         redis.opsForZSet().add(RedisKeys.queueWaiting(s.pid), "w2", now + 1);
@@ -90,7 +81,7 @@ class OpsSummaryServiceTest {
         // 이웃 회차의 게이트 키는 세지 않는다
         redis.opsForValue().set(RedisKeys.seat(s.otherPid, 1L), "token");
 
-        OpsSummary summary = service.summarize(s.pid);
+        OpsSummary summary = opsSummaryService.summarize(s.pid);
 
         assertThat(summary.performance().performanceId()).isEqualTo(s.pid);
         assertThat(summary.performance().showTitle()).startsWith("테스트 공연");
@@ -143,17 +134,17 @@ class OpsSummaryServiceTest {
     }
 
     @Test
-    @DisplayName("Redis를 못 읽으면 redisAvailable=false이고 Redis 칸만 null, DB 집계와 카운터는 그대로 준다")
-    void redisFailureLeavesOnlyRedisCellsEmpty() throws IOException {
+    @DisplayName("Redis를 못 읽으면 Redis 칸만 비우고 DB 집계와 카운터는 그대로 준다")
+    void redisFailureLeavesOnlyRedisCellsEmpty() {
         Scenario s = mixedPerformance();
-        deadRedis = TestTicketingRedis.connectTo("localhost", closedPort(), props);
         SimpleMeterRegistry meters = new SimpleMeterRegistry();
         meters.counter(Metrics.HOLD_GATE, Tag.RESULT, "ok").increment(3);
         meters.counter(Metrics.HOLD_GATE, Tag.RESULT, "seat_taken").increment();
         meters.counter(Metrics.HOLD_EXPIRED).increment(2);
         meters.counter(Metrics.OUTBOX_TASK, Tag.TYPE, "TICKET_ISSUED", Tag.RESULT, OutboxResult.DONE).increment(4);
-        OpsSummaryService broken = new OpsSummaryService(new OpsJdbcRepository(new NamedParameterJdbcTemplate(jdbc)),
-                new OpsRedisStore(deadRedis), new OpsMetricsReader(meters), System::nanoTime, props);
+        OpsSummaryService broken = new OpsSummaryService(
+                new OpsJdbcRepository(new NamedParameterJdbcTemplate(jdbcTemplate)),
+                new OpsRedisStore(testRedis.dead()), new OpsMetricsReader(meters), System::nanoTime, properties);
 
         OpsSummary summary = broken.summarize(s.pid);
 
@@ -176,9 +167,9 @@ class OpsSummaryServiceTest {
     }
 
     @Test
-    @DisplayName("없는 회차는 PERFORMANCE_NOT_FOUND")
+    @DisplayName("없는 회차를 요약하면 PERFORMANCE_NOT_FOUND로 거절한다")
     void unknownPerformance() {
-        assertThatThrownBy(() -> service.summarize(Long.MAX_VALUE - 7))
+        assertThatThrownBy(() -> opsSummaryService.summarize(Long.MAX_VALUE - 7))
                 .isInstanceOf(ApiException.class)
                 .extracting(e -> ((ApiException) e).getCode())
                 .isEqualTo(ErrorCode.PERFORMANCE_NOT_FOUND);
@@ -186,9 +177,9 @@ class OpsSummaryServiceTest {
 
     // 좌석 10개: HELD 3(선점 HELD 2석, PAYING 1석), SOLD 2(확정 1건), 나머지 빈자리
     private Scenario mixedPerformance() {
-        long pid = track(fixtures.newPerformance(1, 2, 5));
-        long otherPid = track(fixtures.newPerformance(1, 1, 2));
-        List<Long> seats = jdbc.queryForList("SELECT id FROM seat WHERE performance_id = ? ORDER BY id", Long.class, pid);
+        long pid = fixtures.newPerformance(1, 2, 5);
+        long otherPid = fixtures.newPerformance(1, 1, 2);
+        List<Long> seats = db.seatIds(pid);
         long user = fixtures.newUser();
 
         long held = hold(pid, user, "HELD", 2, 300_000);
@@ -224,11 +215,6 @@ class OpsSummaryServiceTest {
         return new Scenario(pid, otherPid, seats, failedTask, cancelledPayment, refunding, stalePayment);
     }
 
-    private long track(long pid) {
-        performances.add(pid);
-        return pid;
-    }
-
     private long hold(long pid, long user, String status, int seatCount, int amount) {
         long id = insert("""
                 INSERT INTO seat_hold (performance_id, user_id, hold_token, status, seat_count, total_amount,
@@ -241,7 +227,7 @@ class OpsSummaryServiceTest {
 
     private void markSeats(long holdId, String status, Long... seatIds) {
         for (Long seatId : seatIds) {
-            jdbc.update("UPDATE seat SET status = ?, hold_id = ? WHERE id = ?", status, holdId, seatId);
+            jdbcTemplate.update("UPDATE seat SET status = ?, hold_id = ? WHERE id = ?", status, holdId, seatId);
         }
     }
 
@@ -280,7 +266,7 @@ class OpsSummaryServiceTest {
 
     private long insert(String sql, Object... args) {
         KeyHolder keys = new GeneratedKeyHolder();
-        jdbc.update(connection -> {
+        jdbcTemplate.update(connection -> {
             PreparedStatement ps = connection.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS);
             for (int i = 0; i < args.length; i++) {
                 ps.setObject(i + 1, args[i]);
@@ -291,14 +277,8 @@ class OpsSummaryServiceTest {
     }
 
     private void delete(String table, List<Long> ids) {
-        ids.forEach(id -> jdbc.update("DELETE FROM " + table + " WHERE id = ?", id));
+        ids.forEach(id -> jdbcTemplate.update("DELETE FROM " + table + " WHERE id = ?", id));
         ids.clear();
-    }
-
-    private static int closedPort() throws IOException {
-        try (ServerSocket socket = new ServerSocket(0)) {
-            return socket.getLocalPort();
-        }
     }
 
     private record Scenario(long pid, long otherPid, List<Long> seats, long failedTask, long cancelledPayment,

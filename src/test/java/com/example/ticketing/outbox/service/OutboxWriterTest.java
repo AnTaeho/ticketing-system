@@ -39,7 +39,7 @@ class OutboxWriterTest {
     }
 
     @Test
-    @DisplayName("트랜잭션 안에서는 PENDING·attempt 0·next_attempt_at = NOW로 기록하고, 롤백되면 같이 사라진다")
+    @DisplayName("트랜잭션 안에서 쓰면 바로 집을 수 있는 작업으로 남고 롤백되면 같이 사라진다")
     void writesInsideTransaction() {
         long aggregateId = randomAggregateId();
         TransactionTemplate tx = new TransactionTemplate(transactionManager);
@@ -61,6 +61,7 @@ class OutboxWriterTest {
             outboxWriter.write(OutboxTaskType.TICKET_ISSUED, rolledBack, new TicketIssuedPayload(rolledBack));
             s.setRollbackOnly();
         });
+
         assertThat(count(rolledBack)).isZero();
         jdbcTemplate.update("DELETE FROM outbox_task WHERE id = ?", id);
     }
