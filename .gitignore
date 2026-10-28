@@ -1,4 +1,5 @@
 *.md
+!docs/CONVENTIONS.md
 
 ### Sensitive config (use application-local.yml.example as template) ###
 src/main/resources/application-local.yml
