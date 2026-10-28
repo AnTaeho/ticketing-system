@@ -10,6 +10,7 @@ import com.example.ticketing.booking.service.BookingViewReader;
 import com.example.ticketing.common.config.TicketingProperties;
 import com.example.ticketing.common.metrics.Metrics;
 import com.example.ticketing.common.metrics.Metrics.Tag;
+import com.example.ticketing.common.redis.InstanceId;
 import com.example.ticketing.common.redis.RedisKeys;
 import com.example.ticketing.common.redis.SchedulerLease;
 import com.example.ticketing.common.redis.TestTicketingRedis;
@@ -301,8 +302,8 @@ class OrphanGateKeyReconcilerTest {
             }
         });
         List<OrphanGateKeyReconciler> instances = List.of(
-                reconciler(new SchedulerLease(bookingRedis), slow, catalogOf(List.of(pid))),
-                reconciler(new SchedulerLease(bookingRedis), slow, catalogOf(List.of(pid))));
+                reconciler(new SchedulerLease(bookingRedis, new InstanceId()), slow, catalogOf(List.of(pid))),
+                reconciler(new SchedulerLease(bookingRedis, new InstanceId()), slow, catalogOf(List.of(pid))));
         ExecutorService pool = Executors.newFixedThreadPool(instances.size());
         CountDownLatch start = new CountDownLatch(1);
         try {
@@ -340,7 +341,7 @@ class OrphanGateKeyReconcilerTest {
         setAged(notOpenKey, UUID.randomUUID().toString());
         List<Long> mine = List.of(open, notOpen);
         // 새 인스턴스라 캐시 없이 DB로 예매 중 회차를 고른다. 이 테스트의 회차만 남겨 다른 테스트 키를 건드리지 않는다
-        SeatCatalog freshCatalog = new SeatCatalog(jdbcTemplate, properties) {
+        SeatCatalog freshCatalog = new SeatCatalog(jdbcTemplate, properties, System::nanoTime) {
             @Override
             public List<Long> openPerformanceIds() {
                 return super.openPerformanceIds().stream().filter(mine::contains).toList();
@@ -421,7 +422,7 @@ class OrphanGateKeyReconcilerTest {
 
     // 운영 SeatCatalog는 예매 중 회차 목록을 10초 묶어 두므로 방금 만든 회차가 빠질 수 있다
     private SeatCatalog catalogOf(List<Long> openIds) {
-        return new SeatCatalog(jdbcTemplate, properties) {
+        return new SeatCatalog(jdbcTemplate, properties, System::nanoTime) {
             @Override
             public List<Long> openPerformanceIds() {
                 return openIds;
@@ -435,7 +436,8 @@ class OrphanGateKeyReconcilerTest {
                 new TicketingProperties.Gate(false, p.gate().fallbackMaxConcurrency()), p.queue(), p.seatmap(),
                 p.outbox(), p.ops(), p.pg(), p.fakePg());
         return new SeatHoldService(seatCatalog, seatHoldTransaction, seatHoldRepository, seatRepository,
-                paymentRepository, dbClock, mock(SeatGateRedisStore.class), queueService, gateOff, meterRegistry);
+                paymentRepository, dbClock, mock(SeatGateRedisStore.class), queueService, System::nanoTime, gateOff,
+                meterRegistry);
     }
 
     private long newPerformance() {

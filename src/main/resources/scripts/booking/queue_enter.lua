@@ -1,7 +1,6 @@
--- KEYS[1] = processing, KEYS[2] = waiting, KEYS[3] = 사용자 키
--- ARGV[1] = 새 member, ARGV[2] = now(ms), ARGV[3] = processing 만료 시각(ms), ARGV[4] = waiting 점수(진입 시각 ms)
--- ARGV[5] = 정원, ARGV[6] = 사용자 키 TTL(ms, waiting 토큰 수명과 같다)
--- 반환: {상태, member}
+-- KEYS: [1] processing, [2] waiting, [3] 사용자 키
+-- ARGV: [1] 새 member, [2] now(ms), [3] processing 만료 시각(ms), [4] waiting 점수(진입 시각 ms), [5] 정원, [6] 사용자 키 TTL(ms, waiting 토큰 수명과 같다)
+-- 반환: {'PROCESSING' | 'WAITING', member}. 살아 있는 옛 토큰이 있으면 그 토큰과 상태
 local now = tonumber(ARGV[2])
 local old = redis.call('GET', KEYS[3])
 if old then

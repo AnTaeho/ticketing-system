@@ -18,6 +18,7 @@ import com.example.ticketing.seat.service.SeatCatalog;
 import com.example.ticketing.support.Fixtures;
 import com.example.ticketing.support.IntegrationTest;
 import com.example.ticketing.support.RedisKeyCleaner;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -232,9 +233,11 @@ class QueueServiceTest {
         long opensInAnHour = track(fixtures.newPerformance(show, now.plusHours(1), now.plusDays(1), 1, 1, 1));
         long openedAnHourAgo = track(fixtures.newPerformance(show, now.minusHours(1), now.plusDays(1), 1, 1, 1));
         QueueService dbAhead = new QueueService(repository, seatCatalog,
-                TestDbClock.withDbShift(jdbcTemplate, Duration.ofHours(2)), props);
+                TestDbClock.withDbShift(jdbcTemplate, Duration.ofHours(2)), Clock.systemDefaultZone(), System::nanoTime,
+                props);
         QueueService dbBehind = new QueueService(repository, seatCatalog,
-                TestDbClock.withDbShift(jdbcTemplate, Duration.ofHours(-2)), props);
+                TestDbClock.withDbShift(jdbcTemplate, Duration.ofHours(-2)), Clock.systemDefaultZone(), System::nanoTime,
+                props);
 
         assertThat(dbAhead.enter(opensInAnHour, USER_BASE + 1).status()).isEqualTo(QueueTokenStatus.PROCESSING);
         assertThatThrownBy(() -> dbBehind.enter(openedAnHourAgo, USER_BASE + 2))
@@ -329,7 +332,8 @@ class QueueServiceTest {
     }
 
     private QueueService serviceWithCapacity(int capacity) {
-        return new QueueService(repository, seatCatalog, dbClock, QueueTestProps.withCapacity(props, capacity));
+        return new QueueService(repository, seatCatalog, dbClock, Clock.systemDefaultZone(), System::nanoTime,
+                QueueTestProps.withCapacity(props, capacity));
     }
 
     private long openPerformance() {

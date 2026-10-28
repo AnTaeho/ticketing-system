@@ -11,10 +11,6 @@ import org.springframework.data.repository.query.Param;
 
 public interface SeatRepository extends JpaRepository<Seat, Long> {
 
-    List<Seat> findByPerformanceId(Long performanceId);
-
-    long countByPerformanceId(Long performanceId);
-
     List<Seat> findByPerformanceIdAndHoldIdOrderByIdAsc(Long performanceId, Long holdId);
 
     // 빈자리이거나 선점 기한이 지난 좌석만 잡는다. 영향 행 수가 고른 좌석 수와 다르면 호출자가 롤백한다

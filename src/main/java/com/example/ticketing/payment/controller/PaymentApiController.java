@@ -1,6 +1,7 @@
 package com.example.ticketing.payment.controller;
 
 import com.example.ticketing.common.web.CurrentUser;
+import com.example.ticketing.common.web.HttpNames;
 import com.example.ticketing.payment.dto.PayRequest;
 import com.example.ticketing.payment.dto.PaymentResponse;
 import com.example.ticketing.payment.dto.PaymentStatusView;
@@ -19,16 +20,14 @@ import org.springframework.web.bind.annotation.RestController;
 @RequiredArgsConstructor
 public class PaymentApiController {
 
-    public static final String IDEMPOTENCY_KEY_HEADER = "Idempotency-Key";
-
     private final PaymentService paymentService;
     private final PgScenarioHeaderReader scenarioHeaderReader;
 
     // 확정은 200, 결과를 아직 모르면 202. 실패는 예매 예외 처리기가 402·409로 바꾼다
     @PostMapping("/api/holds/{holdId}/payments")
     public ResponseEntity<PaymentResponse> pay(@CurrentUser Long userId, @PathVariable long holdId,
-                                               @RequestHeader(IDEMPOTENCY_KEY_HEADER) String idempotencyKey,
-                                               @RequestHeader(value = PgScenarioHeaderReader.HEADER, required = false)
+                                               @RequestHeader(HttpNames.IDEMPOTENCY_KEY_HEADER) String idempotencyKey,
+                                               @RequestHeader(value = HttpNames.PG_SCENARIO_HEADER, required = false)
                                                String scenarioHeader,
                                                @RequestBody(required = false) PayRequest request) {
         PaymentResponse response = paymentService.pay(userId, holdId, idempotencyKey,

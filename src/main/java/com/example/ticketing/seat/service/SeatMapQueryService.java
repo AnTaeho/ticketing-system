@@ -4,9 +4,9 @@ import com.example.ticketing.common.config.TicketingProperties;
 import com.example.ticketing.common.error.ApiException;
 import com.example.ticketing.common.error.ErrorCode;
 import com.example.ticketing.common.metrics.Metrics.RebuildSource;
-import com.example.ticketing.common.redis.SchedulerLease;
+import com.example.ticketing.common.redis.InstanceId;
+import com.example.ticketing.common.redis.RedisFailures;
 import com.example.ticketing.seat.repository.SeatMapRedisStore;
-import io.lettuce.core.RedisException;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Duration;
@@ -16,8 +16,8 @@ import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.LongSupplier;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Service;
 
 // 로컬 캐시 → Redis 스냅샷 → (없으면) 리스를 잡은 한 요청만 DB 빌드. Redis 장애 때는 인스턴스 안에서 회차당 초당 한 번만 DB를 읽는다
@@ -32,6 +32,7 @@ public class SeatMapQueryService {
     private final SeatMapBuilder builder;
     private final SeatMapRedisStore store;
     private final String instanceId;
+    private final LongSupplier nanoClock;
     private final long localCacheNanos;
     private final Duration leaseTtl;
     private final Duration snapshotTtl;
@@ -44,12 +45,13 @@ public class SeatMapQueryService {
     private final AtomicLong leaseSeq = new AtomicLong();
 
     public SeatMapQueryService(SeatCatalog seatCatalog, SeatMapBuilder builder, SeatMapRedisStore store,
-                               SchedulerLease schedulerLease, TicketingProperties properties,
+                               InstanceId instanceId, LongSupplier nanoClock, TicketingProperties properties,
                                MeterRegistry meterRegistry) {
         this.seatCatalog = seatCatalog;
         this.builder = builder;
         this.store = store;
-        this.instanceId = schedulerLease.instanceId();
+        this.instanceId = instanceId.value();
+        this.nanoClock = nanoClock;
         this.localCacheNanos = properties.seatmap().localCache().toNanos();
         this.leaseTtl = properties.seatmap().leaseTtl();
         this.snapshotTtl = properties.seatmap().snapshotTtl();
@@ -60,13 +62,16 @@ public class SeatMapQueryService {
     public String get(long performanceId) {
         seatCatalog.performance(performanceId);
         Cached local = localCache.get(performanceId);
-        if (local != null && local.isFresh(localCacheNanos)) {
+        if (isFresh(local)) {
             return local.json();
         }
         String json;
         try {
             json = store.get(performanceId);
-        } catch (DataAccessException | RedisException e) {
+        } catch (RuntimeException e) {
+            if (!RedisFailures.isFailure(e)) {
+                throw e;
+            }
             return onRedisFailure(performanceId, e);
         }
         if (isEmpty(json)) {
@@ -81,7 +86,10 @@ public class SeatMapQueryService {
         boolean leased;
         try {
             leased = store.tryLease(performanceId, owner, leaseTtl);
-        } catch (DataAccessException | RedisException e) {
+        } catch (RuntimeException e) {
+            if (!RedisFailures.isFailure(e)) {
+                throw e;
+            }
             return onRedisFailure(performanceId, e);
         }
         if (leased) {
@@ -92,7 +100,10 @@ public class SeatMapQueryService {
             String json;
             try {
                 json = store.get(performanceId);
-            } catch (DataAccessException | RedisException e) {
+            } catch (RuntimeException e) {
+                if (!RedisFailures.isFailure(e)) {
+                    throw e;
+                }
                 return onRedisFailure(performanceId, e);
             }
             if (!isEmpty(json)) {
@@ -109,7 +120,10 @@ public class SeatMapQueryService {
             String saved;
             try {
                 saved = store.get(performanceId);
-            } catch (DataAccessException | RedisException e) {
+            } catch (RuntimeException e) {
+                if (!RedisFailures.isFailure(e)) {
+                    throw e;
+                }
                 return onRedisFailure(performanceId, e);
             }
             if (!isEmpty(saved)) {
@@ -118,14 +132,20 @@ public class SeatMapQueryService {
             String json = buildOrUnavailable(performanceId, missRebuilds);
             try {
                 store.put(performanceId, json, snapshotTtl);
-            } catch (DataAccessException | RedisException e) {
+            } catch (RuntimeException e) {
+                if (!RedisFailures.isFailure(e)) {
+                    throw e;
+                }
                 log.debug("[booking seatmap] 회차 {} 스냅샷 저장 실패: {}", performanceId, e.toString());
             }
             return cache(performanceId, json);
         } finally {
             try {
                 store.releaseLease(performanceId, owner);
-            } catch (DataAccessException | RedisException e) {
+            } catch (RuntimeException e) {
+                if (!RedisFailures.isFailure(e)) {
+                    throw e;
+                }
                 log.debug("[booking seatmap] 회차 {} 리스 해제 실패, TTL로 풀린다: {}", performanceId, e.toString());
             }
         }
@@ -135,7 +155,7 @@ public class SeatMapQueryService {
     private String onRedisFailure(long performanceId, RuntimeException cause) {
         log.debug("[booking seatmap] 회차 {} Redis 실패, 로컬 캐시·DB로 넘어간다: {}", performanceId, cause.toString());
         Cached stale = localCache.get(performanceId);
-        if (stale != null && stale.isFresh(localCacheNanos)) {
+        if (isFresh(stale)) {
             return stale.json();
         }
         CompletableFuture<String> mine = new CompletableFuture<>();
@@ -163,10 +183,10 @@ public class SeatMapQueryService {
     private String fallbackBuild(long performanceId) {
         // 앞선 빌드가 막 끝나 자리를 비웠을 수 있다. 그 결과가 로컬 캐시에 있으면 다시 읽지 않는다
         Cached latest = localCache.get(performanceId);
-        if (latest != null && latest.isFresh(localCacheNanos)) {
+        if (isFresh(latest)) {
             return latest.json();
         }
-        long now = System.nanoTime();
+        long now = nanoClock.getAsLong();
         Long lastAttempt = lastFallbackAttemptNanos.get(performanceId);
         if (lastAttempt != null && now - lastAttempt < localCacheNanos) {
             throw unavailable(performanceId);
@@ -189,8 +209,12 @@ public class SeatMapQueryService {
     }
 
     private String cache(long performanceId, String json) {
-        localCache.put(performanceId, new Cached(json, System.nanoTime()));
+        localCache.put(performanceId, new Cached(json, nanoClock.getAsLong()));
         return json;
+    }
+
+    private boolean isFresh(Cached cached) {
+        return cached != null && nanoClock.getAsLong() - cached.readAtNanos() < localCacheNanos;
     }
 
     private static String await(CompletableFuture<String> running) {
@@ -222,9 +246,5 @@ public class SeatMapQueryService {
     }
 
     private record Cached(String json, long readAtNanos) {
-
-        boolean isFresh(long ttlNanos) {
-            return System.nanoTime() - readAtNanos < ttlNanos;
-        }
     }
 }

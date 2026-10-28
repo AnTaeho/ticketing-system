@@ -10,8 +10,4 @@ public record PgResult(PgStatus status, String pgTxId, String detail) {
     public static PgResult unknown(String detail) {
         return new PgResult(PgStatus.UNKNOWN, null, detail);
     }
-
-    public boolean is(PgStatus expected) {
-        return status == expected;
-    }
 }

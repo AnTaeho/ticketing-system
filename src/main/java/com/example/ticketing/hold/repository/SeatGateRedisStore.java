@@ -3,10 +3,11 @@ package com.example.ticketing.hold.repository;
 import com.example.ticketing.common.metrics.Metrics;
 import com.example.ticketing.common.metrics.Metrics.ReflectOp;
 import com.example.ticketing.common.metrics.Metrics.Tag;
+import com.example.ticketing.common.redis.RedisFailures;
 import com.example.ticketing.common.redis.RedisKeys;
+import com.example.ticketing.common.redis.RedisScripts;
 import com.example.ticketing.common.redis.TicketingRedis;
 import com.example.ticketing.hold.domain.GateResult;
-import io.lettuce.core.RedisException;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Duration;
@@ -14,22 +15,13 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.core.io.ClassPathResource;
-import org.springframework.dao.DataAccessException;
 import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Component;
 
 // 이미 잡힌 좌석 요청을 DB 앞에서 거절하는 게이트. 판정은 DB가 하고 여기 키는 빠른 거절용이다
 @Slf4j
 @Component
 public class SeatGateRedisStore {
-
-    @SuppressWarnings("rawtypes")
-    private static final DefaultRedisScript<List> HOLD = script("hold.lua", List.class);
-    private static final DefaultRedisScript<Long> RELEASE = script("release.lua", Long.class);
-    private static final DefaultRedisScript<Long> EXTEND = script("extend.lua", Long.class);
-    private static final DefaultRedisScript<Long> CONFIRM = script("confirm.lua", Long.class);
 
     private final StringRedisTemplate redis;
     private final Counter releaseFailure;
@@ -56,29 +48,30 @@ public class SeatGateRedisStore {
         keys.add(RedisKeys.userHold(performanceId, userId));
         sortedSeatIds.forEach(seatId -> keys.add(RedisKeys.seat(performanceId, seatId)));
         sortedSeatIds.forEach(seatId -> keys.add(RedisKeys.rehold(performanceId, userId, seatId)));
-        List<?> reply = redis.execute(HOLD, keys, holdToken, String.valueOf(ttl.toMillis()), String.valueOf(n));
+        List<?> reply = redis.execute(RedisScripts.HOLD, keys, holdToken, String.valueOf(ttl.toMillis()),
+                String.valueOf(n));
         return GateResult.fromScript(reply);
     }
 
     // userhold 키와 좌석 키 중 값이 holdToken인 것만 지운다. 반환: 지운 키 수
     public long release(long performanceId, long userId, List<Long> seatIds, String holdToken) {
-        return redis.execute(RELEASE, userHoldAndSeatKeys(performanceId, userId, seatIds), holdToken);
+        return redis.execute(RedisScripts.RELEASE, userHoldAndSeatKeys(performanceId, userId, seatIds), holdToken);
     }
 
     // 예매 취소용. 확정 때 userhold는 이미 지웠으므로 좌석 키만 지운다
     public long releaseSeatsOnly(long performanceId, List<Long> seatIds, String holdToken) {
-        return redis.execute(RELEASE, seatKeys(performanceId, seatIds), holdToken);
+        return redis.execute(RedisScripts.RELEASE, seatKeys(performanceId, seatIds), holdToken);
     }
 
     // 반환: 연장한 키 수
     public long extend(long performanceId, long userId, List<Long> seatIds, String holdToken, Duration ttl) {
-        return redis.execute(EXTEND, userHoldAndSeatKeys(performanceId, userId, seatIds),
+        return redis.execute(RedisScripts.EXTEND, userHoldAndSeatKeys(performanceId, userId, seatIds),
                 holdToken, String.valueOf(ttl.toMillis()));
     }
 
     // 좌석 키는 gateCloseAt에 만료되게 바꾸고 userhold는 지운다. 반환: 처리한 좌석 키 수
     public long confirm(long performanceId, long userId, List<Long> seatIds, String holdToken, Instant gateCloseAt) {
-        return redis.execute(CONFIRM, userHoldAndSeatKeys(performanceId, userId, seatIds),
+        return redis.execute(RedisScripts.CONFIRM, userHoldAndSeatKeys(performanceId, userId, seatIds),
                 holdToken, String.valueOf(gateCloseAt.toEpochMilli()));
     }
 
@@ -118,7 +111,10 @@ public class SeatGateRedisStore {
     private void quietly(String op, Counter failure, long performanceId, Runnable action) {
         try {
             action.run();
-        } catch (DataAccessException | RedisException e) {
+        } catch (RuntimeException e) {
+            if (!RedisFailures.isFailure(e)) {
+                throw e;
+            }
             failure.increment();
             log.warn("[booking gate] Redis 반영 실패 op={}, performanceId={}: {}", op, performanceId, e.toString());
         }
@@ -133,12 +129,5 @@ public class SeatGateRedisStore {
 
     private static List<String> seatKeys(long performanceId, List<Long> seatIds) {
         return seatIds.stream().map(seatId -> RedisKeys.seat(performanceId, seatId)).toList();
-    }
-
-    private static <T> DefaultRedisScript<T> script(String name, Class<T> resultType) {
-        DefaultRedisScript<T> script = new DefaultRedisScript<>();
-        script.setLocation(new ClassPathResource("scripts/booking/" + name));
-        script.setResultType(resultType);
-        return script;
     }
 }

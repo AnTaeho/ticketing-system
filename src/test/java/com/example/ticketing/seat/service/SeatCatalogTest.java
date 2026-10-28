@@ -137,7 +137,7 @@ class SeatCatalogTest {
     @Test
     @DisplayName("예매 중인 회차 목록은 open_at <= 지금 < starts_at인 회차만 담고 10초 동안 다시 읽지 않는다")
     void openPerformanceIds() {
-        SeatCatalog fresh = new SeatCatalog(jdbcTemplate, properties);
+        SeatCatalog fresh = new SeatCatalog(jdbcTemplate, properties, System::nanoTime);
         long showId = fixtures.newShow();
         LocalDateTime now = fixtures.dbNow();
         long open = fixtures.newPerformance(showId, now.minusMinutes(1), now.plusDays(1), 1, 1, 1);

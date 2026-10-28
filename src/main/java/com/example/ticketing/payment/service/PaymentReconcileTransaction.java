@@ -1,12 +1,13 @@
 package com.example.ticketing.payment.service;
 
 import com.example.ticketing.common.config.TicketingProperties;
+import com.example.ticketing.common.jdbc.RowCounts;
+import com.example.ticketing.common.text.Texts;
 import com.example.ticketing.common.time.DbClock;
-import com.example.ticketing.payment.domain.PaymentStatus;
+import com.example.ticketing.payment.domain.Payment;
 import com.example.ticketing.payment.repository.PaymentRepository;
 import java.time.Duration;
 import java.time.LocalDateTime;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
@@ -19,7 +20,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class PaymentReconcileTransaction {
 
     private static final String CLAIM_SQL = """
-            SELECT id, hold_id, order_id, status, created_at FROM booking_payment
+            SELECT id, order_id, created_at FROM booking_payment
              WHERE status IN ('REQUESTED', 'UNKNOWN') AND next_check_at <= NOW(6)
              ORDER BY id LIMIT :batch
              FOR UPDATE SKIP LOCKED""";
@@ -28,8 +29,6 @@ public class PaymentReconcileTransaction {
             UPDATE booking_payment
                SET next_check_at = DATE_ADD(NOW(6), INTERVAL :leaseMicros MICROSECOND), updated_at = NOW(6)
              WHERE id IN (:ids)""";
-
-    private static final String PAY_DEADLINE_SQL = "SELECT id, pay_deadline FROM seat_hold WHERE id IN (:holdIds)";
 
     private final NamedParameterJdbcTemplate jdbcTemplate;
     private final PaymentRepository paymentRepository;
@@ -51,8 +50,7 @@ public class PaymentReconcileTransaction {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public List<ClaimedPayment> claim(int batch) {
         List<Row> rows = jdbcTemplate.query(CLAIM_SQL, Map.of("batch", batch),
-                (rs, i) -> new Row(rs.getLong("id"), rs.getLong("hold_id"), rs.getString("order_id"),
-                        PaymentStatus.valueOf(rs.getString("status")),
+                (rs, i) -> new Row(rs.getLong("id"), rs.getString("order_id"),
                         rs.getObject("created_at", LocalDateTime.class)));
         if (rows.isEmpty()) {
             return List.of();
@@ -60,36 +58,28 @@ public class PaymentReconcileTransaction {
         List<Long> ids = rows.stream().map(Row::paymentId).toList();
         jdbcTemplate.update(LEASE_SQL, Map.of("ids", ids, "leaseMicros", claimLeaseMicros));
 
-        Map<Long, LocalDateTime> payDeadlines = new HashMap<>();
-        jdbcTemplate.query(PAY_DEADLINE_SQL, Map.of("holdIds", rows.stream().map(Row::holdId).toList()),
-                rs -> {
-                    payDeadlines.put(rs.getLong("id"), rs.getObject("pay_deadline", LocalDateTime.class));
-                });
-
         LocalDateTime now = dbClock.now();
         return rows.stream()
-                .map(r -> new ClaimedPayment(r.paymentId(), r.holdId(), r.orderId(), r.status(), r.createdAt(),
-                        payDeadlines.get(r.holdId()), !r.createdAt().plus(notFoundCancelAfter).isAfter(now)))
+                .map(r -> new ClaimedPayment(r.paymentId(), r.orderId(),
+                        !r.createdAt().plus(notFoundCancelAfter).isAfter(now)))
                 .toList();
     }
 
     // 끝난 결제는 건드리지 않는다. 바꿨으면 true
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public boolean reschedule(long paymentId, Duration delay, String lastError) {
-        return paymentRepository.reschedule(paymentId, micros(delay),
-                PaymentTransaction.abbreviate(lastError)) == 1;
+        return RowCounts.changedOne(paymentRepository.reschedule(paymentId, micros(delay),
+                Texts.abbreviate(lastError, Payment.MAX_LAST_ERROR)));
     }
 
     private static long micros(Duration duration) {
         return duration.toNanos() / 1_000;
     }
 
-    private record Row(long paymentId, long holdId, String orderId, PaymentStatus status,
-                       LocalDateTime createdAt) {
+    private record Row(long paymentId, String orderId, LocalDateTime createdAt) {
     }
 
     // notFoundCancelDue는 집은 시각(DB) 기준으로 결제 생성 후 not-found-cancel-after가 지났는지다
-    public record ClaimedPayment(long paymentId, long holdId, String orderId, PaymentStatus status,
-                                 LocalDateTime createdAt, LocalDateTime payDeadline, boolean notFoundCancelDue) {
+    public record ClaimedPayment(long paymentId, String orderId, boolean notFoundCancelDue) {
     }
 }

@@ -1,6 +1,6 @@
 package com.example.ticketing.user.controller;
 
-import com.example.ticketing.common.web.CurrentUserArgumentResolver;
+import com.example.ticketing.common.web.HttpNames;
 import com.example.ticketing.user.dto.DemoLoginRequest;
 import com.example.ticketing.user.dto.DemoLoginResult;
 import com.example.ticketing.user.service.DemoLoginService;
@@ -21,7 +21,7 @@ public class DemoLoginApiController {
     @PostMapping("/api/demo/login")
     public ResponseEntity<DemoLoginResult> login(@RequestBody DemoLoginRequest request) {
         DemoLoginResult result = demoLoginService.login(request.nickname());
-        ResponseCookie cookie = ResponseCookie.from(CurrentUserArgumentResolver.USER_ID_COOKIE,
+        ResponseCookie cookie = ResponseCookie.from(HttpNames.USER_ID_COOKIE,
                         String.valueOf(result.userId()))
                 .path("/")
                 .sameSite("Lax")

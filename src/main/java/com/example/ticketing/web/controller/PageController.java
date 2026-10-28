@@ -1,8 +1,7 @@
 package com.example.ticketing.web.controller;
 
 import com.example.ticketing.common.config.TicketingProperties;
-import org.springframework.core.env.Environment;
-import org.springframework.core.env.Profiles;
+import com.example.ticketing.common.web.DemoMode;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -16,9 +15,9 @@ public class PageController {
     // 결제 결과를 미리 고르는 시연 상자는 prod가 아닐 때만 그린다. 서버도 prod에서는 그 헤더를 무시한다
     private final boolean demoPg;
 
-    public PageController(TicketingProperties properties, Environment environment) {
+    public PageController(TicketingProperties properties, DemoMode demoMode) {
         this.properties = properties;
-        this.demoPg = !environment.acceptsProfiles(Profiles.of("prod"));
+        this.demoPg = demoMode.enabled();
     }
 
     @GetMapping({"/booking", "/booking/"})

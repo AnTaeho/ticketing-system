@@ -12,9 +12,6 @@ import org.springframework.web.method.support.ModelAndViewContainer;
 
 public class CurrentUserArgumentResolver implements HandlerMethodArgumentResolver {
 
-    public static final String USER_ID_HEADER = "X-User-Id";
-    public static final String USER_ID_COOKIE = "bk_uid";
-
     @Override
     public boolean supportsParameter(MethodParameter parameter) {
         Class<?> type = parameter.getParameterType();
@@ -25,14 +22,14 @@ public class CurrentUserArgumentResolver implements HandlerMethodArgumentResolve
     @Override
     public Object resolveArgument(MethodParameter parameter, ModelAndViewContainer mavContainer,
                                   NativeWebRequest webRequest, WebDataBinderFactory binderFactory) {
-        String header = webRequest.getHeader(USER_ID_HEADER);
+        String header = webRequest.getHeader(HttpNames.USER_ID_HEADER);
         if (header != null && !header.isBlank()) {
             return parseUserId(header);
         }
         HttpServletRequest request = webRequest.getNativeRequest(HttpServletRequest.class);
         if (request != null && request.getCookies() != null) {
             for (Cookie cookie : request.getCookies()) {
-                if (USER_ID_COOKIE.equals(cookie.getName())) {
+                if (HttpNames.USER_ID_COOKIE.equals(cookie.getName())) {
                     return parseUserId(cookie.getValue());
                 }
             }

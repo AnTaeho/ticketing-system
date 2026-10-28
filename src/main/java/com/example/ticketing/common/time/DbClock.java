@@ -4,7 +4,6 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.function.LongSupplier;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
@@ -16,19 +15,14 @@ public class DbClock {
 
     private final JdbcTemplate jdbcTemplate;
     private final Clock jvmClock;
-    private final LongSupplier nanoTime;
+    private final LongSupplier nanoClock;
     private final Object offsetLock = new Object();
     private volatile Offset offset;
 
-    @Autowired
-    public DbClock(JdbcTemplate jdbcTemplate) {
-        this(jdbcTemplate, Clock.systemDefaultZone(), System::nanoTime);
-    }
-
-    DbClock(JdbcTemplate jdbcTemplate, Clock jvmClock, LongSupplier nanoTime) {
+    public DbClock(JdbcTemplate jdbcTemplate, Clock jvmClock, LongSupplier nanoClock) {
         this.jdbcTemplate = jdbcTemplate;
         this.jvmClock = jvmClock;
-        this.nanoTime = nanoTime;
+        this.nanoClock = nanoClock;
     }
 
     public LocalDateTime now() {
@@ -42,12 +36,12 @@ public class DbClock {
 
     private Duration currentOffset() {
         Offset current = offset;
-        if (current != null && current.isFresh(nanoTime.getAsLong())) {
+        if (current != null && current.isFresh(nanoClock.getAsLong())) {
             return current.value();
         }
         synchronized (offsetLock) {
             current = offset;
-            if (current != null && current.isFresh(nanoTime.getAsLong())) {
+            if (current != null && current.isFresh(nanoClock.getAsLong())) {
                 return current.value();
             }
             offset = measure();
@@ -61,7 +55,7 @@ public class DbClock {
         LocalDateTime db = now();
         LocalDateTime after = LocalDateTime.now(jvmClock);
         LocalDateTime middle = before.plus(Duration.between(before, after).dividedBy(2));
-        return new Offset(Duration.between(middle, db), nanoTime.getAsLong());
+        return new Offset(Duration.between(middle, db), nanoClock.getAsLong());
     }
 
     private record Offset(Duration value, long measuredAtNanos) {

@@ -156,7 +156,7 @@ class HttpPgClientTest {
     @Test
     @DisplayName("base-url도 local.server.port도 없으면 호출하지 않고 UNKNOWN")
     void noBaseUrlIsUnknown() {
-        PgClient client = new HttpPgClient(withPg(""), new MockEnvironment(), jsonMapper);
+        PgClient client = new HttpPgClient(withPg(""), new MockEnvironment(), jsonMapper, System::nanoTime);
 
         PgResult result = client.query(newOrderId());
 
@@ -192,7 +192,7 @@ class HttpPgClientTest {
     }
 
     private PgClient clientFor(String baseUrl) {
-        return new HttpPgClient(withPg(baseUrl), environment, jsonMapper);
+        return new HttpPgClient(withPg(baseUrl), environment, jsonMapper, System::nanoTime);
     }
 
     private TicketingProperties withPg(String baseUrl) {
@@ -207,7 +207,7 @@ class HttpPgClientTest {
         Duration limit = properties.fakePg().slowDelay().plusSeconds(5);
         long deadline = System.nanoTime() + limit.toNanos();
         PgResult last = query.get();
-        while (last.is(PgStatus.PROCESSING) && System.nanoTime() < deadline) {
+        while (last.status() == PgStatus.PROCESSING && System.nanoTime() < deadline) {
             pause();
             last = query.get();
         }
@@ -217,7 +217,7 @@ class HttpPgClientTest {
     private PgResult awaitStatus(Supplier<PgResult> query, PgStatus expected) {
         long deadline = System.nanoTime() + Duration.ofSeconds(3).toNanos();
         PgResult last = query.get();
-        while (!last.is(expected) && System.nanoTime() < deadline) {
+        while (last.status() != expected && System.nanoTime() < deadline) {
             pause();
             last = query.get();
         }

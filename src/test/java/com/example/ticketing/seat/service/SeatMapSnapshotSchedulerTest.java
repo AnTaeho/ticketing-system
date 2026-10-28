@@ -5,6 +5,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.example.ticketing.common.config.TicketingProperties;
 import com.example.ticketing.common.metrics.Metrics;
 import com.example.ticketing.common.metrics.Metrics.Tag;
+import com.example.ticketing.common.redis.InstanceId;
+import com.example.ticketing.common.redis.RedisKeys;
 import com.example.ticketing.common.redis.TestTicketingRedis;
 import com.example.ticketing.common.redis.TicketingRedis;
 import com.example.ticketing.seat.repository.SeatMapRedisStore;
@@ -64,16 +66,18 @@ class SeatMapSnapshotSchedulerTest {
     @DisplayName("리스를 가진 인스턴스만 빌드한다. 리더는 다음 주기에 리스를 이어 가고, 다른 인스턴스는 건너뛴다")
     void onlyLeaseHolderBuilds() {
         long pid = openPerformance();
-        SeatMapSnapshotScheduler a = scheduler("instance-a", catalogOf(List.of(pid)));
-        SeatMapSnapshotScheduler b = scheduler("instance-b", catalogOf(List.of(pid)));
+        InstanceId instanceA = new InstanceId();
+        InstanceId instanceB = new InstanceId();
+        SeatMapSnapshotScheduler a = scheduler(instanceA, catalogOf(List.of(pid)));
+        SeatMapSnapshotScheduler b = scheduler(instanceB, catalogOf(List.of(pid)));
         double before = rebuilds();
 
         a.snapshot();
         assertThat(rebuilds() - before).isEqualTo(1.0);
         String first = store.get(pid);
         assertThat(jsonMapper.readTree(first).get("performanceId").asLong()).isEqualTo(pid);
-        assertThat(redis().opsForValue().get(SeatMapRedisStore.leaseKey(pid))).isEqualTo("instance-a");
-        assertThat(redis().getExpire(SeatMapRedisStore.snapshotKey(pid), TimeUnit.MILLISECONDS))
+        assertThat(redis().opsForValue().get(RedisKeys.seatMapLease(pid))).isEqualTo(instanceA.value());
+        assertThat(redis().getExpire(RedisKeys.seatMap(pid), TimeUnit.MILLISECONDS))
                 .isPositive().isLessThanOrEqualTo(props.seatmap().snapshotTtl().toMillis());
 
         b.snapshot();
@@ -82,14 +86,14 @@ class SeatMapSnapshotSchedulerTest {
 
         a.snapshot();
         assertThat(rebuilds() - before).isEqualTo(2.0);
-        assertThat(redis().getExpire(SeatMapRedisStore.leaseKey(pid), TimeUnit.MILLISECONDS))
+        assertThat(redis().getExpire(RedisKeys.seatMapLease(pid), TimeUnit.MILLISECONDS))
                 .isPositive().isLessThanOrEqualTo(props.seatmap().leaseTtl().toMillis());
 
         // 리더가 멈춰 리스가 풀리면 다른 인스턴스가 이어받는다
-        redis().delete(SeatMapRedisStore.leaseKey(pid));
+        redis().delete(RedisKeys.seatMapLease(pid));
         b.snapshot();
         assertThat(rebuilds() - before).isEqualTo(3.0);
-        assertThat(redis().opsForValue().get(SeatMapRedisStore.leaseKey(pid))).isEqualTo("instance-b");
+        assertThat(redis().opsForValue().get(RedisKeys.seatMapLease(pid))).isEqualTo(instanceB.value());
     }
 
     @Test
@@ -101,20 +105,20 @@ class SeatMapSnapshotSchedulerTest {
         long started = track(fixtures.newPerformance(fixtures.newShow(), now.minusDays(2), now.minusMinutes(1), 1, 1, 2));
         List<Long> mine = List.of(open, notYetOpen, started);
         // 운영 카탈로그는 예매 중 목록을 10초 묶어 두므로, 같은 쿼리를 쓰는 새 카탈로그에서 이 테스트의 회차만 남긴다
-        SeatCatalog fresh = new SeatCatalog(jdbcTemplate, props) {
+        SeatCatalog fresh = new SeatCatalog(jdbcTemplate, props, System::nanoTime) {
             @Override
             public List<Long> openPerformanceIds() {
                 return super.openPerformanceIds().stream().filter(mine::contains).toList();
             }
         };
 
-        scheduler("instance-a", fresh).snapshot();
+        scheduler(new InstanceId(), fresh).snapshot();
 
         assertThat(store.get(open)).isNotNull();
         assertThat(store.get(notYetOpen)).isNull();
         assertThat(store.get(started)).isNull();
-        assertThat(redis().hasKey(SeatMapRedisStore.leaseKey(notYetOpen))).isFalse();
-        assertThat(redis().hasKey(SeatMapRedisStore.leaseKey(started))).isFalse();
+        assertThat(redis().hasKey(RedisKeys.seatMapLease(notYetOpen))).isFalse();
+        assertThat(redis().hasKey(RedisKeys.seatMapLease(started))).isFalse();
     }
 
     @Test
@@ -122,9 +126,9 @@ class SeatMapSnapshotSchedulerTest {
     void oneFailingPerformanceDoesNotStopOthers() {
         long broken = openPerformance();
         long healthy = openPerformance();
-        redis().opsForHash().put(SeatMapRedisStore.leaseKey(broken), "not", "a-string");
+        redis().opsForHash().put(RedisKeys.seatMapLease(broken), "not", "a-string");
 
-        scheduler("instance-a", catalogOf(List.of(broken, healthy))).snapshot();
+        scheduler(new InstanceId(), catalogOf(List.of(broken, healthy))).snapshot();
 
         assertThat(store.get(broken)).isNull();
         assertThat(store.get(healthy)).isNotNull();
@@ -135,7 +139,7 @@ class SeatMapSnapshotSchedulerTest {
     void failureWarnThrottled() throws IOException {
         TicketingRedis dead = TestTicketingRedis.connectTo("localhost", closedPort(), props);
         SeatMapSnapshotScheduler scheduler = new SeatMapSnapshotScheduler(catalogOf(List.of(1L, 2L, 3L)), builder,
-                new SeatMapRedisStore(dead), "instance-a", props, meterRegistry);
+                new SeatMapRedisStore(dead), new InstanceId(), System::nanoTime, props, meterRegistry);
         try (CapturedLogs logs = CapturedLogs.of(SeatMapSnapshotScheduler.class)) {
             for (int cycle = 0; cycle < 3; cycle++) {
                 scheduler.snapshot();
@@ -156,19 +160,20 @@ class SeatMapSnapshotSchedulerTest {
         assertThat(store.tryLease(pid, "owner-2", Duration.ofSeconds(2))).isFalse();
 
         store.releaseLease(pid, "owner-2");
-        assertThat(redis().opsForValue().get(SeatMapRedisStore.leaseKey(pid))).isEqualTo("owner-1");
+        assertThat(redis().opsForValue().get(RedisKeys.seatMapLease(pid))).isEqualTo("owner-1");
 
         store.releaseLease(pid, "owner-1");
-        assertThat(redis().hasKey(SeatMapRedisStore.leaseKey(pid))).isFalse();
+        assertThat(redis().hasKey(RedisKeys.seatMapLease(pid))).isFalse();
         assertThat(store.tryLease(pid, "owner-2", Duration.ofSeconds(2))).isTrue();
     }
 
-    private SeatMapSnapshotScheduler scheduler(String instanceId, SeatCatalog catalog) {
-        return new SeatMapSnapshotScheduler(catalog, builder, store, instanceId, props, meterRegistry);
+    private SeatMapSnapshotScheduler scheduler(InstanceId instanceId, SeatCatalog catalog) {
+        return new SeatMapSnapshotScheduler(catalog, builder, store, instanceId, System::nanoTime, props,
+                meterRegistry);
     }
 
     private SeatCatalog catalogOf(List<Long> openIds) {
-        return new SeatCatalog(jdbcTemplate, props) {
+        return new SeatCatalog(jdbcTemplate, props, System::nanoTime) {
             @Override
             public List<Long> openPerformanceIds() {
                 return openIds;

@@ -1,5 +1,6 @@
--- KEYS[1] = userhold, KEYS[2..n+1] = 좌석 키(정렬), KEYS[n+2..2n+1] = 쿨다운 키(같은 순서)
--- ARGV[1] = holdToken, ARGV[2] = ttlMs, ARGV[3] = n
+-- KEYS: [1] userhold, [2..n+1] 좌석 키(정렬), [n+2..2n+1] 쿨다운 키(같은 순서)
+-- ARGV: [1] holdToken, [2] ttlMs, [3] n
+-- 반환: {'OK'} | {'USER_HAS_HOLD'} | {'SEAT_TAKEN', 좌석 키} | {'COOLDOWN', 쿨다운 키}
 local n = tonumber(ARGV[3])
 if redis.call('EXISTS', KEYS[1]) == 1 then return {'USER_HAS_HOLD'} end
 for i = 2, n + 1 do

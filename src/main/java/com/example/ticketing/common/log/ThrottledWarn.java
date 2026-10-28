@@ -9,7 +9,7 @@ import org.slf4j.Logger;
 // 장애 중 같은 경고가 요청·주기마다 쌓이지 않게 한 주기에 한 번만 warn으로 남기고, 그사이는 debug로 세어 다음 warn에 붙인다
 public final class ThrottledWarn {
 
-    public static final Duration DEFAULT_INTERVAL = Duration.ofSeconds(10);
+    private static final Duration INTERVAL = Duration.ofSeconds(10);
 
     private final Logger log;
     private final long intervalNanos;
@@ -17,13 +17,9 @@ public final class ThrottledWarn {
     private final AtomicLong lastWarnNanos;
     private final AtomicLong suppressed = new AtomicLong();
 
-    public ThrottledWarn(Logger log) {
-        this(log, DEFAULT_INTERVAL, System::nanoTime);
-    }
-
-    ThrottledWarn(Logger log, Duration interval, LongSupplier nanoClock) {
+    public ThrottledWarn(Logger log, LongSupplier nanoClock) {
         this.log = log;
-        this.intervalNanos = interval.toNanos();
+        this.intervalNanos = INTERVAL.toNanos();
         this.nanoClock = nanoClock;
         this.lastWarnNanos = new AtomicLong(nanoClock.getAsLong() - intervalNanos);
     }

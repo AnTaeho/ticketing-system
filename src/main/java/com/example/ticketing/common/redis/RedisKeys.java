@@ -6,7 +6,7 @@ public final class RedisKeys {
     private RedisKeys() {
     }
 
-    public static String tag(long performanceId) {
+    private static String tag(long performanceId) {
         return "{p:" + performanceId + "}";
     }
 
@@ -14,8 +14,16 @@ public final class RedisKeys {
         return "seat:" + tag(performanceId) + ":" + seatId;
     }
 
+    public static String seatPattern(long performanceId) {
+        return "seat:" + tag(performanceId) + ":*";
+    }
+
     public static String userHold(long performanceId, long userId) {
         return "userhold:" + tag(performanceId) + ":" + userId;
+    }
+
+    public static String userHoldPattern(long performanceId) {
+        return "userhold:" + tag(performanceId) + ":*";
     }
 
     public static String rehold(long performanceId, long userId, long seatId) {
@@ -41,5 +49,18 @@ public final class RedisKeys {
 
     public static String queueRate(long performanceId) {
         return "bq:" + tag(performanceId) + ":rate";
+    }
+
+    public static String seatMap(long performanceId) {
+        return "seatmap:" + tag(performanceId);
+    }
+
+    public static String seatMapLease(long performanceId) {
+        return "seatmap:lease:" + tag(performanceId);
+    }
+
+    // 회차에 묶이지 않은 서버 전체 리스라 해시 태그가 없다
+    public static String schedulerLease(String name) {
+        return "sched:lease:" + name;
     }
 }

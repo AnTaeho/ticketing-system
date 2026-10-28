@@ -8,6 +8,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.example.ticketing.common.config.TicketingProperties;
+import com.example.ticketing.common.web.HttpNames;
 import com.example.ticketing.fakepg.domain.FakePgScenario;
 import com.example.ticketing.fakepg.dto.FakePgReply;
 import com.example.ticketing.fakepg.service.FakePgService;
@@ -256,7 +257,7 @@ class FakePgControllerTest {
 
     private ResultActions approve(String orderId, String scenario) throws Exception {
         return mockMvc.perform(post(BASE)
-                .header(FakePgController.SCENARIO_HEADER, scenario)
+                .header(HttpNames.PG_SCENARIO_HEADER, scenario)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"orderId\":\"" + orderId + "\",\"amount\":1000}"));
     }

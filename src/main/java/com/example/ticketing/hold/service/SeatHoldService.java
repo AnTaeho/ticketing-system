@@ -9,6 +9,7 @@ import com.example.ticketing.common.metrics.Metrics.FallbackResult;
 import com.example.ticketing.common.metrics.Metrics.HoldResult;
 import com.example.ticketing.common.metrics.Metrics.ReflectOp;
 import com.example.ticketing.common.metrics.Metrics.Tag;
+import com.example.ticketing.common.redis.RedisFailures;
 import com.example.ticketing.common.time.DbClock;
 import com.example.ticketing.hold.domain.GateResult;
 import com.example.ticketing.hold.domain.SeatHold;
@@ -27,7 +28,6 @@ import com.example.ticketing.seat.service.SeatCatalog;
 import com.example.ticketing.seat.service.SeatCatalog.PerformanceInfo;
 import com.example.ticketing.seat.service.SeatCatalog.SeatSelection;
 import com.example.ticketing.show.domain.PerformanceState;
-import io.lettuce.core.RedisException;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Duration;
@@ -35,8 +35,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.Semaphore;
+import java.util.function.LongSupplier;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Service;
 
 // 트랜잭션을 열지 않는다. 검증·게이트 동안 DB 커넥션을 잡지 않으려고
@@ -68,12 +68,12 @@ public class SeatHoldService {
     private final Counter fallbackRejected;
     private final Counter queueConsumeFailure;
     private final Semaphore fallbackPermits;
-    private final ThrottledWarn redisWarn = new ThrottledWarn(log);
+    private final ThrottledWarn redisWarn;
 
     public SeatHoldService(SeatCatalog seatCatalog, SeatHoldTransaction seatHoldTransaction,
                            SeatHoldRepository seatHoldRepository, SeatRepository seatRepository,
                            PaymentRepository paymentRepository, DbClock dbClock, SeatGateRedisStore gate,
-                           QueueService queueService, TicketingProperties properties,
+                           QueueService queueService, LongSupplier nanoClock, TicketingProperties properties,
                            MeterRegistry meterRegistry) {
         this.seatCatalog = seatCatalog;
         this.seatHoldTransaction = seatHoldTransaction;
@@ -83,6 +83,7 @@ public class SeatHoldService {
         this.dbClock = dbClock;
         this.gate = gate;
         this.queueService = queueService;
+        this.redisWarn = new ThrottledWarn(log, nanoClock);
         this.gateEnabled = properties.gate().enabled();
         this.queueRequired = properties.queue().required();
         this.holdTtl = properties.hold().ttl();
@@ -165,7 +166,10 @@ public class SeatHoldService {
         boolean admitted;
         try {
             admitted = queueService.isAdmitted(performanceId, queueToken, userId);
-        } catch (DataAccessException | RedisException e) {
+        } catch (RuntimeException e) {
+            if (!RedisFailures.isFailure(e)) {
+                throw e;
+            }
             warnRedisFailure("queue_check", performanceId, e);
             return false;
         }
@@ -182,7 +186,10 @@ public class SeatHoldService {
         }
         try {
             queueService.consume(performanceId, queueToken, userId);
-        } catch (DataAccessException | RedisException e) {
+        } catch (RuntimeException e) {
+            if (!RedisFailures.isFailure(e)) {
+                throw e;
+            }
             queueConsumeFailure.increment();
             warnRedisFailure("queue_consume", performanceId, e);
         }
@@ -197,7 +204,10 @@ public class SeatHoldService {
         GateResult result;
         try {
             result = gate.tryHold(selection.performanceId(), userId, selection.seatIds(), holdToken, holdTtl);
-        } catch (DataAccessException | RedisException e) {
+        } catch (RuntimeException e) {
+            if (!RedisFailures.isFailure(e)) {
+                throw e;
+            }
             gateError.increment();
             warnRedisFailure("gate", selection.performanceId(), e);
             return false;

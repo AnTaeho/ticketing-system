@@ -26,6 +26,8 @@ import org.hibernate.type.SqlTypes;
         indexes = @Index(name = "idx_outbox_poll", columnList = "status, next_attempt_at"))
 public class OutboxTask {
 
+    public static final int MAX_LAST_ERROR = 500;
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
@@ -56,7 +58,7 @@ public class OutboxTask {
     @Column(name = "locked_until")
     private LocalDateTime lockedUntil;
 
-    @Column(name = "last_error", length = 500)
+    @Column(name = "last_error", length = MAX_LAST_ERROR)
     private String lastError;
 
     @Column(name = "created_at", nullable = false, updatable = false)

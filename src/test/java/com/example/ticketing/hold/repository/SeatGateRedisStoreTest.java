@@ -219,6 +219,11 @@ class SeatGateRedisStoreTest {
         assertThat(RedisKeys.rehold(7, 3, 42)).isEqualTo("rehold:{p:7}:3:42");
         assertThat(RedisKeys.seatIdOf("seat:{p:7}:42")).isEqualTo(42);
         assertThat(RedisKeys.seatIdOf("rehold:{p:7}:3:42")).isEqualTo(42);
+        assertThat(RedisKeys.seatPattern(7)).isEqualTo("seat:{p:7}:*");
+        assertThat(RedisKeys.userHoldPattern(7)).isEqualTo("userhold:{p:7}:*");
+        assertThat(RedisKeys.seatMap(7)).isEqualTo("seatmap:{p:7}");
+        assertThat(RedisKeys.seatMapLease(7)).isEqualTo("seatmap:lease:{p:7}");
+        assertThat(RedisKeys.schedulerLease("orphan")).isEqualTo("sched:lease:orphan");
     }
 
     private Map<String, String> snapshot() {

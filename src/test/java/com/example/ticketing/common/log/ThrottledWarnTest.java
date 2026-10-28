@@ -15,8 +15,7 @@ class ThrottledWarnTest {
     @DisplayName("10초 안의 실패는 warn 한 줄로 묶고, 10초가 지나면 그사이 생략한 건수를 붙여 다시 한 줄 남긴다")
     void oneWarnPerInterval() {
         AtomicLong clock = new AtomicLong(0);
-        ThrottledWarn warn = new ThrottledWarn(LoggerFactory.getLogger(ThrottledWarnTest.class),
-                Duration.ofSeconds(10), clock::get);
+        ThrottledWarn warn = new ThrottledWarn(LoggerFactory.getLogger(ThrottledWarnTest.class), clock::get);
 
         try (CapturedLogs logs = CapturedLogs.of(ThrottledWarnTest.class)) {
             for (int i = 0; i < 5; i++) {

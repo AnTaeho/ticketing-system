@@ -6,6 +6,7 @@ import com.example.ticketing.common.error.ApiException;
 import com.example.ticketing.common.error.ErrorCode;
 import com.example.ticketing.common.metrics.Metrics;
 import com.example.ticketing.common.metrics.Metrics.Tag;
+import com.example.ticketing.common.redis.RedisFailures;
 import com.example.ticketing.common.redis.RedisKeys;
 import com.example.ticketing.common.redis.TicketingRedis;
 import com.example.ticketing.hold.domain.HoldStatus;
@@ -173,11 +174,14 @@ public class OpsSummaryService {
             StringRedisTemplate redis = bookingRedis.template();
             Long waiting = redis.opsForZSet().zCard(RedisKeys.queueWaiting(performanceId));
             Long processing = redis.opsForZSet().zCard(RedisKeys.queueProcessing(performanceId));
-            long seatKeys = countKeys(redis, "seat:" + RedisKeys.tag(performanceId) + ":*");
-            long userHoldKeys = countKeys(redis, "userhold:" + RedisKeys.tag(performanceId) + ":*");
+            long seatKeys = countKeys(redis, RedisKeys.seatPattern(performanceId));
+            long userHoldKeys = countKeys(redis, RedisKeys.userHoldPattern(performanceId));
             return new RedisPart(true, new Queue(orZero(waiting), orZero(processing)),
                     new GateKeys(seatKeys, userHoldKeys));
         } catch (RuntimeException e) {
+            if (!RedisFailures.isFailure(e)) {
+                throw e;
+            }
             log.warn("[booking ops] 회차 {} Redis 집계 실패: {}", performanceId, e.toString());
             return new RedisPart(false, new Queue(null, null), new GateKeys(null, null));
         }

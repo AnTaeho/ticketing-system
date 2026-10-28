@@ -4,6 +4,7 @@ import com.example.ticketing.common.config.TicketingProperties;
 import com.example.ticketing.common.redis.SchedulerLease;
 import com.example.ticketing.queue.repository.QueueRedisStore;
 import com.example.ticketing.seat.service.SeatCatalog;
+import java.time.Clock;
 import java.time.Duration;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -22,6 +23,7 @@ public class QueuePromotionScheduler {
     private final SchedulerLease lease;
     private final QueueRedisStore repository;
     private final SeatCatalog seatCatalog;
+    private final Clock clock;
     private final int capacity;
     private final long processingTtlMs;
     private final long waitingTtlMs;
@@ -29,10 +31,11 @@ public class QueuePromotionScheduler {
     private final Duration leaseTtl;
 
     public QueuePromotionScheduler(SchedulerLease lease, QueueRedisStore repository, SeatCatalog seatCatalog,
-                                   TicketingProperties properties) {
+                                   Clock clock, TicketingProperties properties) {
         this.lease = lease;
         this.repository = repository;
         this.seatCatalog = seatCatalog;
+        this.clock = clock;
         this.capacity = properties.queue().capacity();
         this.processingTtlMs = properties.queue().processingTokenTtl().toMillis();
         this.waitingTtlMs = properties.queue().waitingTokenTtl().toMillis();
@@ -56,9 +59,9 @@ public class QueuePromotionScheduler {
         }
     }
 
-    // 만료를 먼저 치워야 빈 자리가 승격에 잡힌다. 반환: 승격한 수
+    // 만료를 먼저 치워야 빈 자리가 승격에 잡힌다. 점수가 진입 때 쓴 서버 벽시계(ms)라 같은 시계로 비교한다
     long promoteOne(long performanceId) {
-        long now = System.currentTimeMillis();
+        long now = clock.millis();
         repository.purgeExpired(performanceId, now, waitingTtlMs);
         long moved = repository.promote(performanceId, now + processingTtlMs, capacity);
         double rate = 0.8 * repository.rate(performanceId) + 0.2 * moved / intervalSeconds;

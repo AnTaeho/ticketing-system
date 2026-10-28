@@ -1,12 +1,15 @@
 package com.example.ticketing.payment.client;
 
 import com.example.ticketing.common.config.TicketingProperties;
+import com.example.ticketing.common.text.Texts;
+import com.example.ticketing.common.web.HttpNames;
 import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
+import java.util.function.LongSupplier;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.env.Environment;
 import org.springframework.http.MediaType;
@@ -22,7 +25,6 @@ import tools.jackson.databind.json.JsonMapper;
 @Component
 public class HttpPgClient implements PgClient {
 
-    static final String SCENARIO_HEADER = "X-Fake-Pg-Scenario";
     private static final Set<PgStatus> BODY_STATUSES =
             Set.of(PgStatus.APPROVED, PgStatus.DECLINED, PgStatus.CANCELLED, PgStatus.PROCESSING);
     private static final int MAX_DETAIL_BODY = 200;
@@ -30,10 +32,12 @@ public class HttpPgClient implements PgClient {
     private final RestClient restClient;
     private final Environment environment;
     private final JsonMapper jsonMapper;
+    private final LongSupplier nanoClock;
     private final String configuredBaseUrl;
     private volatile String resolvedBaseUrl;
 
-    public HttpPgClient(TicketingProperties properties, Environment environment, JsonMapper jsonMapper) {
+    public HttpPgClient(TicketingProperties properties, Environment environment, JsonMapper jsonMapper,
+                        LongSupplier nanoClock) {
         TicketingProperties.Pg pg = properties.pg();
         HttpClient httpClient = HttpClient.newBuilder()
                 .connectTimeout(pg.connectTimeout())
@@ -44,6 +48,7 @@ public class HttpPgClient implements PgClient {
         this.restClient = RestClient.builder().requestFactory(requestFactory).build();
         this.environment = environment;
         this.jsonMapper = jsonMapper;
+        this.nanoClock = nanoClock;
         this.configuredBaseUrl = pg.baseUrl() == null ? "" : pg.baseUrl().trim();
     }
 
@@ -55,7 +60,7 @@ public class HttpPgClient implements PgClient {
                     .contentType(MediaType.APPLICATION_JSON)
                     .accept(MediaType.APPLICATION_JSON)
                     .body(jsonMapper.writeValueAsString(Map.of("orderId", orderId, "amount", amount)));
-            scenario.ifPresent(s -> spec.header(SCENARIO_HEADER, s.name()));
+            scenario.ifPresent(s -> spec.header(HttpNames.PG_SCENARIO_HEADER, s.name()));
             return spec;
         });
     }
@@ -76,7 +81,7 @@ public class HttpPgClient implements PgClient {
 
     private PgResult call(Operation operation, String orderId,
                           Function<String, RestClient.RequestHeadersSpec<?>> request) {
-        long started = System.nanoTime();
+        long started = nanoClock.getAsLong();
         PgResult result;
         try {
             String baseUrl = baseUrl();
@@ -90,7 +95,7 @@ public class HttpPgClient implements PgClient {
         } catch (RuntimeException e) {
             result = PgResult.unknown(describe(e));
         }
-        long elapsedMs = (System.nanoTime() - started) / 1_000_000;
+        long elapsedMs = (nanoClock.getAsLong() - started) / 1_000_000;
         log.debug("PG {} orderId={} result={} pgTxId={} elapsedMs={} detail={}",
                 operation, orderId, result.status(), result.pgTxId(), elapsedMs, result.detail());
         return result;
@@ -166,7 +171,7 @@ public class HttpPgClient implements PgClient {
         if (body == null || body.isEmpty()) {
             return "(본문 없음)";
         }
-        return body.length() <= MAX_DETAIL_BODY ? body : body.substring(0, MAX_DETAIL_BODY) + "…";
+        return Texts.abbreviate(body, MAX_DETAIL_BODY);
     }
 
     private enum Operation {

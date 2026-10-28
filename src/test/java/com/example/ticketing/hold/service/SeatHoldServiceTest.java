@@ -224,7 +224,7 @@ class SeatHoldServiceTest {
         SeatGateRedisStore openGate = mock(SeatGateRedisStore.class);
         when(openGate.tryHold(anyLong(), anyLong(), any(), anyString(), any())).thenReturn(GateResult.ok());
         return new SeatHoldService(seatCatalog, tx, seatHoldRepository, seatRepository, paymentRepository, clock,
-                openGate, queueService, noQueue, meterRegistry);
+                openGate, queueService, System::nanoTime, noQueue, meterRegistry);
     }
 
     private String holdStatus(long holdId) {

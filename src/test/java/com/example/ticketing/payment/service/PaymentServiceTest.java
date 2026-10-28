@@ -7,6 +7,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import com.example.ticketing.common.config.TicketingProperties;
 import com.example.ticketing.common.error.ApiException;
 import com.example.ticketing.common.error.ErrorCode;
+import com.example.ticketing.common.jdbc.ConstraintViolations;
 import com.example.ticketing.common.redis.RedisKeys;
 import com.example.ticketing.common.redis.TicketingRedis;
 import com.example.ticketing.hold.dto.HoldCreated;
@@ -146,8 +147,7 @@ class PaymentServiceTest {
         assertThat(outbox.get("locked_until")).isNull();
         JsonNode payload = jsonMapper.readTree((String) outbox.get("payload"));
         assertThat(payload.get("bookingId").asLong()).isEqualTo(bookingId);
-        assertThat(payload.get("userId").asLong()).isEqualTo(f.userId);
-        assertThat(payload.get("performanceId").asLong()).isEqualTo(f.pid);
+        assertThat(payload.size()).isEqualTo(1);
 
         assertThat(db.holdStatus(f.holdId)).isEqualTo("CONFIRMED");
         f.seatIds.forEach(seatId -> assertThat(db.seat(seatId))
@@ -520,11 +520,10 @@ class PaymentServiceTest {
             DataIntegrityViolationException sameKey = catchDuplicate(() -> paymentRepository.save(
                     Payment.requested(holdId - 1, userId, key, orderId(), 1000, null)));
 
-            String holdViolation = PaymentService.violatedConstraint(sameHold);
-            String keyViolation = PaymentService.violatedConstraint(sameKey);
-            System.out.println("[S4.3] 유니크 위반 원인: hold=" + holdViolation + " / idem=" + keyViolation);
-            assertThat(holdViolation).contains(Payment.UK_HOLD).doesNotContain(Payment.UK_IDEMPOTENCY);
-            assertThat(keyViolation).contains(Payment.UK_IDEMPOTENCY).doesNotContain(Payment.UK_HOLD);
+            assertThat(ConstraintViolations.matches(sameHold, Payment.UK_HOLD)).isTrue();
+            assertThat(ConstraintViolations.matches(sameHold, Payment.UK_IDEMPOTENCY)).isFalse();
+            assertThat(ConstraintViolations.matches(sameKey, Payment.UK_IDEMPOTENCY)).isTrue();
+            assertThat(ConstraintViolations.matches(sameKey, Payment.UK_HOLD)).isFalse();
         } finally {
             jdbcTemplate.update("DELETE FROM booking_payment WHERE user_id = ?", userId);
         }

@@ -5,11 +5,12 @@ import com.example.ticketing.common.metrics.Metrics;
 import com.example.ticketing.common.metrics.Metrics.OrphanKind;
 import com.example.ticketing.common.metrics.Metrics.SkipReason;
 import com.example.ticketing.common.metrics.Metrics.Tag;
+import com.example.ticketing.common.redis.RedisFailures;
 import com.example.ticketing.common.redis.RedisKeys;
+import com.example.ticketing.common.redis.RedisScripts;
 import com.example.ticketing.common.redis.SchedulerLease;
 import com.example.ticketing.common.redis.TicketingRedis;
 import com.example.ticketing.seat.service.SeatCatalog;
-import io.lettuce.core.RedisException;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.nio.charset.StandardCharsets;
@@ -25,13 +26,10 @@ import java.util.function.Consumer;
 import java.util.function.Supplier;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.core.io.ClassPathResource;
-import org.springframework.dao.DataAccessException;
 import org.springframework.data.redis.core.Cursor;
 import org.springframework.data.redis.core.RedisCallback;
 import org.springframework.data.redis.core.ScanOptions;
 import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -49,7 +47,6 @@ public class OrphanGateKeyReconciler {
     private static final long SCAN_COUNT = 200;
     private static final int PIPELINE_BATCH = 200;
     private static final int IN_CHUNK = 500;
-    private static final DefaultRedisScript<Long> RELEASE = releaseScript();
 
     // 좌석 행의 hold_id가 이 hold이고 HELD·SOLD인 (토큰, 좌석)만 살아 있는 키다
     private static final String LIVE_SEAT_SQL = """
@@ -112,9 +109,9 @@ public class OrphanGateKeyReconciler {
     }
 
     Removed reconcileOne(long performanceId) {
-        List<GateKey> seatKeys = readKeys("seat:" + RedisKeys.tag(performanceId) + ":*");
+        List<GateKey> seatKeys = readKeys(RedisKeys.seatPattern(performanceId));
         long seats = release(orphanSeatKeys(performanceId, seatKeys));
-        List<GateKey> userHoldKeys = readKeys("userhold:" + RedisKeys.tag(performanceId) + ":*");
+        List<GateKey> userHoldKeys = readKeys(RedisKeys.userHoldPattern(performanceId));
         long userHolds = release(orphanUserHoldKeys(performanceId, userHoldKeys));
 
         seatRemoved.increment(seats);
@@ -197,7 +194,7 @@ public class OrphanGateKeyReconciler {
         return redisCall(() -> {
             long removed = 0;
             for (Map.Entry<String, List<String>> entry : keysByToken.entrySet()) {
-                Long n = redis.execute(RELEASE, entry.getValue(), entry.getKey());
+                Long n = redis.execute(RedisScripts.RELEASE, entry.getValue(), entry.getKey());
                 removed += n == null ? 0 : n;
             }
             return removed;
@@ -222,16 +219,12 @@ public class OrphanGateKeyReconciler {
     private static <T> T redisCall(Supplier<T> call) {
         try {
             return call.get();
-        } catch (DataAccessException | RedisException e) {
+        } catch (RuntimeException e) {
+            if (!RedisFailures.isFailure(e)) {
+                throw e;
+            }
             throw new RedisUnavailable(e);
         }
-    }
-
-    private static DefaultRedisScript<Long> releaseScript() {
-        DefaultRedisScript<Long> script = new DefaultRedisScript<>();
-        script.setLocation(new ClassPathResource("scripts/booking/release.lua"));
-        script.setResultType(Long.class);
-        return script;
     }
 
     record Removed(long seats, long userHolds) {

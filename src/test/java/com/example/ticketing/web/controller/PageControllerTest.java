@@ -13,6 +13,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.example.ticketing.common.config.TicketingProperties;
 import com.example.ticketing.common.error.ApiExceptionHandler;
+import com.example.ticketing.common.web.DemoMode;
 import com.example.ticketing.support.IntegrationTest;
 import com.example.ticketing.web.PageExceptionHandler;
 import org.junit.jupiter.api.BeforeEach;
@@ -129,7 +130,7 @@ class PageControllerTest {
         resolver.setTemplateEngine(context.getBean(ISpringTemplateEngine.class));
         resolver.setCharacterEncoding("UTF-8");
         MockMvc prodMvc = MockMvcBuilders
-                .standaloneSetup(new PageController(context.getBean(TicketingProperties.class), prod))
+                .standaloneSetup(new PageController(context.getBean(TicketingProperties.class), new DemoMode(prod)))
                 .setViewResolvers(resolver)
                 .build();
 
@@ -219,7 +220,7 @@ class PageControllerTest {
         resolver.setTemplateEngine(context.getBean(ISpringTemplateEngine.class));
         resolver.setCharacterEncoding("UTF-8");
         PageController exploding = new PageController(context.getBean(TicketingProperties.class),
-                new MockEnvironment()) {
+                new DemoMode(new MockEnvironment())) {
             @Override
             public String shows() {
                 throw new IllegalStateException("boom");

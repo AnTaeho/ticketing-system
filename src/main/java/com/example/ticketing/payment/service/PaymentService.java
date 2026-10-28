@@ -3,6 +3,8 @@ package com.example.ticketing.payment.service;
 import com.example.ticketing.common.config.TicketingProperties;
 import com.example.ticketing.common.error.ApiException;
 import com.example.ticketing.common.error.ErrorCode;
+import com.example.ticketing.common.jdbc.ConstraintViolations;
+import com.example.ticketing.common.web.HttpNames;
 import com.example.ticketing.hold.repository.SeatGateRedisStore;
 import com.example.ticketing.payment.client.PgClient;
 import com.example.ticketing.payment.client.PgResult;
@@ -18,7 +20,6 @@ import java.time.Duration;
 import java.util.Map;
 import java.util.Optional;
 import lombok.extern.slf4j.Slf4j;
-import org.hibernate.exception.ConstraintViolationException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 
@@ -93,30 +94,14 @@ public class PaymentService {
         try {
             return paymentTransaction.start(userId, holdId, key);
         } catch (DataIntegrityViolationException e) {
-            String violated = violatedConstraint(e);
-            boolean idempotency = violated.contains(Payment.UK_IDEMPOTENCY);
-            if (!idempotency && !violated.contains(Payment.UK_HOLD)) {
+            boolean idempotency = ConstraintViolations.matches(e, Payment.UK_IDEMPOTENCY);
+            if (!idempotency && !ConstraintViolations.matches(e, Payment.UK_HOLD)) {
                 throw e;
             }
-            log.info("[booking payment] 결제 시작 유니크 위반 constraint={}, holdId={}", violated, holdId);
+            log.info("[booking payment] 결제 시작 유니크 위반 constraint={}, holdId={}",
+                    idempotency ? Payment.UK_IDEMPOTENCY : Payment.UK_HOLD, holdId);
             return paymentTransaction.findAfterDuplicate(userId, holdId, key, idempotency).orElseThrow(() -> e);
         }
-    }
-
-    static String violatedConstraint(DataIntegrityViolationException e) {
-        StringBuilder found = new StringBuilder();
-        for (Throwable cause = e; cause != null; cause = cause.getCause()) {
-            if (cause instanceof ConstraintViolationException violation && violation.getConstraintName() != null) {
-                found.append(violation.getConstraintName()).append(' ');
-            }
-            if (cause.getMessage() != null) {
-                found.append(cause.getMessage()).append(' ');
-            }
-            if (cause.getCause() == cause) {
-                break;
-            }
-        }
-        return found.toString();
     }
 
     private static String checkIdempotencyKey(String key) {
@@ -126,7 +111,7 @@ public class PaymentService {
         String trimmed = key.trim();
         if (trimmed.length() > MAX_IDEMPOTENCY_KEY_LENGTH) {
             throw new ApiException(ErrorCode.INVALID_REQUEST,
-                    Map.of("header", "Idempotency-Key", "maxLength", MAX_IDEMPOTENCY_KEY_LENGTH));
+                    Map.of("header", HttpNames.IDEMPOTENCY_KEY_HEADER, "maxLength", MAX_IDEMPOTENCY_KEY_LENGTH));
         }
         return trimmed;
     }

@@ -37,6 +37,7 @@ public class Payment {
 
     public static final String UK_HOLD = "uk_payment_hold";
     public static final String UK_IDEMPOTENCY = "uk_payment_idem";
+    public static final int MAX_LAST_ERROR = 200;
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -65,7 +66,7 @@ public class Payment {
     @Column(name = "pg_tx_id", length = 64)
     private String pgTxId;
 
-    @Column(name = "last_error", length = 200)
+    @Column(name = "last_error", length = MAX_LAST_ERROR)
     private String lastError;
 
     // 대사 대상 시각. 최종 상태가 되면 NULL

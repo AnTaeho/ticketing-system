@@ -24,7 +24,6 @@ import com.example.ticketing.payment.service.PaymentReconcileTransaction.Claimed
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Duration;
 import java.time.Instant;
-import java.time.LocalDateTime;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -127,9 +126,7 @@ class PaymentReconcileSchedulerTest {
     }
 
     private static ClaimedPayment claimed(long paymentId, String orderId, boolean cancelDue) {
-        LocalDateTime now = LocalDateTime.now();
-        return new ClaimedPayment(paymentId, paymentId + 100, orderId, PaymentStatus.UNKNOWN,
-                now.minusSeconds(cancelDue ? 60 : 5), now.plusMinutes(10), cancelDue);
+        return new ClaimedPayment(paymentId, orderId, cancelDue);
     }
 
     private static PaymentSettlement applied(long paymentId, PaymentOutcome outcome) {
@@ -138,7 +135,7 @@ class PaymentReconcileSchedulerTest {
 
     private static PaymentSettlement settlement(long paymentId, PaymentOutcome outcome, boolean applied) {
         return new PaymentSettlement(paymentId, outcome, applied, PaymentStatus.APPROVED, HoldStatus.CONFIRMED,
-                null, null, paymentId + 100, 7L, 11L, "token", applied ? List.of(101L) : List.of(),
+                null, null, 7L, 11L, "token", applied ? List.of(101L) : List.of(),
                 outcome == PaymentOutcome.CONFIRMED ? Instant.EPOCH : null);
     }
 }

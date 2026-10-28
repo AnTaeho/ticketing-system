@@ -1,5 +1,6 @@
--- KEYS = userhold 키(있으면) + 좌석 키들, ARGV[1] = holdToken
--- 남의 선점 키를 지우지 않도록 값이 토큰과 같은 키만 지운다
+-- KEYS: 지울 키들
+-- ARGV: [1] 기대 값(값이 이것과 같을 때만 지운다. 범용 compare-and-delete)
+-- 반환: 지운 키 수
 local n = 0
 for _, k in ipairs(KEYS) do
   if redis.call('GET', k) == ARGV[1] then redis.call('DEL', k); n = n + 1 end

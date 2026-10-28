@@ -15,6 +15,7 @@ import java.util.Objects;
 import java.util.TreeSet;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.function.LongSupplier;
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
@@ -28,6 +29,7 @@ public class SeatCatalog {
 
     private final JdbcTemplate jdbcTemplate;
     private final TicketingProperties properties;
+    private final LongSupplier nanoClock;
 
     private final ConcurrentMap<Long, PerformanceInfo> performances = new ConcurrentHashMap<>();
     private final Object openIdsLock = new Object();
@@ -68,18 +70,18 @@ public class SeatCatalog {
     // 예매 중인 회차: open_at <= NOW(6) < starts_at. 스케줄러가 매 주기 부르므로 10초 묶어 둔다
     public List<Long> openPerformanceIds() {
         OpenIds current = openIds;
-        if (current != null && current.isFresh()) {
+        if (current != null && current.isFresh(nanoClock.getAsLong())) {
             return current.ids();
         }
         synchronized (openIdsLock) {
             current = openIds;
-            if (current != null && current.isFresh()) {
+            if (current != null && current.isFresh(nanoClock.getAsLong())) {
                 return current.ids();
             }
             List<Long> ids = jdbcTemplate.queryForList(
                     "SELECT id FROM performance WHERE open_at <= NOW(6) AND starts_at > NOW(6) ORDER BY id",
                     Long.class);
-            openIds = new OpenIds(List.copyOf(ids), System.nanoTime());
+            openIds = new OpenIds(List.copyOf(ids), nanoClock.getAsLong());
             return openIds.ids();
         }
     }
@@ -133,8 +135,8 @@ public class SeatCatalog {
 
     private record OpenIds(List<Long> ids, long loadedAtNanos) {
 
-        boolean isFresh() {
-            return System.nanoTime() - loadedAtNanos < OPEN_IDS_TTL_NANOS;
+        boolean isFresh(long nowNanos) {
+            return nowNanos - loadedAtNanos < OPEN_IDS_TTL_NANOS;
         }
     }
 }

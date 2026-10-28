@@ -6,6 +6,7 @@ import com.example.ticketing.booking.dto.RefundStatus;
 import com.example.ticketing.booking.repository.BookingRepository;
 import com.example.ticketing.common.error.ApiException;
 import com.example.ticketing.common.error.ErrorCode;
+import com.example.ticketing.common.jdbc.RowCounts;
 import com.example.ticketing.hold.domain.SeatHold;
 import com.example.ticketing.hold.repository.SeatHoldRepository;
 import com.example.ticketing.outbox.domain.OutboxTaskType;
@@ -51,12 +52,12 @@ public class BookingTransaction {
             throw new ApiException(ErrorCode.CANCEL_NOT_ALLOWED, Map.of("bookingId", bookingId));
         }
 
-        expect(bookingRepository.markCancelled(bookingId), 1, "booking CANCELLED");
+        RowCounts.requireExactly(bookingRepository.markCancelled(bookingId), 1, "booking CANCELLED");
         SeatHold hold = seatHoldRepository.findById(booking.getHoldId())
                 .orElseThrow(() -> new IllegalStateException("예매 " + bookingId + "의 hold가 없다"));
         // 게이트 키를 지울 좌석 ID는 hold_id를 비우기 전에 읽어 둔다
         List<Long> seatIds = seatRepository.lockSoldSeatIds(hold.getId());
-        expect(seatRepository.releaseSoldSeats(hold.getId()), seatIds.size(), "seat AVAILABLE");
+        RowCounts.requireExactly(seatRepository.releaseSoldSeats(hold.getId()), seatIds.size(), "seat AVAILABLE");
         outboxWriter.write(OutboxTaskType.REFUND_REQUESTED, payment.getId(),
                 json("paymentId", payment.getId(), "orderId", payment.getOrderId()));
         return new Cancellation(bookingId, booking.getPerformanceId(), true, hold.getHoldToken(),
@@ -69,13 +70,6 @@ public class BookingTransaction {
             payload.put((String) keyValues[i], keyValues[i + 1]);
         }
         return jsonMapper.writeValueAsString(payload);
-    }
-
-    // booking 락 아래라 어긋날 수 없다. 어긋나면 롤백해 반쯤 바뀐 상태를 남기지 않는다
-    private static void expect(int actual, int expected, String what) {
-        if (actual != expected) {
-            throw new IllegalStateException(what + " 영향 행 수: 기대 " + expected + ", 실제 " + actual);
-        }
     }
 
     // applied가 true일 때만 게이트에 반영할 좌석과 토큰이 있다

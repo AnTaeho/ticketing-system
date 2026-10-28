@@ -1,7 +1,10 @@
 package com.example.ticketing.outbox.service;
 
 import com.example.ticketing.common.config.TicketingProperties;
+import com.example.ticketing.common.jdbc.RowCounts;
+import com.example.ticketing.common.text.Texts;
 import com.example.ticketing.common.time.DbClock;
+import com.example.ticketing.outbox.domain.OutboxTask;
 import com.example.ticketing.outbox.domain.OutboxTaskStatus;
 import com.example.ticketing.outbox.dto.ClaimedOutboxTask;
 import java.time.Duration;
@@ -19,7 +22,6 @@ import org.springframework.transaction.annotation.Transactional;
 @Component
 public class OutboxClaimTransaction {
 
-    private static final int MAX_LAST_ERROR = 500;
     // 1L << 63은 음수라 지수를 여기서 멈춘다
     private static final int MAX_BACKOFF_EXPONENT = Long.SIZE - 2;
 
@@ -81,7 +83,8 @@ public class OutboxClaimTransaction {
     // false면 그 사이 잠금이 지나 다른 워커가 다시 집었다. 결과는 그쪽이 쓴다
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public boolean markDone(ClaimedOutboxTask task) {
-        return jdbcTemplate.update(DONE_SQL, Map.of("id", task.id(), "lockedUntil", task.lockedUntil())) == 1;
+        return RowCounts.changedOne(jdbcTemplate.update(DONE_SQL,
+                Map.of("id", task.id(), "lockedUntil", task.lockedUntil())));
     }
 
     // 다시 해 볼 횟수가 남았으면 PENDING(2^attempt초 뒤, 최대 max-backoff), 다 썼으면 FAILED. 다른 워커가 다시 집었으면 empty
@@ -95,21 +98,14 @@ public class OutboxClaimTransaction {
         params.put("status", status.name());
         params.put("attempt", attempt);
         params.put("backoffSeconds", backoffSeconds(attempt, maxBackoffSeconds));
-        params.put("lastError", abbreviate(error));
-        return jdbcTemplate.update(FAILED_ATTEMPT_SQL, params) == 1
+        params.put("lastError", Texts.abbreviate(error, OutboxTask.MAX_LAST_ERROR));
+        return RowCounts.changedOne(jdbcTemplate.update(FAILED_ATTEMPT_SQL, params))
                 ? Optional.of(status)
                 : Optional.empty();
     }
 
     static long backoffSeconds(int attempt, long maxSeconds) {
         return Math.min(1L << Math.min(attempt, MAX_BACKOFF_EXPONENT), maxSeconds);
-    }
-
-    private static String abbreviate(String error) {
-        if (error == null) {
-            return null;
-        }
-        return error.length() <= MAX_LAST_ERROR ? error : error.substring(0, MAX_LAST_ERROR - 1) + "…";
     }
 
     private record Row(long id, String taskType, long aggregateId, String payload, int attempt) {

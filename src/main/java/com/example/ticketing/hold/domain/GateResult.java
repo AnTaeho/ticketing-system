@@ -29,10 +29,6 @@ public record GateResult(Type type, Long seatId) {
         return new GateResult(Type.COOLDOWN, seatId);
     }
 
-    public boolean isOk() {
-        return type == Type.OK;
-    }
-
     public static GateResult fromScript(List<?> reply) {
         if (reply == null || reply.isEmpty()) {
             throw new IllegalStateException("hold.lua가 빈 결과를 돌려줬다");

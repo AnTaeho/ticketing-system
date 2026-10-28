@@ -13,6 +13,7 @@ import com.example.ticketing.seat.service.SeatCatalog;
 import com.example.ticketing.support.Fixtures;
 import com.example.ticketing.support.IntegrationTest;
 import com.example.ticketing.support.RedisKeyCleaner;
+import java.time.Clock;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
@@ -197,16 +198,18 @@ class QueuePromotionSchedulerTest {
     }
 
     private QueueService service(int capacity) {
-        return new QueueService(repository, seatCatalog, dbClock, QueueTestProps.withCapacity(props, capacity));
+        return new QueueService(repository, seatCatalog, dbClock, Clock.systemDefaultZone(), System::nanoTime,
+                QueueTestProps.withCapacity(props, capacity));
     }
 
     private QueuePromotionScheduler scheduler(int capacity, SeatCatalog catalog) {
-        return new QueuePromotionScheduler(lease, repository, catalog, QueueTestProps.withCapacity(props, capacity));
+        return new QueuePromotionScheduler(lease, repository, catalog, Clock.systemDefaultZone(),
+                QueueTestProps.withCapacity(props, capacity));
     }
 
     // 운영 SeatCatalog는 예매 중 회차 목록을 10초 묶어 두므로 방금 만든 회차가 빠질 수 있다
     private SeatCatalog catalogOf(List<Long> openIds) {
-        return new SeatCatalog(jdbcTemplate, props) {
+        return new SeatCatalog(jdbcTemplate, props, System::nanoTime) {
             @Override
             public List<Long> openPerformanceIds() {
                 return openIds;

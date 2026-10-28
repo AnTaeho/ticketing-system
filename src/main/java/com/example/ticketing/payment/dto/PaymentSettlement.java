@@ -15,7 +15,6 @@ public record PaymentSettlement(
         HoldStatus holdStatus,
         Long bookingId,
         String bookingNumber,
-        long holdId,
         long performanceId,
         long userId,
         String holdToken,

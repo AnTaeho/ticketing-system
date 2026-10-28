@@ -1,5 +1,6 @@
 package com.example.ticketing.common.time;
 
+import java.time.Clock;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -18,6 +19,6 @@ public final class TestDbClock {
                 return value instanceof LocalDateTime time ? requiredType.cast(time.plus(skew)) : value;
             }
         };
-        return new DbClock(shifted);
+        return new DbClock(shifted, Clock.systemDefaultZone(), System::nanoTime);
     }
 }

@@ -1,23 +1,17 @@
 package com.example.ticketing.queue.repository;
 
 import com.example.ticketing.common.redis.RedisKeys;
+import com.example.ticketing.common.redis.RedisScripts;
 import com.example.ticketing.common.redis.TicketingRedis;
 import com.example.ticketing.queue.domain.QueueTokenStatus;
 import java.time.Duration;
 import java.util.List;
-import org.springframework.core.io.ClassPathResource;
 import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Component;
 
 // waiting 점수는 진입 시각이다. 만료는 진입 시각 + waiting 수명으로 판정해 FIFO 순서와 만료를 한 점수로 다룬다
 @Component
 public class QueueRedisStore {
-
-    @SuppressWarnings("rawtypes")
-    private static final DefaultRedisScript<List> ENTER = script("queue_enter.lua", List.class);
-    private static final DefaultRedisScript<Long> PROMOTE = script("queue_promote.lua", Long.class);
-    private static final DefaultRedisScript<Long> CONSUME = script("queue_consume.lua", Long.class);
 
     private final StringRedisTemplate redis;
 
@@ -28,7 +22,7 @@ public class QueueRedisStore {
     // 이미 살아 있는 토큰이 있으면 그 토큰과 상태를 돌려준다
     public Entered enter(long performanceId, long userId, String member, long nowMs,
                          long processingExpireAtMs, int capacity, long waitingTtlMs) {
-        List<?> reply = redis.execute(ENTER,
+        List<?> reply = redis.execute(RedisScripts.QUEUE_ENTER,
                 List.of(RedisKeys.queueProcessing(performanceId), RedisKeys.queueWaiting(performanceId),
                         RedisKeys.queueUser(performanceId, userId)),
                 member, String.valueOf(nowMs), String.valueOf(processingExpireAtMs), String.valueOf(nowMs),
@@ -41,7 +35,7 @@ public class QueueRedisStore {
 
     // 반환: 승격한 수
     public long promote(long performanceId, long processingExpireAtMs, int capacity) {
-        Long moved = redis.execute(PROMOTE,
+        Long moved = redis.execute(RedisScripts.QUEUE_PROMOTE,
                 List.of(RedisKeys.queueProcessing(performanceId), RedisKeys.queueWaiting(performanceId)),
                 String.valueOf(processingExpireAtMs), String.valueOf(capacity));
         return moved == null ? 0 : moved;
@@ -62,7 +56,7 @@ public class QueueRedisStore {
 
     // 반환: processing에서 지운 수
     public long consume(long performanceId, long userId, String member) {
-        Long removed = redis.execute(CONSUME,
+        Long removed = redis.execute(RedisScripts.QUEUE_CONSUME,
                 List.of(RedisKeys.queueProcessing(performanceId), RedisKeys.queueUser(performanceId, userId)), member);
         return removed == null ? 0 : removed;
     }
@@ -94,12 +88,5 @@ public class QueueRedisStore {
     }
 
     public record Entered(QueueTokenStatus status, String member) {
-    }
-
-    private static <T> DefaultRedisScript<T> script(String name, Class<T> resultType) {
-        DefaultRedisScript<T> script = new DefaultRedisScript<>();
-        script.setLocation(new ClassPathResource("scripts/booking/" + name));
-        script.setResultType(resultType);
-        return script;
     }
 }

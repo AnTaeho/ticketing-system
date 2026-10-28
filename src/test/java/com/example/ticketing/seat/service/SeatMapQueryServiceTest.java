@@ -16,13 +16,15 @@ import com.example.ticketing.common.error.ApiException;
 import com.example.ticketing.common.error.ErrorCode;
 import com.example.ticketing.common.metrics.Metrics;
 import com.example.ticketing.common.metrics.Metrics.Tag;
-import com.example.ticketing.common.redis.SchedulerLease;
+import com.example.ticketing.common.redis.InstanceId;
+import com.example.ticketing.common.redis.RedisKeys;
 import com.example.ticketing.common.redis.TicketingRedis;
 import com.example.ticketing.seat.repository.SeatMapRedisStore;
 import com.example.ticketing.support.Fixtures;
 import com.example.ticketing.support.IntegrationTest;
 import com.example.ticketing.support.RedisKeyCleaner;
 import io.micrometer.core.instrument.MeterRegistry;
+import java.time.Clock;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -55,7 +57,7 @@ class SeatMapQueryServiceTest {
     @Autowired
     private SeatMapRedisStore store;
     @Autowired
-    private SchedulerLease schedulerLease;
+    private InstanceId instanceId;
     @Autowired
     private TicketingProperties props;
     @Autowired
@@ -94,7 +96,7 @@ class SeatMapQueryServiceTest {
         assertThat(results).hasSize(50);
         assertThat(generatedAts).hasSize(1);
         assertThat(store.get(pid)).isEqualTo(results.get(0));
-        assertThat(bookingRedis.template().hasKey(SeatMapRedisStore.leaseKey(pid))).isFalse();
+        assertThat(bookingRedis.template().hasKey(RedisKeys.seatMapLease(pid))).isFalse();
     }
 
     @Test
@@ -131,7 +133,7 @@ class SeatMapQueryServiceTest {
     @DisplayName("다른 인스턴스가 리스를 잡고 끝내 저장하지 않으면 50ms×10회 재조회 뒤 503 SEATMAP_UNAVAILABLE")
     void unavailableWhenLeaseHeldElsewhere() {
         long pid = performance();
-        bookingRedis.template().opsForValue().set(SeatMapRedisStore.leaseKey(pid), "other-instance", Duration.ofSeconds(5));
+        bookingRedis.template().opsForValue().set(RedisKeys.seatMapLease(pid), "other-instance", Duration.ofSeconds(5));
         double missBefore = rebuilds("miss");
 
         long started = System.nanoTime();
@@ -143,14 +145,14 @@ class SeatMapQueryServiceTest {
 
         assertThat(elapsedMs).isGreaterThanOrEqualTo(SeatMapQueryService.MAX_POLLS * SeatMapQueryService.POLL_INTERVAL_MS);
         assertThat(rebuilds("miss")).isEqualTo(missBefore);
-        assertThat(bookingRedis.template().opsForValue().get(SeatMapRedisStore.leaseKey(pid))).isEqualTo("other-instance");
+        assertThat(bookingRedis.template().opsForValue().get(RedisKeys.seatMapLease(pid))).isEqualTo("other-instance");
     }
 
     @Test
     @DisplayName("리스 대기 중 다른 인스턴스가 저장하면 그 스냅샷을 받는다")
     void pollsUntilOtherInstancePuts() throws Exception {
         long pid = performance();
-        bookingRedis.template().opsForValue().set(SeatMapRedisStore.leaseKey(pid), "other-instance", Duration.ofSeconds(5));
+        bookingRedis.template().opsForValue().set(RedisKeys.seatMapLease(pid), "other-instance", Duration.ofSeconds(5));
         String stored = builder.build(pid).orElseThrow();
         ExecutorService pool = Executors.newSingleThreadExecutor();
         try {
@@ -305,12 +307,13 @@ class SeatMapQueryServiceTest {
     }
 
     private SeatMapQueryService service(SeatMapRedisStore seatMapStore, SeatMapBuilder seatMapBuilder) {
-        return new SeatMapQueryService(seatCatalog, seatMapBuilder, seatMapStore, schedulerLease, props, meterRegistry);
+        return new SeatMapQueryService(seatCatalog, seatMapBuilder, seatMapStore, instanceId, System::nanoTime, props,
+                meterRegistry);
     }
 
     // 동시 요청이 single-flight 안에서 겹치도록 빌드를 늦춘다
     private SeatMapBuilder slowBuilder(long delayMs) {
-        return new SeatMapBuilder(jdbcTemplate, jsonMapper) {
+        return new SeatMapBuilder(jdbcTemplate, jsonMapper, Clock.systemDefaultZone()) {
             @Override
             public Optional<String> build(long performanceId) {
                 try {

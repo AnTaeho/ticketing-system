@@ -16,6 +16,7 @@ import com.example.ticketing.support.Fixtures;
 import com.example.ticketing.support.IntegrationTest;
 import java.io.IOException;
 import java.net.ServerSocket;
+import java.time.Clock;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -44,7 +45,8 @@ class QueueFailureTest {
     @BeforeEach
     void setUp() throws IOException {
         deadRedis = TestTicketingRedis.connectTo("localhost", closedPort(), props);
-        deadService = new QueueService(new QueueRedisStore(deadRedis), seatCatalog, dbClock, props);
+        deadService = new QueueService(new QueueRedisStore(deadRedis), seatCatalog, dbClock, Clock.systemDefaultZone(),
+                System::nanoTime, props);
     }
 
     @AfterEach

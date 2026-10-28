@@ -1,6 +1,7 @@
 package com.example.ticketing.fakepg.service;
 
 import com.example.ticketing.common.config.TicketingProperties;
+import com.example.ticketing.common.jdbc.RowCounts;
 import com.example.ticketing.fakepg.domain.FakePgDecider;
 import com.example.ticketing.fakepg.domain.FakePgOrder;
 import com.example.ticketing.fakepg.domain.FakePgScenario;
@@ -58,7 +59,7 @@ public class FakePgService {
         Integer updated = write.execute(status -> plan.approve()
                 ? repository.approveProcessing(orderId, pgTxId)
                 : repository.declineProcessing(orderId));
-        if (updated != null && updated == 1) {
+        if (RowCounts.changedOne(updated)) {
             return FakePgReply.of(orderId, plan.approve() ? FakePgStatus.APPROVED : FakePgStatus.DECLINED, pgTxId);
         }
         // 지연 중에 행이 바뀌었으면 지금 행을 그대로 알린다
@@ -88,7 +89,7 @@ public class FakePgService {
                 return FakePgReply.of(tx);
             }
             Integer updated = write.execute(status -> repository.cancelApproved(orderId));
-            if (updated != null && updated == 1) {
+            if (RowCounts.changedOne(updated)) {
                 return FakePgReply.of(orderId, FakePgStatus.CANCELLED, tx.getPgTxId());
             }
         }
@@ -102,7 +103,7 @@ public class FakePgService {
             return row;
         }
         Integer updated = write.execute(status -> repository.declineStaleProcessing(orderId, staleMicros));
-        return updated != null && updated == 1 ? find(orderId) : row;
+        return RowCounts.changedOne(updated) ? find(orderId) : row;
     }
 
     private Optional<FakePgOrder> find(String orderId) {

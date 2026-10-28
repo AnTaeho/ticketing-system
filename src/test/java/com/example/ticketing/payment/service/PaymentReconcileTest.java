@@ -252,6 +252,7 @@ class PaymentReconcileTest {
         Fixture f = newHold(1);
         long paymentId = unknownPayment(f);
         db.makeDue(paymentId);
+        LocalDateTime payDeadline = db.payDeadline(f.holdId);
         CountDownLatch locked = new CountDownLatch(1);
         CountDownLatch release = new CountDownLatch(1);
         TransactionTemplate tx = new TransactionTemplate(transactionManager);
@@ -281,8 +282,8 @@ class PaymentReconcileTest {
         assertThat(afterUnlock).extracting(ClaimedPayment::paymentId).containsExactly(paymentId);
         ClaimedPayment claimed = afterUnlock.get(0);
         assertThat(claimed.orderId()).isEqualTo(db.payment(paymentId).get("order_id"));
-        assertThat(claimed.holdId()).isEqualTo(f.holdId);
-        assertThat(claimed.payDeadline()).isEqualTo(db.payDeadline(f.holdId));
+        assertThat(db.payment(claimed.paymentId())).containsEntry("hold_id", f.holdId);
+        assertThat(db.payDeadline(f.holdId)).isEqualTo(payDeadline);
         assertThat(claimed.notFoundCancelDue()).isFalse();
         assertThat(db.recheckMs(paymentId)).isBetween(30_000L - TOLERANCE_MS, 30_000L);
         assertThat(reconcileTransaction.claim(20)).isEmpty();

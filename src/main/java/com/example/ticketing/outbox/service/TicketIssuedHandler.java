@@ -1,5 +1,7 @@
 package com.example.ticketing.outbox.service;
 
+import com.example.ticketing.common.jdbc.ConstraintViolations;
+import com.example.ticketing.common.text.Texts;
 import com.example.ticketing.notification.domain.Notification;
 import com.example.ticketing.notification.repository.NotificationRepository;
 import com.example.ticketing.outbox.domain.OutboxTaskType;
@@ -9,7 +11,6 @@ import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Locale;
 import lombok.extern.slf4j.Slf4j;
-import org.hibernate.exception.ConstraintViolationException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
@@ -62,7 +63,7 @@ public class TicketIssuedHandler implements OutboxHandler {
         try {
             write.executeWithoutResult(status -> issue(bookingId));
         } catch (DataIntegrityViolationException e) {
-            if (!violates(e, Notification.UK_BOOKING)) {
+            if (!ConstraintViolations.matches(e, Notification.UK_BOOKING)) {
                 throw e;
             }
             log.info("[booking outbox] 예매 {} 발권 알림은 이미 있다", bookingId);
@@ -95,25 +96,8 @@ public class TicketIssuedHandler implements OutboxHandler {
         SeatRow first = seats.get(0);
         String others = seats.size() > 1 ? " 외 " + (seats.size() - 1) + "석" : "";
         return "「%s」 %s %s구역 %d열 %d번%s 예매가 확정됐어요. 예매번호 %s".formatted(
-                shorten(title), startsAt.format(STARTS_AT), first.section(), first.rowNo(), first.seatNo(), others,
-                bookingNumber);
-    }
-
-    private static String shorten(String title) {
-        return title.length() <= MAX_TITLE ? title : title.substring(0, MAX_TITLE - 1) + "…";
-    }
-
-    private static boolean violates(DataIntegrityViolationException e, String constraint) {
-        for (Throwable cause = e; cause != null && cause.getCause() != cause; cause = cause.getCause()) {
-            if (cause instanceof ConstraintViolationException violation
-                    && violation.getConstraintName() != null && violation.getConstraintName().contains(constraint)) {
-                return true;
-            }
-            if (cause.getMessage() != null && cause.getMessage().contains(constraint)) {
-                return true;
-            }
-        }
-        return false;
+                Texts.abbreviate(title, MAX_TITLE), startsAt.format(STARTS_AT), first.section(), first.rowNo(),
+                first.seatNo(), others, bookingNumber);
     }
 
     record SeatRow(String section, int rowNo, int seatNo) {

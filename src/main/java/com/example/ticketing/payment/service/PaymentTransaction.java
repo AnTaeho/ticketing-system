@@ -6,6 +6,8 @@ import com.example.ticketing.booking.repository.BookingSeatRepository;
 import com.example.ticketing.common.config.TicketingProperties;
 import com.example.ticketing.common.error.ApiException;
 import com.example.ticketing.common.error.ErrorCode;
+import com.example.ticketing.common.jdbc.RowCounts;
+import com.example.ticketing.common.text.Texts;
 import com.example.ticketing.common.time.DbClock;
 import com.example.ticketing.hold.domain.HoldStatus;
 import com.example.ticketing.hold.domain.SeatHold;
@@ -22,6 +24,7 @@ import com.example.ticketing.payment.dto.StartResult.Started;
 import com.example.ticketing.payment.repository.PaymentRepository;
 import com.example.ticketing.seat.repository.SeatRepository;
 import com.example.ticketing.seat.service.SeatCatalog;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -43,7 +46,6 @@ import tools.jackson.databind.json.JsonMapper;
 public class PaymentTransaction {
 
     private static final DateTimeFormatter BOOKING_DATE = DateTimeFormatter.ofPattern("yyyyMMdd");
-    private static final int MAX_LAST_ERROR = 200;
 
     private final PaymentRepository paymentRepository;
     private final SeatHoldRepository seatHoldRepository;
@@ -53,6 +55,7 @@ public class PaymentTransaction {
     private final OutboxWriter outboxWriter;
     private final SeatCatalog seatCatalog;
     private final DbClock dbClock;
+    private final Clock clock;
     private final TicketingProperties properties;
     private final JsonMapper jsonMapper;
 
@@ -88,10 +91,10 @@ public class PaymentTransaction {
         }
 
         LocalDateTime payDeadline = now.plus(properties.payment().payDeadline());
-        if (seatHoldRepository.markPaying(holdId, payDeadline) != 1) {
+        if (!RowCounts.changedOne(seatHoldRepository.markPaying(holdId, payDeadline))) {
             throw new ApiException(ErrorCode.HOLD_EXPIRED, Map.of("holdId", holdId));
         }
-        if (seatRepository.extendHeldUntil(holdId, payDeadline) != hold.getSeatCount()) {
+        if (!RowCounts.changedExactly(seatRepository.extendHeldUntil(holdId, payDeadline), hold.getSeatCount())) {
             throw new ApiException(ErrorCode.SEAT_STATE_CHANGED, Map.of("holdId", holdId));
         }
         List<Long> seatIds = seatRepository.findHeldSeatIds(holdId);
@@ -117,26 +120,25 @@ public class PaymentTransaction {
         LocalDateTime now = dbClock.now();
 
         if (seatIds.size() == hold.getSeatCount()) {
-            expect(seatRepository.markSold(holdId), seatIds.size(), "seat SOLD");
-            expect(seatHoldRepository.markConfirmed(holdId), 1, "hold CONFIRMED");
-            expect(paymentRepository.markApproved(paymentId, pgTxId), 1, "payment APPROVED");
+            RowCounts.requireExactly(seatRepository.markSold(holdId), seatIds.size(), "seat SOLD");
+            RowCounts.requireExactly(seatHoldRepository.markConfirmed(holdId), 1, "hold CONFIRMED");
+            RowCounts.requireExactly(paymentRepository.markApproved(paymentId, pgTxId), 1, "payment APPROVED");
             Booking booking = bookingRepository.save(Booking.confirmed(bookingNumber(now, holdId), holdId,
                     paymentId, hold.getUserId(), hold.getPerformanceId(), hold.getTotalAmount()));
-            expect(bookingSeatRepository.copySoldSeats(booking.getId(), holdId), seatIds.size(), "booking_seat");
-            outboxWriter.write(OutboxTaskType.TICKET_ISSUED, booking.getId(), json(
-                    "bookingId", booking.getId(), "userId", hold.getUserId(),
-                    "performanceId", hold.getPerformanceId()));
+            RowCounts.requireExactly(bookingSeatRepository.copySoldSeats(booking.getId(), holdId), seatIds.size(),
+                    "booking_seat");
+            outboxWriter.write(OutboxTaskType.TICKET_ISSUED, booking.getId(), json("bookingId", booking.getId()));
             // 서버와 DB의 시간대가 달라도 맞도록 DB 시각 기준 남은 시간으로 바꾼다
             LocalDateTime gateCloseAt = seatCatalog.performance(hold.getPerformanceId()).gateCloseAt();
-            Instant gateCloseInstant = Instant.now().plus(Duration.between(now, gateCloseAt));
+            Instant gateCloseInstant = clock.instant().plus(Duration.between(now, gateCloseAt));
             return applied(payment, hold, PaymentOutcome.CONFIRMED, PaymentStatus.APPROVED,
                     HoldStatus.CONFIRMED, booking, seatIds, gateCloseInstant);
         }
 
         // 결제 마감이 지나 남이 좌석을 가져갔다. 돈은 받았으므로 남은 좌석을 풀고 환불을 맡긴다
-        expect(seatRepository.releaseHeldSeats(holdId), seatIds.size(), "seat AVAILABLE");
-        expect(seatHoldRepository.markRefunding(holdId), 1, "hold REFUNDING");
-        expect(paymentRepository.markApproved(paymentId, pgTxId), 1, "payment APPROVED");
+        RowCounts.requireExactly(seatRepository.releaseHeldSeats(holdId), seatIds.size(), "seat AVAILABLE");
+        RowCounts.requireExactly(seatHoldRepository.markRefunding(holdId), 1, "hold REFUNDING");
+        RowCounts.requireExactly(paymentRepository.markApproved(paymentId, pgTxId), 1, "payment APPROVED");
         outboxWriter.write(OutboxTaskType.REFUND_REQUESTED, paymentId, json(
                 "paymentId", paymentId, "orderId", payment.getOrderId()));
         return applied(payment, hold, PaymentOutcome.SEAT_LOST, PaymentStatus.APPROVED,
@@ -158,7 +160,7 @@ public class PaymentTransaction {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public PaymentSettlement markUnknown(long paymentId, String detail) {
         long recheckMicros = properties.payment().unknownRecheckAfter().toNanos() / 1_000;
-        paymentRepository.markUnknown(paymentId, abbreviate(detail), recheckMicros);
+        paymentRepository.markUnknown(paymentId, Texts.abbreviate(detail, Payment.MAX_LAST_ERROR), recheckMicros);
         Payment payment = paymentRepository.findById(paymentId)
                 .orElseThrow(() -> paymentNotFound(paymentId));
         return current(payment);
@@ -169,7 +171,7 @@ public class PaymentTransaction {
     public boolean completeRefund(long paymentId) {
         long holdId = paymentRepository.findHoldIdById(paymentId).orElseThrow(() -> paymentNotFound(paymentId));
         seatHoldRepository.markReleasedFromRefunding(holdId);
-        return paymentRepository.markRefunded(paymentId) == 1;
+        return RowCounts.changedOne(paymentRepository.markRefunded(paymentId));
     }
 
     @Transactional(readOnly = true, isolation = Isolation.READ_COMMITTED)
@@ -218,12 +220,12 @@ public class PaymentTransaction {
         }
         long holdId = hold.getId();
         List<Long> seatIds = seatRepository.lockHeldSeatIds(holdId);
-        expect(seatRepository.releaseHeldSeats(holdId), seatIds.size(), "seat AVAILABLE");
-        expect(seatHoldRepository.markReleasedFromPaying(holdId), 1, "hold RELEASED");
+        RowCounts.requireExactly(seatRepository.releaseHeldSeats(holdId), seatIds.size(), "seat AVAILABLE");
+        RowCounts.requireExactly(seatHoldRepository.markReleasedFromPaying(holdId), 1, "hold RELEASED");
         int updated = target == PaymentStatus.DECLINED
                 ? paymentRepository.markDeclined(paymentId)
                 : paymentRepository.markCancelled(paymentId);
-        expect(updated, 1, "payment " + target);
+        RowCounts.requireExactly(updated, 1, "payment " + target);
         PaymentOutcome outcome = target == PaymentStatus.DECLINED
                 ? PaymentOutcome.DECLINED
                 : PaymentOutcome.CANCELLED;
@@ -258,7 +260,7 @@ public class PaymentTransaction {
                 : null;
         return new PaymentSettlement(payment.getId(), outcome, false, payment.getStatus(), hold.getStatus(),
                 booking == null ? null : booking.getId(), booking == null ? null : booking.getBookingNumber(),
-                hold.getId(), hold.getPerformanceId(), hold.getUserId(), hold.getHoldToken(), List.of(), null);
+                hold.getPerformanceId(), hold.getUserId(), hold.getHoldToken(), List.of(), null);
     }
 
     private static PaymentSettlement applied(Payment payment, SeatHold hold, PaymentOutcome outcome,
@@ -266,8 +268,7 @@ public class PaymentTransaction {
                                              Booking booking, List<Long> seatIds, Instant gateCloseAt) {
         return new PaymentSettlement(payment.getId(), outcome, true, paymentStatus, holdStatus,
                 booking == null ? null : booking.getId(), booking == null ? null : booking.getBookingNumber(),
-                hold.getId(), hold.getPerformanceId(), hold.getUserId(), hold.getHoldToken(),
-                List.copyOf(seatIds), gateCloseAt);
+                hold.getPerformanceId(), hold.getUserId(), hold.getHoldToken(), List.copyOf(seatIds), gateCloseAt);
     }
 
     static String bookingNumber(LocalDateTime dbNow, long holdId) {
@@ -280,20 +281,6 @@ public class PaymentTransaction {
             payload.put((String) keyValues[i], keyValues[i + 1]);
         }
         return jsonMapper.writeValueAsString(payload);
-    }
-
-    // hold 락 아래라 어긋날 수 없다. 어긋나면 롤백해 반쯤 바뀐 상태를 남기지 않는다
-    private static void expect(int actual, int expected, String what) {
-        if (actual != expected) {
-            throw new IllegalStateException(what + " 영향 행 수: 기대 " + expected + ", 실제 " + actual);
-        }
-    }
-
-    static String abbreviate(String detail) {
-        if (detail == null) {
-            return null;
-        }
-        return detail.length() <= MAX_LAST_ERROR ? detail : detail.substring(0, MAX_LAST_ERROR - 1) + "…";
     }
 
     private static ApiException paymentNotFound(long paymentId) {

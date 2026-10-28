@@ -3,14 +3,14 @@ package com.example.ticketing.seat.service;
 import com.example.ticketing.common.config.TicketingProperties;
 import com.example.ticketing.common.log.ThrottledWarn;
 import com.example.ticketing.common.metrics.Metrics.RebuildSource;
-import com.example.ticketing.common.redis.SchedulerLease;
+import com.example.ticketing.common.redis.InstanceId;
 import com.example.ticketing.seat.repository.SeatMapRedisStore;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Duration;
 import java.util.Optional;
+import java.util.function.LongSupplier;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -29,21 +29,16 @@ public class SeatMapSnapshotScheduler {
     private final Duration leaseTtl;
     private final Duration snapshotTtl;
     private final Counter rebuilds;
-    private final ThrottledWarn failureWarn = new ThrottledWarn(log);
+    private final ThrottledWarn failureWarn;
 
-    @Autowired
     public SeatMapSnapshotScheduler(SeatCatalog seatCatalog, SeatMapBuilder builder, SeatMapRedisStore store,
-                                    SchedulerLease schedulerLease, TicketingProperties properties,
+                                    InstanceId instanceId, LongSupplier nanoClock, TicketingProperties properties,
                                     MeterRegistry meterRegistry) {
-        this(seatCatalog, builder, store, schedulerLease.instanceId(), properties, meterRegistry);
-    }
-
-    SeatMapSnapshotScheduler(SeatCatalog seatCatalog, SeatMapBuilder builder, SeatMapRedisStore store,
-                             String instanceId, TicketingProperties properties, MeterRegistry meterRegistry) {
         this.seatCatalog = seatCatalog;
         this.builder = builder;
         this.store = store;
-        this.instanceId = instanceId;
+        this.instanceId = instanceId.value();
+        this.failureWarn = new ThrottledWarn(log, nanoClock);
         this.leaseTtl = properties.seatmap().leaseTtl();
         this.snapshotTtl = properties.seatmap().snapshotTtl();
         this.rebuilds = SeatMapBuilder.rebuildCounter(meterRegistry, RebuildSource.SCHEDULER);

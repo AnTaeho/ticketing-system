@@ -65,17 +65,4 @@ public class Seat {
 
     @Column(name = "held_until")
     private LocalDateTime heldUntil;
-
-    public static Seat available(Long performanceId, String section, int rowNo, int seatNo,
-                                 SeatGrade grade, int price) {
-        Seat seat = new Seat();
-        seat.performanceId = performanceId;
-        seat.section = section;
-        seat.rowNo = rowNo;
-        seat.seatNo = seatNo;
-        seat.grade = grade;
-        seat.price = price;
-        seat.status = SeatStatus.AVAILABLE;
-        return seat;
-    }
 }

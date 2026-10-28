@@ -1,5 +1,6 @@
 package com.example.ticketing.fakepg.controller;
 
+import com.example.ticketing.common.web.HttpNames;
 import com.example.ticketing.fakepg.domain.FakePgScenario;
 import com.example.ticketing.fakepg.domain.FakePgStatus;
 import com.example.ticketing.fakepg.dto.FakePgApproveRequest;
@@ -25,14 +26,13 @@ import org.springframework.web.bind.annotation.RestController;
 @RequiredArgsConstructor
 public class FakePgController {
 
-    public static final String SCENARIO_HEADER = "X-Fake-Pg-Scenario";
     private static final int MAX_ORDER_ID_LENGTH = 40;
 
     private final FakePgService fakePgService;
 
     @PostMapping
     public ResponseEntity<FakePgReply> approve(@RequestBody FakePgApproveRequest request,
-                                               @RequestHeader(value = SCENARIO_HEADER, required = false)
+                                               @RequestHeader(value = HttpNames.PG_SCENARIO_HEADER, required = false)
                                                String scenarioHeader) {
         String orderId = request.orderId();
         if (!validOrderId(orderId)) {

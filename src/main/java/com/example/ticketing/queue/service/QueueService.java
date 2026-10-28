@@ -4,6 +4,7 @@ import com.example.ticketing.common.config.TicketingProperties;
 import com.example.ticketing.common.error.ApiException;
 import com.example.ticketing.common.error.ErrorCode;
 import com.example.ticketing.common.log.ThrottledWarn;
+import com.example.ticketing.common.redis.RedisFailures;
 import com.example.ticketing.common.time.DbClock;
 import com.example.ticketing.queue.dto.QueueEntered;
 import com.example.ticketing.queue.dto.QueuePosition;
@@ -12,14 +13,15 @@ import com.example.ticketing.queue.repository.QueueRedisStore.Entered;
 import com.example.ticketing.seat.service.SeatCatalog;
 import com.example.ticketing.seat.service.SeatCatalog.PerformanceInfo;
 import com.example.ticketing.show.domain.PerformanceState;
-import io.lettuce.core.RedisException;
+import java.time.Clock;
 import java.util.Map;
 import java.util.UUID;
+import java.util.function.LongSupplier;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Service;
 
 // 진입·조회는 Redis가 없으면 줄 순서를 지킬 수 없으므로 503으로 막는다(fail-closed)
+// 점수는 Redis 안의 순서·만료 비교에만 쓰여 요청마다 DB 시각을 읽지 않고 서버 벽시계(ms)를 쓴다
 @Slf4j
 @Service
 public class QueueService {
@@ -29,16 +31,19 @@ public class QueueService {
     private final QueueRedisStore repository;
     private final SeatCatalog seatCatalog;
     private final DbClock dbClock;
+    private final Clock clock;
     private final int capacity;
     private final long processingTtlMs;
     private final long waitingTtlMs;
-    private final ThrottledWarn unavailableWarn = new ThrottledWarn(log);
+    private final ThrottledWarn unavailableWarn;
 
-    public QueueService(QueueRedisStore repository, SeatCatalog seatCatalog, DbClock dbClock,
-                        TicketingProperties properties) {
+    public QueueService(QueueRedisStore repository, SeatCatalog seatCatalog, DbClock dbClock, Clock clock,
+                        LongSupplier nanoClock, TicketingProperties properties) {
         this.repository = repository;
         this.seatCatalog = seatCatalog;
         this.dbClock = dbClock;
+        this.clock = clock;
+        this.unavailableWarn = new ThrottledWarn(log, nanoClock);
         this.capacity = properties.queue().capacity();
         this.processingTtlMs = properties.queue().processingTokenTtl().toMillis();
         this.waitingTtlMs = properties.queue().waitingTokenTtl().toMillis();
@@ -47,12 +52,15 @@ public class QueueService {
     public QueueEntered enter(long performanceId, long userId) {
         ensureOpen(performanceId);
         String member = userId + "." + UUID.randomUUID();
-        long now = System.currentTimeMillis();
+        long now = clock.millis();
         try {
             Entered entered = repository.enter(performanceId, userId, member, now, now + processingTtlMs,
                     capacity, waitingTtlMs);
             return new QueueEntered(entered.member(), entered.status());
-        } catch (DataAccessException | RedisException e) {
+        } catch (RuntimeException e) {
+            if (!RedisFailures.isFailure(e)) {
+                throw e;
+            }
             throw unavailable("enter", performanceId, e);
         }
     }
@@ -63,8 +71,11 @@ public class QueueService {
             throw new ApiException(ErrorCode.QUEUE_TOKEN_NOT_FOUND);
         }
         try {
-            return lookUp(performanceId, token, System.currentTimeMillis());
-        } catch (DataAccessException | RedisException e) {
+            return lookUp(performanceId, token, clock.millis());
+        } catch (RuntimeException e) {
+            if (!RedisFailures.isFailure(e)) {
+                throw e;
+            }
             throw unavailable("status", performanceId, e);
         }
     }
@@ -75,7 +86,7 @@ public class QueueService {
             return false;
         }
         Double expireAt = repository.processingScore(performanceId, token);
-        return expireAt != null && expireAt > System.currentTimeMillis();
+        return expireAt != null && expireAt > clock.millis();
     }
 
     // 선점이 커밋된 뒤에만 부른다. 반환: 처리열에서 지웠는지

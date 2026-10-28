@@ -33,6 +33,7 @@ import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.io.IOException;
 import java.net.ServerSocket;
+import java.time.Clock;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -203,10 +204,11 @@ class SeatHoldQueueTest {
         TicketingRedis deadRedis = TestTicketingRedis.connectTo("localhost", closedPort(), properties);
         try {
             QueueService deadQueue = new QueueService(new QueueRedisStore(deadRedis),
-                    seatCatalog, dbClock, properties);
+                    seatCatalog, dbClock, Clock.systemDefaultZone(), System::nanoTime, properties);
             SeatGateRedisStore spyGate = mock(SeatGateRedisStore.class);
             SeatHoldService service = new SeatHoldService(seatCatalog, seatHoldTransaction, seatHoldRepository,
-                    seatRepository, paymentRepository, dbClock, spyGate, deadQueue, properties, meterRegistry);
+                    seatRepository, paymentRepository, dbClock, spyGate, deadQueue, System::nanoTime, properties,
+                    meterRegistry);
             // 토큰 주인 확인은 Redis 없이 하므로 장애 중에도 남의 토큰은 403이다
             assertThatThrownBy(() -> service.hold(userId, pid, seatIds(pid).subList(0, 1),
                     (userId + 1) + "." + UUID.randomUUID()))
@@ -254,7 +256,8 @@ class SeatHoldQueueTest {
         long userId = fixtures.newUser();
         SeatGateRedisStore offGate = mock(SeatGateRedisStore.class);
         SeatHoldService gateOff = new SeatHoldService(seatCatalog, seatHoldTransaction, seatHoldRepository,
-                seatRepository, paymentRepository, dbClock, offGate, queueService, with(false, true), meterRegistry);
+                seatRepository, paymentRepository, dbClock, offGate, queueService, System::nanoTime, with(false, true),
+                meterRegistry);
 
         assertThatThrownBy(() -> gateOff.hold(userId, pid, target, null))
                 .extracting("code").isEqualTo(ErrorCode.NOT_ADMITTED);
@@ -267,7 +270,7 @@ class SeatHoldQueueTest {
 
     private SeatHoldService newService(QueueService queue, TicketingProperties props) {
         return new SeatHoldService(seatCatalog, seatHoldTransaction, seatHoldRepository, seatRepository,
-                paymentRepository, dbClock, gate, queue, props, meterRegistry);
+                paymentRepository, dbClock, gate, queue, System::nanoTime, props, meterRegistry);
     }
 
     private TicketingProperties with(boolean gateEnabled, boolean queueRequired) {

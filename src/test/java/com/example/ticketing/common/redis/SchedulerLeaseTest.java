@@ -17,6 +17,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -46,7 +47,7 @@ class SchedulerLeaseTest {
         int instances = 8;
         List<SchedulerLease> leases = new ArrayList<>();
         for (int i = 0; i < instances; i++) {
-            leases.add(new SchedulerLease(bookingRedis, "instance-" + i));
+            leases.add(new SchedulerLease(bookingRedis, new InstanceId()));
         }
         AtomicInteger ran = new AtomicInteger();
         AtomicInteger acquired = new AtomicInteger();
@@ -83,7 +84,7 @@ class SchedulerLeaseTest {
     @Test
     @DisplayName("남이 잡은 리스는 건너뛰고 지우지 않는다")
     void skipsAndKeepsOthersLease() {
-        SchedulerLease lease = new SchedulerLease(bookingRedis, "mine");
+        SchedulerLease lease = new SchedulerLease(bookingRedis, new InstanceId());
         redis().opsForValue().set(key, "someone-else", Duration.ofSeconds(5));
         AtomicBoolean ran = new AtomicBoolean();
 
@@ -96,8 +97,8 @@ class SchedulerLeaseTest {
     @Test
     @DisplayName("TTL이 지나면 다른 인스턴스가 잡고, 늦게 끝난 원래 인스턴스는 남의 리스를 지우지 않는다")
     void expiredLeaseIsTakenOverAndNotDeletedByOldOwner() {
-        SchedulerLease a = new SchedulerLease(bookingRedis, "a");
-        SchedulerLease b = new SchedulerLease(bookingRedis, "b");
+        SchedulerLease a = new SchedulerLease(bookingRedis, new InstanceId());
+        SchedulerLease b = new SchedulerLease(bookingRedis, new InstanceId());
         AtomicBoolean bRan = new AtomicBoolean();
         Duration ttl = Duration.ofSeconds(30);
 
@@ -118,7 +119,7 @@ class SchedulerLeaseTest {
     @Test
     @DisplayName("작업이 예외를 내도 리스를 풀고 예외는 그대로 던진다")
     void releasesOnTaskFailure() {
-        SchedulerLease lease = new SchedulerLease(bookingRedis, "mine");
+        SchedulerLease lease = new SchedulerLease(bookingRedis, new InstanceId());
 
         assertThatThrownBy(() -> lease.runIfLeader(name, Duration.ofSeconds(5), () -> {
             throw new IllegalStateException("boom");
@@ -132,7 +133,7 @@ class SchedulerLeaseTest {
     void skipsOnRedisFailure() throws IOException {
         TicketingRedis dead = TestTicketingRedis.connectTo("localhost", closedPort(), props);
         try {
-            SchedulerLease lease = new SchedulerLease(dead, "mine");
+            SchedulerLease lease = new SchedulerLease(dead, new InstanceId());
             AtomicBoolean ran = new AtomicBoolean();
             assertThat(lease.runIfLeader(name, Duration.ofSeconds(5), () -> ran.set(true))).isFalse();
             assertThat(ran).isFalse();
@@ -143,8 +144,14 @@ class SchedulerLeaseTest {
 
     @Test
     @DisplayName("빈으로 등록된 리스는 기동 때 만든 UUID를 인스턴스 ID로 쓴다")
-    void beanInstanceIdIsUuid(@Autowired SchedulerLease bean) {
-        assertThat(UUID.fromString(bean.instanceId())).isNotNull();
+    void beanInstanceIdIsUuid(@Autowired SchedulerLease bean, @Autowired InstanceId instanceId) {
+        AtomicReference<String> owner = new AtomicReference<>();
+
+        assertThat(bean.runIfLeader(name, Duration.ofSeconds(5), () -> owner.set(redis().opsForValue().get(key))))
+                .isTrue();
+
+        assertThat(UUID.fromString(owner.get())).isNotNull();
+        assertThat(owner.get()).isEqualTo(instanceId.value());
     }
 
     private StringRedisTemplate redis() {

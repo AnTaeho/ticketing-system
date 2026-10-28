@@ -9,6 +9,7 @@ import com.example.ticketing.seat.domain.SeatMapSnapshot.Section;
 import com.example.ticketing.seat.domain.SeatStatus;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
+import java.time.Clock;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -30,6 +31,7 @@ public class SeatMapBuilder {
 
     private final JdbcTemplate jdbcTemplate;
     private final JsonMapper jsonMapper;
+    private final Clock clock;
 
     // 좌석이 없으면 빈 Optional. 빈 좌석맵은 저장하거나 내보내지 않는다
     public Optional<String> build(long performanceId) {
@@ -58,7 +60,8 @@ public class SeatMapBuilder {
         if (sections.isEmpty()) {
             return Optional.empty();
         }
-        SeatMapSnapshot snapshot = new SeatMapSnapshot(performanceId, System.currentTimeMillis(), sections);
+        // 화면이 새 스냅샷인지 가리는 값일 뿐이라 DB 시각을 읽지 않고 서버 벽시계를 쓴다
+        SeatMapSnapshot snapshot = new SeatMapSnapshot(performanceId, clock.millis(), sections);
         return Optional.of(jsonMapper.writeValueAsString(snapshot));
     }
 

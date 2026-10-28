@@ -1,5 +1,6 @@
 package com.example.ticketing.common.error;
 
+import com.example.ticketing.common.web.HttpNames;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import org.springframework.core.Ordered;
@@ -19,8 +20,6 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
 @RestControllerAdvice(annotations = RestController.class)
 public class ApiExceptionHandler {
 
-    private static final String IDEMPOTENCY_KEY_HEADER = "Idempotency-Key";
-
     @ExceptionHandler(ApiException.class)
     public ResponseEntity<ErrorResponse> handleBooking(ApiException e) {
         return respond(e.getCode(), e.getDetail());
@@ -37,7 +36,7 @@ public class ApiExceptionHandler {
 
     @ExceptionHandler(MissingRequestHeaderException.class)
     public ResponseEntity<ErrorResponse> handleMissingHeader(MissingRequestHeaderException e) {
-        if (IDEMPOTENCY_KEY_HEADER.equalsIgnoreCase(e.getHeaderName())) {
+        if (HttpNames.IDEMPOTENCY_KEY_HEADER.equalsIgnoreCase(e.getHeaderName())) {
             return respond(ErrorCode.IDEMPOTENCY_KEY_REQUIRED, Map.of());
         }
         return respond(ErrorCode.INVALID_REQUEST, Map.of("header", e.getHeaderName()));
