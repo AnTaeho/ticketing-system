@@ -1,7 +1,9 @@
+import io.gatling.commons.validation._
 import io.gatling.core.Predef._
 import io.gatling.core.structure.ChainBuilder
 import io.gatling.http.Predef._
 import io.gatling.http.protocol.HttpProtocolBuilder
+import io.gatling.http.response.Response
 
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicInteger
@@ -56,16 +58,27 @@ object BookingSteps {
       .check(jsonPath("$.userId").ofType[Long].saveAs("userId"))
   )
 
+  private val SoldOut = "SOLD_OUT"
+
+  private def statusIs(code: Int) = (r: Response, _: Session) => (r.status.code == code).success
+
+  // 매진이면 진입이 409 SOLD_OUT이다. 토큰 없이 queueStatus를 SOLD_OUT으로 두고, 처음 매진을 안 시각을 남긴다
   def enterQueue(perf: String): ChainBuilder =
     exec(_.set("enterAt", System.currentTimeMillis()))
       .exec(
         http(RequestNames.QueueEnter)
           .post(s"$perf/queue/tokens")
           .header("X-User-Id", "#{userId}")
-          .check(status.is(200))
-          .check(jsonPath("$.token").saveAs("queueToken"))
-          .check(jsonPath("$.status").saveAs("queueStatus"))
+          .check(status.in(200, 409))
+          .checkIf(statusIs(200))(jsonPath("$.token").saveAs("queueToken"), jsonPath("$.status").saveAs("queueStatus"))
+          .checkIf(statusIs(409))(jsonPath("$.code").is(SoldOut).saveAs("queueStatus"))
       )
+      .exec(markSoldOut)
+
+  private val markSoldOut: Session => Session = s =>
+    if (s("queueStatus").asOption[String].contains(SoldOut) && !s.contains("soldOutAt"))
+      s.set("soldOutAt", System.currentTimeMillis())
+    else s
 
   private def waiting(s: Session): Boolean = s("queueStatus").asOption[String].contains("WAITING")
 
@@ -100,7 +113,7 @@ object BookingSteps {
         .check(status.is(204))
     )
 
-  // PROCESSING을 본 시각을 admittedAt으로 남긴다. maxWait가 지나도 WAITING이면 포기한다
+  // PROCESSING을 본 시각을 admittedAt으로 남긴다. SOLD_OUT을 받거나 maxWait가 지나도 WAITING이면 그만둔다
   def waitForAdmission(perf: String, pauseMin: FiniteDuration, pauseMax: FiniteDuration,
                        maxWait: FiniteDuration): ChainBuilder =
     asLongAs(s => waiting(s) && System.currentTimeMillis() - s("enterAt").as[Long] < maxWait.toMillis) {
@@ -113,6 +126,7 @@ object BookingSteps {
             .check(jsonPath("$.status").saveAs("queueStatus"))
         )
         .exec(s => s.set("polls", s("polls").asOption[Int].getOrElse(0) + 1))
+        .exec(markSoldOut)
     }
       .doIf(s => s("queueStatus").asOption[String].contains("PROCESSING")) {
         exec(_.set("admittedAt", System.currentTimeMillis()))
@@ -208,7 +222,8 @@ object BookingSteps {
   }
 
   // 로그인 → 대기열 → 입장 대기 → 잡기 → 떠남 → 결제. 어디서 멈췄든 마지막에 사용자 기록을 남긴다.
-  // 화면처럼 좌석 화면은 잡기에 성공해 넘어갈 때도 떠남을 보내고, 대기열 화면은 입장하지 못하고 떠날 때만 보낸다
+  // 화면처럼 좌석 화면은 잡기에 성공해 넘어갈 때도 떠남을 보내고, 대기열 화면은 입장하지 못하고 떠날 때만 보낸다.
+  // 순서 조회가 SOLD_OUT이면 입장하지 못한 사용자처럼 떠남을 보내고 끝낸다
   def booking(perf: String, pauseMin: FiniteDuration, pauseMax: FiniteDuration, maxWait: FiniteDuration,
               maxRetries: Int, stopWhenSoldOut: Boolean, userLog: UserLog): ChainBuilder =
     exec(login)

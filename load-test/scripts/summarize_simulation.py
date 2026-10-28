@@ -182,6 +182,9 @@ def summarize(reqs, user_events, names, users):
     out["leave_req"] = len(leaves)
     out["leave_ko"] = sum(1 for r in leaves if r[2] != "OK")
     out["leave_p99_ms"] = pct([e - s for s, e, _, _ in leaves], 99)
+    if users is not None and users and "sold_out_at_ms" in users[0]:
+        out["enter_sold_out"] = sum(1 for u in users if u["outcome"] == "enter_sold_out")
+        out["poll_sold_out"] = sum(1 for u in users if u["outcome"] == "queue_sold_out")
 
     detail = {
         "steps": {key: step_stats(reqs.get(names[key], [])) for key in

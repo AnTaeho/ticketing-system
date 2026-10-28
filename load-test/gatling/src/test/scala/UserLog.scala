@@ -21,7 +21,7 @@ class UserLog(path: Option[String]) {
 
   def write(): Unit = path.foreach { p =>
     val header = "n,enter_at_ms,admitted_at_ms,polls,hold_attempts,hold_status,pay_status,outcome," +
-      "heartbeats,heartbeat_status,leave_status"
+      "heartbeats,heartbeat_status,leave_status,sold_out_at_ms"
     Files.write(Paths.get(p), (header +: rows.asScala.toSeq).mkString("", "\n", "\n").getBytes(StandardCharsets.UTF_8))
   }
 
@@ -29,13 +29,15 @@ class UserLog(path: Option[String]) {
     def opt(key: String): String = s(key).asOption[Any].map(_.toString).getOrElse("")
     Seq(opt("n"), opt("enterAt"), opt("admittedAt"), s("polls").asOption[Int].getOrElse(0).toString,
       s("holdAttempts").asOption[Int].getOrElse(0).toString, opt("holdStatus"), opt("payStatus"), outcome(s),
-      s("heartbeats").asOption[Int].getOrElse(0).toString, opt("heartbeatStatus"), opt("leaveStatus"))
+      s("heartbeats").asOption[Int].getOrElse(0).toString, opt("heartbeatStatus"), opt("leaveStatus"),
+      opt("soldOutAt"))
       .mkString(",")
   }
 
   private def outcome(s: Session): String =
     if (!s.contains("userId")) "login_failed"
-    else if (!s.contains("queueToken")) "queue_enter_failed"
+    else if (!s.contains("queueToken"))
+      if (s("queueStatus").asOption[String].contains("SOLD_OUT")) "enter_sold_out" else "queue_enter_failed"
     else if (!s.contains("admittedAt")) s("queueStatus").asOption[String] match {
       case Some("WAITING") => "queue_timeout"
       case Some(other)     => s"queue_${other.toLowerCase}"
