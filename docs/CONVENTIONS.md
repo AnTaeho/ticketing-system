@@ -23,13 +23,15 @@ com.example.ticketing
 | 하위 패키지 | 들어가는 것 | 의존해도 되는 곳 |
 |---|---|---|
 | `controller` | `*Controller`, 컨트롤러 전용 변환기 | 같은 기능의 `service`·`dto`, `common` |
-| `dto` | `*Request`, `*Command`, `*Result`, `*Response`, 흐름 결과 record | 같은 기능의 `domain`, `common` |
+| `dto` | `*Request`, `*Command`, `*Result`, `*Response`, 흐름 결과 record | 같은 기능의 `domain`, 다른 기능의 `domain` 값·enum, `common` |
 | `service` | `*Service`, `*Transaction`, `*Reader`, `*Scheduler`, `*Handler` | 같은 기능의 `repository`·`domain`·`dto`·`client`, 다른 기능의 `service`·`dto`, `common` |
 | `repository` | `*Repository`(JPA), `*JdbcRepository`(JDBC), `*RedisStore`(Redis) | 같은 기능의 `domain`, `common` |
 | `domain` | 엔티티, 상태 enum, 값 record, 순수 규칙 | `common`, 다른 기능의 `domain` 값·enum (엔티티는 제외) |
 | `client` | 외부 시스템 클라이언트와 그 결과 타입 | `common` |
 
 - 다른 기능의 `controller`나 `repository`를 직접 부르지 않는다. 필요하면 그 기능의 `service`를 부른다.
+- 테이블의 쓰기는 그 테이블을 가진 기능만 한다. 다른 기능의 테이블을 읽기만 할 때는, 서비스 호출이 순환을 만들면 자기 `*JdbcRepository`의 읽기 SQL로 읽어도 된다.
+- 의존은 한 방향이다: `payment → booking`, `payment·booking → hold → seat → show`. 거꾸로 부르지 않는다.
 - 두 기능이 서로를 부르면(순환) 한쪽으로 몰거나 공통 개념을 `common`으로 뺀다.
 
 ## 2. 클래스 역할과 이름
