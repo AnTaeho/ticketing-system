@@ -31,6 +31,7 @@ com.example.ticketing
 
 - 다른 기능의 `controller`나 `repository`를 직접 부르지 않는다. 필요하면 그 기능의 `service`를 부른다.
 - 테이블의 쓰기는 그 테이블을 가진 기능만 한다. 다른 기능의 테이블을 읽기만 할 때는, 서비스 호출이 순환을 만들면 자기 `*JdbcRepository`의 읽기 SQL로 읽어도 된다.
+- 예외: hold·payment·booking의 `*Transaction`은 한 트랜잭션 안에서 락 순서를 지키려고 좌석·회차·사용자 repository로 직접 행을 잠그고 상태를 바꾼다. 트랜잭션 밖의 조회는 이 예외에 들지 않는다.
 - 의존은 한 방향이다: `payment → booking`, `payment·booking → hold → seat → show`, `payment·booking·notification → outbox`. 거꾸로 부르지 않는다.
 - `outbox`는 작업 큐(기록, 집기, 결과 반영)만 맡고 다른 기능을 모른다. 작업 처리는 그 작업을 가진 기능이 `OutboxHandler`로 구현한다(환불은 `payment`, 발권 알림은 `notification`).
 - `ops`는 시연용 집계라 다른 기능의 테이블과 상태 enum을 읽기만 하고, 다른 기능은 `ops`를 부르지 않는다.
@@ -41,17 +42,20 @@ com.example.ticketing
 | 접미사 | 하는 일 | 하지 않는 일 |
 |---|---|---|
 | `*Controller` | HTTP 요청을 `*Command`로 바꾸고, `*Result`를 `*Response`로 바꾼다. 상태 코드를 고른다 | 판정, SQL, Redis |
-| `*Service` | 한 유스케이스의 흐름을 짠다. 트랜잭션을 열지 않는다. 커밋 뒤 Redis 반영과 외부 호출을 여기서 한다 | SQL |
+| `*Service` | 한 유스케이스의 흐름을 짠다. 트랜잭션을 열지 않는다(관리 API의 단순 생성만 예외). 커밋 뒤 Redis 반영과 외부 호출을 여기서 한다 | SQL |
 | `*Transaction` | 쓰기 트랜잭션 한 단위. 락, 조건부 UPDATE, 같은 트랜잭션의 Outbox 기록 | 외부 호출, Redis |
 | `*Reader` | 읽기 전용 조회와 조립 | 쓰기 |
-| `*Scheduler` | 주기 실행의 진입점. 집고, 건마다 위임하고, 실패를 기록한다. `@Scheduled` 메서드 이름은 `run()`이다 | 업무 판정 |
+| `*Scheduler` | 주기 실행의 진입점. 집고, 건마다 위임하고, 실패를 기록한다. `@Scheduled` 메서드 이름은 `run()`이다. 건마다의 판정이 한 화면에 들면 여기에 둔다 | 트랜잭션, 길어진 판정 |
+| `*Reflector` | 커밋 뒤 Redis 게이트 반영. 게이트 스위치와 반영 실패 기록을 맡는다 | DB |
+| `*Writer` | 같은 트랜잭션 안에서 기록만 한다(`OutboxWriter`) | 커밋 |
 | `*Repository` | JPA. 단건 저장·조회와 native 조건부 UPDATE | 여러 테이블 조립 |
 | `*JdbcRepository` | `NamedParameterJdbcTemplate`. `SKIP LOCKED` 집기, 다건·조인 조회, 대량 INSERT | 업무 판정 |
 | `*RedisStore` | Redis 읽기·쓰기와 Lua 실행. Redis 장애는 `RedisUnavailableException`으로 바꿔 던진다 | 장애 정책 |
 | `*Client` | 외부 시스템 호출. 실패를 결과 값으로 돌려준다 | 재시도 정책 |
 
 - 메서드 이름은 하는 일을 그대로 쓴다. `boolean`은 이름 그대로의 뜻일 때만 돌려주고, 갈래가 셋 이상이거나 "모름"이 섞이면 enum을 돌려준다.
-- 상태 전이 메서드는 `출발To도착`(`heldToPaying`, `payingToConfirmed`)으로 짓는다.
+- 상태 전이 메서드는 repository와 `*Transaction` 모두 `출발To도착`(`heldToPaying`, `payingToConfirmed`)으로 짓는다.
+- 표에 없는 service 도우미(`*Issuer`, `*Builder`, `*Metrics`)는 이름이 하는 일을 그대로 말하게 짓는다.
 - 인자 순서는 `userId, performanceId, …`로 통일한다.
 
 ## 3. 데이터 전달은 DTO로
@@ -124,7 +128,8 @@ com.example.ticketing
 - 데이터는 운영 경로(`Fixtures`)로 만든다. 픽스처가 만든 회차는 픽스처가 기억했다가 정리한다.
 - 동시성 테스트는 `Concurrently` 러너를 쓴다. 출발 전 모두 준비시키고, 시간 제한을 두고, 예기치 못한 예외가 0인지 단언한다.
 - 준비, 실행, 검증은 빈 줄로 나눈다. `@DisplayName`은 "조건이면 결과다" 한 문장이다.
-- 테스트 수와 단언 강도를 줄이는 리팩터링은 하지 않는다. 표준 출력에 찍지 않는다.
+- 규칙은 그 규칙을 가진 층에서 한 번 검증한다. 다른 층에서 같은 규칙을 되풀이하는 테스트와 소스 문자열만 확인하는 테스트는 두지 않는다. 테스트를 옮기거나 합칠 때 단언 강도는 줄이지 않는다.
+- 표준 출력에 찍지 않는다.
 
 ## 12. 화면 (Thymeleaf + 순수 JS)
 
