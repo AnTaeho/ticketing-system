@@ -61,6 +61,8 @@ ticketing:
   gate:
     enabled: true              # 부하 테스트 비교 스위치
     fallback-max-concurrency: 8      # Hikari 풀(10)보다 작게
+    reconcile-enabled: true
+    reconcile-scan-ms: 30000
   queue:
     capacity: 200
     processing-max-session: 10m      # 입장 뒤 좌석 화면에 머물 수 있는 최대 시간. 생존 신호를 보내도 이보다 길어지지 않는다
@@ -85,8 +87,6 @@ ticketing:
     max-attempts: 5
     max-backoff: 60s           # 재시도 간격은 2^attempt초이고 이 값에서 멈춘다
   ops:
-    orphan-enabled: true
-    orphan-scan-ms: 30000
     stale-payment-after: 30s   # 운영 화면에 오래 걸리는 결제로 올리는 기준
   pg:
     base-url: ""               # 비우면 http://localhost:${local.server.port}/fake-pg

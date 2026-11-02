@@ -36,12 +36,12 @@ public class PaymentService {
     private final Duration gateKeyMargin;
 
     public PaymentService(PaymentTransaction paymentTransaction, PaymentReader paymentReader, PgClient pgClient,
-                          SeatGateReflector gate, TicketingProperties properties) {
+                          SeatGateReflector gate, PaymentGateReflector reflector, TicketingProperties properties) {
         this.paymentTransaction = paymentTransaction;
         this.paymentReader = paymentReader;
         this.pgClient = pgClient;
         this.gate = gate;
-        this.reflector = new PaymentGateReflector(gate);
+        this.reflector = reflector;
         this.gateKeyMargin = properties.payment().gateKeyMargin();
     }
 
@@ -60,9 +60,9 @@ public class PaymentService {
 
         PgResult pg = pgClient.approve(started.orderId(), started.amount(), command.pgScenario().map(Enum::name));
         PaymentSettlement settlement = switch (pg.status()) {
-            case APPROVED -> paymentTransaction.confirm(started.paymentId(), pg.pgTxId());
-            case DECLINED -> paymentTransaction.decline(started.paymentId());
-            default -> paymentTransaction.markUnknown(started.paymentId(), unknownCause(pg));
+            case APPROVED -> paymentTransaction.openToApproved(started.paymentId(), pg.pgTxId());
+            case DECLINED -> paymentTransaction.openToDeclined(started.paymentId());
+            default -> paymentTransaction.requestedToUnknown(started.paymentId(), unknownCause(pg));
         };
         // 승인 중 남이 가져간 좌석의 키도 이 요청이 늘려 두었으므로, 트랜잭션이 본 좌석 대신 늘린 좌석 전부에 반영한다
         reflector.reflect(settlement.withGate(started.gate()));

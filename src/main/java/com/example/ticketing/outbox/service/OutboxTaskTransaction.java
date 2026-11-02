@@ -44,17 +44,17 @@ public class OutboxTaskTransaction {
         this.maxBackoffSeconds = properties.outbox().maxBackoff().toSeconds();
     }
 
-    // 모르는 종류는 집지 않고 핸들러가 없는 작업과 같게 실패로 기록한다
+    // 모르는 종류(옛 버전이나 잘못 들어간 행)는 집지 않고 실패로 기록한다
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public List<ClaimedOutboxTask> claim(int batch) {
-        List<DueOutboxTask> due = repository.claimDue(batch);
-        List<DueOutboxTask> known = new ArrayList<>();
-        for (DueOutboxTask task : due) {
-            if (OutboxTaskType.parse(task.taskType()).isPresent()) {
-                known.add(task);
+        List<KnownTask> known = new ArrayList<>();
+        for (DueOutboxTask task : repository.claimDue(batch)) {
+            Optional<OutboxTaskType> type = OutboxTaskType.parse(task.taskType());
+            if (type.isPresent()) {
+                known.add(new KnownTask(task, type.get()));
             } else {
                 FailedAttempt failure = failedAttempt(task.attempt(), "핸들러 없음: " + task.taskType());
-                repository.markFailedAttemptLocked(task.id(), failure);
+                repository.markFailedAttemptUnclaimed(task.id(), failure);
                 log.warn("[outbox] 모르는 작업 종류라 실패로 기록했다 taskId={} type={} status={}", task.id(),
                         task.taskType(), failure.status());
             }
@@ -63,17 +63,17 @@ public class OutboxTaskTransaction {
             return List.of();
         }
         LocalDateTime lockedUntil = dbClock.now().plus(lockDuration);
-        repository.lock(known.stream().map(DueOutboxTask::id).toList(), lockedUntil);
+        repository.lock(known.stream().map(k -> k.row().id()).toList(), lockedUntil);
         return known.stream()
-                .map(t -> new ClaimedOutboxTask(t.id(), OutboxTaskType.valueOf(t.taskType()), t.aggregateId(),
-                        t.payload(), t.attempt(), lockedUntil))
+                .map(k -> new ClaimedOutboxTask(k.row().id(), k.type(), k.row().aggregateId(), k.row().payload(),
+                        k.row().attempt(), lockedUntil))
                 .toList();
     }
 
     // false면 그 사이 잠금이 지나 다른 워커가 다시 집었다. 결과는 그쪽이 쓴다
     @Transactional(isolation = Isolation.READ_COMMITTED)
-    public boolean markDone(ClaimedOutboxTask task) {
-        return RowCounts.changedOne(repository.markDone(task.id(), task.lockedUntil()));
+    public boolean processingToDone(ClaimedOutboxTask task) {
+        return RowCounts.changedOne(repository.processingToDone(task.id(), task.lockedUntil()));
     }
 
     // 다시 해 볼 횟수가 남았으면 PENDING(2^attempt초 뒤, 최대 max-backoff), 다 썼으면 FAILED. 다른 워커가 다시 집었으면 empty
@@ -94,5 +94,8 @@ public class OutboxTaskTransaction {
 
     static long backoffSeconds(int attempt, long maxSeconds) {
         return Math.min(1L << Math.min(attempt, MAX_BACKOFF_EXPONENT), maxSeconds);
+    }
+
+    private record KnownTask(DueOutboxTask row, OutboxTaskType type) {
     }
 }

@@ -4,7 +4,6 @@ import com.example.ticketing.common.config.TicketingProperties;
 import com.example.ticketing.common.metrics.Metrics;
 import com.example.ticketing.common.metrics.Metrics.ReconcileResult;
 import com.example.ticketing.common.metrics.Metrics.Tag;
-import com.example.ticketing.hold.service.SeatGateReflector;
 import com.example.ticketing.payment.client.PgClient;
 import com.example.ticketing.payment.client.PgResult;
 import com.example.ticketing.payment.dto.ClaimedPayment;
@@ -40,12 +39,13 @@ public class PaymentReconcileScheduler {
     private final Counter queryFailed;
 
     public PaymentReconcileScheduler(PaymentReconcileTransaction reconcileTransaction,
-                                     PaymentTransaction paymentTransaction, PgClient pgClient, SeatGateReflector gate,
-                                     TicketingProperties properties, MeterRegistry meterRegistry) {
+                                     PaymentTransaction paymentTransaction, PgClient pgClient,
+                                     PaymentGateReflector reflector, TicketingProperties properties,
+                                     MeterRegistry meterRegistry) {
         this.reconcileTransaction = reconcileTransaction;
         this.paymentTransaction = paymentTransaction;
         this.pgClient = pgClient;
-        this.reflector = new PaymentGateReflector(gate);
+        this.reflector = reflector;
         this.batchSize = properties.payment().reconcileBatchSize();
         this.recheckAfter = properties.payment().unknownRecheckAfter();
         this.processingRecheckAfter = properties.payment().processingRecheckAfter();
@@ -74,9 +74,9 @@ public class PaymentReconcileScheduler {
     void reconcile(ClaimedPayment payment) {
         PgResult pg = pgClient.query(payment.orderId());
         switch (pg.status()) {
-            case APPROVED -> settle(paymentTransaction.confirm(payment.paymentId(), pg.pgTxId()));
-            case DECLINED -> settle(paymentTransaction.decline(payment.paymentId()));
-            case CANCELLED -> settle(paymentTransaction.cancelAndRelease(payment.paymentId()));
+            case APPROVED -> settle(paymentTransaction.openToApproved(payment.paymentId(), pg.pgTxId()));
+            case DECLINED -> settle(paymentTransaction.openToDeclined(payment.paymentId()));
+            case CANCELLED -> settle(paymentTransaction.openToCancelled(payment.paymentId()));
             case PROCESSING -> recheck(payment, processingRecheckAfter, null, waiting);
             case NOT_FOUND -> notFound(payment);
             default -> recheck(payment, recheckAfter, pg.describe("PG 조회"), queryFailed);
@@ -91,8 +91,8 @@ public class PaymentReconcileScheduler {
         }
         PgResult cancel = pgClient.cancel(payment.orderId());
         switch (cancel.status()) {
-            case CANCELLED -> settle(paymentTransaction.cancelAndRelease(payment.paymentId()));
-            case DECLINED -> settle(paymentTransaction.decline(payment.paymentId()));
+            case CANCELLED -> settle(paymentTransaction.openToCancelled(payment.paymentId()));
+            case DECLINED -> settle(paymentTransaction.openToDeclined(payment.paymentId()));
             case CONFLICT -> recheck(payment, recheckAfter, cancel.describe("PG 취소"), waiting);
             default -> recheck(payment, recheckAfter, cancel.describe("PG 취소"), queryFailed);
         }

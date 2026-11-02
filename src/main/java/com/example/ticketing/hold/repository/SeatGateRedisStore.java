@@ -47,20 +47,18 @@ public class SeatGateRedisStore {
         seatIds.forEach(seatId -> keys.add(RedisKeys.seat(pid, seatId)));
         seatIds.forEach(seatId -> keys.add(RedisKeys.rehold(hold.userId(), pid, seatId)));
         List<?> reply = RedisFailures.translate(() -> redis.execute(RedisScripts.HOLD, keys, hold.holdToken(),
-                String.valueOf(ttl.toMillis()), String.valueOf(n)));
+                String.valueOf(ttl.toMillis())));
         return GateResult.fromScript(reply);
     }
 
     // userhold 키와 좌석 키 중 값이 holdToken인 것만 지운다. 반환: 지운 키 수
     public long release(GateHold hold) {
-        return RedisFailures.translate(
-                () -> redis.execute(RedisScripts.RELEASE, userHoldAndSeatKeys(hold), hold.holdToken()));
+        return releaseIfOwned(hold.holdToken(), userHoldAndSeatKeys(hold));
     }
 
     // 예매 취소용. 확정 때 userhold는 이미 지웠으므로 좌석 키만 지운다
     public long releaseSeatsOnly(GateHold hold) {
-        return RedisFailures.translate(
-                () -> redis.execute(RedisScripts.RELEASE, seatKeys(hold), hold.holdToken()));
+        return releaseIfOwned(hold.holdToken(), seatKeys(hold));
     }
 
     // 반환: 연장한 키 수

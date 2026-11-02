@@ -43,6 +43,9 @@ public class SeatJdbcRepository {
              WHERE hold_id IN (:holdIds) AND status = 'HELD'
              ORDER BY id""";
 
+    private static final String SEAT_IDS_OF_HOLD_SQL =
+            "SELECT id FROM seat WHERE performance_id = :pid AND hold_id = :holdId ORDER BY id";
+
     private final NamedParameterJdbcTemplate jdbcTemplate;
 
     // 회차 행과 좌석을 함께 읽는다. 회차가 없으면 빈 Optional
@@ -78,6 +81,12 @@ public class SeatJdbcRepository {
                 (rs, i) -> new SeatMapRow(rs.getLong("id"), rs.getString("section"), rs.getInt("row_no"),
                         rs.getInt("seat_no"), rs.getString("grade"), rs.getInt("price"),
                         SeatStatus.valueOf(rs.getString("status"))));
+    }
+
+    // 지금 이 hold를 가리키는 좌석(HELD·SOLD) ID 오름차순
+    public List<Long> findSeatIdsOfHold(long performanceId, long holdId) {
+        return jdbcTemplate.queryForList(SEAT_IDS_OF_HOLD_SQL, Map.of("pid", performanceId, "holdId", holdId),
+                Long.class);
     }
 
     // hold마다 아직 HELD로 쥐고 있는 좌석 ID(오름차순). 좌석이 없는 hold는 결과에 없다

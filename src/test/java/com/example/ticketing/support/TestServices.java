@@ -23,6 +23,7 @@ import com.example.ticketing.outbox.service.OutboxHandler;
 import com.example.ticketing.outbox.service.OutboxTaskTransaction;
 import com.example.ticketing.payment.client.HttpPgClient;
 import com.example.ticketing.payment.client.PgClient;
+import com.example.ticketing.payment.service.PaymentGateReflector;
 import com.example.ticketing.payment.service.PaymentReader;
 import com.example.ticketing.payment.service.PaymentReconcileScheduler;
 import com.example.ticketing.payment.service.PaymentReconcileTransaction;
@@ -33,7 +34,6 @@ import com.example.ticketing.queue.service.QueuePromotionScheduler;
 import com.example.ticketing.queue.service.QueueService;
 import com.example.ticketing.seat.repository.SeatJdbcRepository;
 import com.example.ticketing.seat.repository.SeatMapRedisStore;
-import com.example.ticketing.seat.repository.SeatRepository;
 import com.example.ticketing.seat.service.SeatCatalog;
 import com.example.ticketing.seat.service.SeatMapBuilder;
 import com.example.ticketing.seat.service.SeatMapQueryService;
@@ -189,15 +189,16 @@ public class TestServices {
     }
 
     public PaymentService paymentService(SeatGateRedisStore gateStore, TicketingProperties properties) {
+        SeatGateReflector gate = gateReflector(gateStore, properties);
         return new PaymentService(bean(PaymentTransaction.class), bean(PaymentReader.class), bean(PgClient.class),
-                gateReflector(gateStore, properties), properties);
+                gate, new PaymentGateReflector(gate), properties);
     }
 
     public static PaymentReconcileScheduler paymentReconcileScheduler(
             PaymentReconcileTransaction reconcileTransaction, PaymentTransaction paymentTransaction, PgClient pgClient,
             SeatGateReflector reflector, TicketingProperties properties, MeterRegistry meterRegistry) {
-        return new PaymentReconcileScheduler(reconcileTransaction, paymentTransaction, pgClient, reflector, properties,
-                meterRegistry);
+        return new PaymentReconcileScheduler(reconcileTransaction, paymentTransaction, pgClient,
+                new PaymentGateReflector(reflector), properties, meterRegistry);
     }
 
     // 컨텍스트의 PG 클라이언트(대역이 있으면 대역)로 만든다
@@ -262,7 +263,7 @@ public class TestServices {
             SeatGateRedisStore gate = gateStore != null ? gateStore : bean(SeatGateRedisStore.class);
             return new SeatHoldService(bean(SeatCatalog.class),
                     transaction != null ? transaction : bean(SeatHoldTransaction.class),
-                    bean(SeatHoldRepository.class), bean(SeatRepository.class), bean(SeatHoldJdbcRepository.class),
+                    bean(SeatHoldRepository.class), bean(SeatHoldJdbcRepository.class),
                     dbClock != null ? dbClock : bean(DbClock.class), gate, gateReflector(gate, resolved),
                     queueService != null ? queueService : bean(QueueService.class),
                     new HoldMetrics(meterRegistry()), System::nanoTime, resolved);

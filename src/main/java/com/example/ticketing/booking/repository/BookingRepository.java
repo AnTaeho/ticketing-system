@@ -18,5 +18,5 @@ public interface BookingRepository extends JpaRepository<Booking, Long> {
     @Query(value = """
             UPDATE booking SET status = 'CANCELLED', cancelled_at = NOW(6)
              WHERE id = :id AND status = 'CONFIRMED'""", nativeQuery = true)
-    int markCancelled(@Param("id") long id);
+    int confirmedToCancelled(@Param("id") long id);
 }

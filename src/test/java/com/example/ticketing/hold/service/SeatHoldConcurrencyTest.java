@@ -73,7 +73,7 @@ class SeatHoldConcurrencyTest {
         Results<CreateHoldResult> results = Concurrently.of(THREAD_COUNT)
                 .readyWithin(Duration.ofSeconds(30))
                 .within(Duration.ofSeconds(60))
-                .run(i -> seatHoldService.hold(new CreateHoldCommand(users.get(i), pid, target, tokens.get(i))));
+                .run(i -> service().hold(new CreateHoldCommand(users.get(i), pid, target, tokens.get(i))));
 
         assertThat(results.unexpected(ApiException.class)).isEmpty();
         assertThat(results.values()).hasSize(1);
@@ -125,8 +125,8 @@ class SeatHoldConcurrencyTest {
             String tokenB = fixtures.admit(pid, userB);
             Results<CreateHoldResult> results = Concurrently.of(2).within(Duration.ofSeconds(60))
                     .run(i -> i == 0
-                            ? seatHoldService.hold(new CreateHoldCommand(userA, pid, forward, tokenA))
-                            : seatHoldService.hold(new CreateHoldCommand(userB, pid, reverse, tokenB)));
+                            ? service().hold(new CreateHoldCommand(userA, pid, forward, tokenA))
+                            : service().hold(new CreateHoldCommand(userB, pid, reverse, tokenB)));
 
             int conflicted = 0;
             for (Throwable error : results.errors()) {
@@ -146,7 +146,7 @@ class SeatHoldConcurrencyTest {
             List<Outcome<CreateHoldResult>> outcomes = results.outcomes();
             for (int i = 0; i < outcomes.size(); i++) {
                 if (!outcomes.get(i).failed()) {
-                    seatHoldService.release(i == 0 ? userA : userB, outcomes.get(i).value().holdId());
+                    service().release(i == 0 ? userA : userB, outcomes.get(i).value().holdId());
                 }
             }
         }
@@ -175,7 +175,7 @@ class SeatHoldConcurrencyTest {
         }
 
         Results<CreateHoldResult> results = Concurrently.of(attempts).within(Duration.ofSeconds(60))
-                .run(i -> seatHoldService.hold(
+                .run(i -> service().hold(
                         new CreateHoldCommand(userId, pid, List.of(ids.get(i)), tokens.get(i))));
 
         assertThat(results.unexpected(ApiException.class)).isEmpty();
@@ -192,7 +192,11 @@ class SeatHoldConcurrencyTest {
         }
     }
 
-    private boolean gateEnabled() {
+    protected SeatHoldService service() {
+        return seatHoldService;
+    }
+
+    protected boolean gateEnabled() {
         return properties.gate().enabled();
     }
 

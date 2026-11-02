@@ -75,7 +75,7 @@ public class OutboxTaskJdbcRepository {
         jdbcTemplate.update(LOCK_SQL, Map.of("ids", ids, "lockedUntil", lockedUntil));
     }
 
-    public int markDone(long id, LocalDateTime lockedUntil) {
+    public int processingToDone(long id, LocalDateTime lockedUntil) {
         return jdbcTemplate.update(DONE_SQL, Map.of("id", id, "lockedUntil", lockedUntil));
     }
 
@@ -85,9 +85,9 @@ public class OutboxTaskJdbcRepository {
                 params(id, failure).addValue("lockedUntil", lockedUntil));
     }
 
-    // 집기 트랜잭션이 행 락을 쥔 채로 쓴다. 집지 않고 실패만 기록하는 행에 쓴다
+    // 집기 트랜잭션 안에서 집지 않을 행(모르는 종류)의 실패를 기록한다. 행 락은 집기 SQL이 쥐고 있다
     @Transactional(propagation = Propagation.MANDATORY)
-    public int markFailedAttemptLocked(long id, FailedAttempt failure) {
+    public int markFailedAttemptUnclaimed(long id, FailedAttempt failure) {
         return jdbcTemplate.update(FAILED_ATTEMPT_SQL, params(id, failure));
     }
 

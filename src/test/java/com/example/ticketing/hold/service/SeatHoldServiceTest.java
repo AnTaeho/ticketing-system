@@ -189,7 +189,7 @@ class SeatHoldServiceTest {
         long openedAnHourAgo = fixtures.newPerformance(show, now.minusHours(1), now.plusDays(1), 1, 1, 2);
         SeatHoldTransaction tx = mock(SeatHoldTransaction.class);
         when(tx.persistHold(anyLong(), any(SeatSelection.class), anyString()))
-                .thenReturn(new HoldPlacement(1L, "t", now.plusMinutes(5)));
+                .thenReturn(new HoldPlacement(1L, now.plusMinutes(5)));
         SeatHoldService dbAhead = serviceWith(TestDbClock.withDbShift(jdbcTemplate, Duration.ofHours(2)), tx);
         SeatHoldService dbBehind = serviceWith(TestDbClock.withDbShift(jdbcTemplate, Duration.ofHours(-2)), tx);
 

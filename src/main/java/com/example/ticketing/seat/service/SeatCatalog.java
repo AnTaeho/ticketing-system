@@ -79,6 +79,12 @@ public class SeatCatalog {
         return new SeatSelection(performanceId, List.copyOf(sorted), seats, totalAmount);
     }
 
+    // 지금 이 hold를 가리키는 좌석. 풀리거나 남이 가져간 좌석은 빠지고, 위치·가격은 카탈로그에서 채운다
+    public List<SeatInfo> seatsOfHold(long performanceId, long holdId) {
+        Map<Long, SeatInfo> seats = performance(performanceId).seats();
+        return seatJdbcRepository.findSeatIdsOfHold(performanceId, holdId).stream().map(seats::get).toList();
+    }
+
     // 스케줄러가 매 주기 부르므로 10초 묶어 둔다
     public List<Long> openPerformanceIds() {
         OpenIds current = openIds;

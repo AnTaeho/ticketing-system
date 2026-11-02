@@ -2,6 +2,7 @@ package com.example.ticketing.hold.controller;
 
 import static com.example.ticketing.support.TestMvc.USER;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.startsWith;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -235,13 +236,84 @@ class HoldApiControllerTest {
     }
 
     @Test
-    @DisplayName("사용자 식별이 없으면 401 LOGIN_REQUIRED로 답한다")
+    @DisplayName("잡아 둔 자리가 없으면 내 선점 조회가 404이고 잡으면 그 선점을 돌려준다")
+    void returnsMyActiveHold() throws Exception {
+        long pid = fixtures.newPerformance(1, 1, 4);
+        long userId = fixtures.newUser();
+
+        mine(userId, pid)
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("HOLD_NOT_FOUND"));
+
+        long holdId = holdId(userId, pid, db.seatIds(pid).get(0));
+        String expiresAt = jdbcTemplate.queryForObject(
+                "SELECT DATE_FORMAT(expires_at, '%Y-%m-%dT%H:%i:%s') FROM seat_hold WHERE id = ?", String.class, holdId);
+
+        mine(userId, pid)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.holdId").value(holdId))
+                .andExpect(jsonPath("$.status").value("HELD"))
+                .andExpect(jsonPath("$.expiresAt").value(startsWith(expiresAt)));
+    }
+
+    @Test
+    @DisplayName("결제 중인 선점도 내 선점으로 돌려준다")
+    void myActiveHoldIncludesPaying() throws Exception {
+        long pid = fixtures.newPerformance(1, 1, 2);
+        long userId = fixtures.newUser();
+        long holdId = holdId(userId, pid, db.seatIds(pid).get(0));
+        jdbcTemplate.update("UPDATE seat_hold SET status = 'PAYING' WHERE id = ?", holdId);
+
+        mine(userId, pid)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.holdId").value(holdId))
+                .andExpect(jsonPath("$.status").value("PAYING"));
+    }
+
+    @Test
+    @DisplayName("놓은 선점이나 남의 선점, 다른 회차의 선점은 내 선점 조회에서 404로 답한다")
+    void myActiveHoldIgnoresInactiveAndOthers() throws Exception {
+        long pid = fixtures.newPerformance(1, 1, 4);
+        long otherPid = fixtures.newPerformance(1, 1, 2);
+        long owner = fixtures.newUser();
+        long stranger = fixtures.newUser();
+        long holdId = holdId(owner, pid, db.seatIds(pid).get(0));
+
+        mine(stranger, pid)
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("HOLD_NOT_FOUND"));
+        mine(owner, otherPid)
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("HOLD_NOT_FOUND"));
+
+        mockMvc.perform(delete("/api/holds/{holdId}", holdId).header(USER, owner))
+                .andExpect(status().isNoContent());
+
+        mine(owner, pid)
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("HOLD_NOT_FOUND"));
+    }
+
+    @Test
+    @DisplayName("사용자 식별이 없으면 잡기와 내 선점 조회 모두 401 LOGIN_REQUIRED로 답한다")
     void loginRequired() throws Exception {
         mockMvc.perform(post("/api/performances/{pid}/holds", 1L)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"seatIds\":[1]}"))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.code").value("LOGIN_REQUIRED"));
+        mockMvc.perform(get("/api/performances/{pid}/holds/mine", 1L))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("LOGIN_REQUIRED"));
+    }
+
+    private ResultActions mine(long userId, long pid) throws Exception {
+        return mockMvc.perform(get("/api/performances/{pid}/holds/mine", pid).header(USER, userId));
+    }
+
+    private long holdId(long userId, long pid, long seatId) throws Exception {
+        return testMvc.body(hold(userId, pid, List.of(seatId)).andExpect(status().isCreated()).andReturn())
+                .get("holdId").asLong();
     }
 
     private ResultActions hold(long userId, long pid, List<Long> seatIds) throws Exception {

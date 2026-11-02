@@ -32,7 +32,7 @@ public class HoldExpiryTransaction {
         List<Long> ids = claimed.stream().map(ClaimedHold::holdId).toList();
         Map<Long, List<Long>> seatsByHold = seatJdbcRepository.findHeldSeatIdsByHold(ids);
 
-        seatHoldRepository.markExpired(ids);
+        seatHoldRepository.heldToExpired(ids);
         seatRepository.releaseHeldSeatsOf(ids);
 
         return claimed.stream()

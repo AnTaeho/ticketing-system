@@ -13,8 +13,6 @@ public interface SeatRepository extends JpaRepository<Seat, Long> {
 
     // 조건부 UPDATE는 모두 flush·clear한다. 같은 트랜잭션에서 뒤이어 읽는 엔티티가 바뀌기 전 값으로 남지 않게
 
-    List<Seat> findByPerformanceIdAndHoldIdOrderByIdAsc(Long performanceId, Long holdId);
-
     // 빈자리이거나 선점 기한이 지난 좌석만 잡는다. 영향 행 수가 고른 좌석 수와 다르면 호출자가 롤백한다
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query(value = """

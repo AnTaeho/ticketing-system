@@ -39,21 +39,20 @@ public class BookingTransaction {
 
     // booking 락이 같은 예매의 취소를 줄 세운다. 뒤에 온 쪽은 CANCELLED를 보고 아무것도 바꾸지 않으므로 환불 작업은 하나다
     @Transactional(isolation = Isolation.READ_COMMITTED)
-    public BookingCancellation cancel(long userId, long bookingId) {
+    public BookingCancellation confirmedToCancelled(long userId, long bookingId) {
         Booking booking = bookingRepository.lockByIdAndUserId(bookingId, userId)
                 .orElseThrow(() -> new ApiException(ErrorCode.BOOKING_NOT_FOUND,
                         Map.of("bookingId", bookingId)));
         BookingPayment payment = bookingJdbcRepository.findPayment(booking.getPaymentId())
                 .orElseThrow(() -> new IllegalStateException("예매 " + bookingId + "의 결제가 없다"));
         if (booking.getStatus() == BookingStatus.CANCELLED) {
-            return BookingCancellation.alreadyCancelled(bookingId,
-                    RefundStatus.of(BookingStatus.CANCELLED, payment.refunded()));
+            return BookingCancellation.alreadyCancelled(RefundStatus.of(BookingStatus.CANCELLED, payment.refunded()));
         }
         if (performanceRepository.countStarted(booking.getPerformanceId()) > 0) {
             throw new ApiException(ErrorCode.CANCEL_NOT_ALLOWED, Map.of("bookingId", bookingId));
         }
 
-        RowCounts.requireExactly(bookingRepository.markCancelled(bookingId), 1, "booking CANCELLED");
+        RowCounts.requireExactly(bookingRepository.confirmedToCancelled(bookingId), 1, "booking CANCELLED");
         SeatHold hold = seatHoldRepository.findById(booking.getHoldId())
                 .orElseThrow(() -> new IllegalStateException("예매 " + bookingId + "의 hold가 없다"));
         // 게이트 키를 지울 좌석 ID는 hold_id를 비우기 전에 읽어 둔다
@@ -61,7 +60,7 @@ public class BookingTransaction {
         RowCounts.requireExactly(seatRepository.releaseSoldSeats(hold.getId()), seatIds.size(), "seat AVAILABLE");
         outboxWriter.write(OutboxTaskType.REFUND_REQUESTED, payment.paymentId(),
                 new RefundRequestedPayload(payment.paymentId(), payment.orderId()));
-        return BookingCancellation.cancelled(bookingId,
+        return BookingCancellation.cancelled(
                 new GateHold(booking.getUserId(), booking.getPerformanceId(), hold.getHoldToken(), seatIds));
     }
 }

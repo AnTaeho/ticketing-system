@@ -1,22 +1,16 @@
 package com.example.ticketing.hold.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.example.ticketing.common.config.TicketingProperties;
-import com.example.ticketing.common.config.TicketingProperties.Gate;
 import com.example.ticketing.common.config.TicketingProperties.Hold;
 import com.example.ticketing.common.metrics.Metrics;
 import com.example.ticketing.hold.domain.GateHold;
 import com.example.ticketing.hold.dto.HoldExpiry;
-import com.example.ticketing.hold.repository.SeatGateRedisStore;
 import com.example.ticketing.support.Counters;
 import com.example.ticketing.support.TestProperties;
 import com.example.ticketing.support.TestServices;
@@ -28,30 +22,31 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+// 쿨다운·게이트 스위치 같은 반영 규칙은 SeatGateReflectorTest가 본다. 여기서는 반영을 넘기는지만 본다
 class HoldExpirySchedulerTest {
 
     private static final int BATCH = 3;
 
-    private static final Duration COOLDOWN = Duration.ofMinutes(10);
-
     private HoldExpiryTransaction holdExpiryTransaction;
-    private SeatGateRedisStore seatGateRedisStore;
-    private SimpleMeterRegistry meterRegistry;
+    private SeatGateReflector gateReflector;
     private Counters counters;
     private HoldExpiryScheduler scheduler;
 
     @BeforeEach
     void setUp() {
         holdExpiryTransaction = mock(HoldExpiryTransaction.class);
-        seatGateRedisStore = mock(SeatGateRedisStore.class);
-        meterRegistry = new SimpleMeterRegistry();
+        gateReflector = mock(SeatGateReflector.class);
+        SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
         counters = new Counters(meterRegistry);
-        scheduler = scheduler(true);
+        TicketingProperties properties = TestProperties.empty()
+                .hold(new Hold(Duration.ofMinutes(5), 4, true, 1000, BATCH, Duration.ofMinutes(10)))
+                .build();
+        scheduler = TestServices.holdExpiryScheduler(holdExpiryTransaction, gateReflector, meterRegistry, properties);
     }
 
     @Test
-    @DisplayName("게이트가 켜져 있으면 선점마다 키를 지우고 좌석이 남은 선점에만 쿨다운을 건다")
-    void releasesGateAndSetsCooldown() {
+    @DisplayName("만료가 커밋된 선점마다 게이트 반영을 넘기고 만료 수를 센다")
+    void expiresGateOfEachHold() {
         GateHold withSeats = new GateHold(11L, 7L, "token-1", List.of(101L, 102L));
         GateHold seatsTaken = new GateHold(12L, 7L, "token-2", List.of());
         when(holdExpiryTransaction.claimAndExpire(BATCH))
@@ -59,21 +54,8 @@ class HoldExpirySchedulerTest {
 
         scheduler.run();
 
-        verify(seatGateRedisStore).release(withSeats);
-        verify(seatGateRedisStore).setReholdCooldown(withSeats, COOLDOWN);
-        verify(seatGateRedisStore).release(seatsTaken);
-        verify(seatGateRedisStore, never()).setReholdCooldown(eq(seatsTaken), any());
-    }
-
-    @Test
-    @DisplayName("게이트가 꺼져 있으면 만료 처리 뒤 Redis를 부르지 않는다")
-    void gateOffSkipsRedis() {
-        scheduler = scheduler(false);
-        when(holdExpiryTransaction.claimAndExpire(BATCH)).thenReturn(holds(2));
-
-        scheduler.run();
-
-        verifyNoInteractions(seatGateRedisStore);
+        verify(gateReflector).expire(withSeats);
+        verify(gateReflector).expire(seatsTaken);
         assertThat(counters.count(Metrics.HOLD_EXPIRED)).isEqualTo(2);
     }
 
@@ -109,15 +91,6 @@ class HoldExpirySchedulerTest {
 
         verify(holdExpiryTransaction, times(1)).claimAndExpire(BATCH);
         assertThat(counters.count(Metrics.HOLD_EXPIRED)).isZero();
-    }
-
-    private HoldExpiryScheduler scheduler(boolean gateEnabled) {
-        TicketingProperties properties = TestProperties.empty()
-                .hold(new Hold(Duration.ofMinutes(5), 4, true, 1000, BATCH, COOLDOWN))
-                .gate(new Gate(gateEnabled, 20))
-                .build();
-        SeatGateReflector reflector = TestServices.gateReflector(seatGateRedisStore, properties, meterRegistry);
-        return TestServices.holdExpiryScheduler(holdExpiryTransaction, reflector, meterRegistry, properties);
     }
 
     private static List<HoldExpiry> holds(int count) {

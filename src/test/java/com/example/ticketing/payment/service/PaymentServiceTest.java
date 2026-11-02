@@ -333,7 +333,7 @@ class PaymentServiceTest {
         stubPg.approveWith(PgResult.unknown("timeout"));
         long cancelledPayment = paymentService.pay(command(cancelled, key()))
                 .paymentId();
-        paymentTransaction.cancelAndRelease(cancelledPayment);
+        paymentTransaction.openToCancelled(cancelledPayment);
 
         for (Held held : List.of(declined, cancelled)) {
             ApiException e = catchApiException(() -> paymentService.pay(command(held, key())));
@@ -437,14 +437,14 @@ class PaymentServiceTest {
 
     @Test
     @DisplayName("결과 모름 결제를 취소하면 선점이 풀리고 다시 취소해도 바뀌지 않는다")
-    void cancelAndRelease() {
+    void openToCancelled() {
         Held held = fixtures.held(2);
         stubPg.approveWith(PgResult.unknown("timeout"));
         String key = key();
         long paymentId = paymentService.pay(command(held, key)).paymentId();
 
-        PaymentSettlement first = paymentTransaction.cancelAndRelease(paymentId);
-        PaymentSettlement second = paymentTransaction.cancelAndRelease(paymentId);
+        PaymentSettlement first = paymentTransaction.openToCancelled(paymentId);
+        PaymentSettlement second = paymentTransaction.openToCancelled(paymentId);
 
         assertThat(first.changedSeats()).isTrue();
         assertThat(first.result().outcome()).isEqualTo(PaymentOutcome.CANCELLED);
@@ -471,9 +471,9 @@ class PaymentServiceTest {
         PaymentResult confirmed = paymentService.pay(command(held, key()));
         long paymentId = confirmed.paymentId();
 
-        PaymentSettlement decline = paymentTransaction.decline(paymentId);
-        PaymentSettlement confirmAgain = paymentTransaction.confirm(paymentId, "other-tx");
-        PaymentSettlement unknown = paymentTransaction.markUnknown(paymentId, "late timeout");
+        PaymentSettlement decline = paymentTransaction.openToDeclined(paymentId);
+        PaymentSettlement confirmAgain = paymentTransaction.openToApproved(paymentId, "other-tx");
+        PaymentSettlement unknown = paymentTransaction.requestedToUnknown(paymentId, "late timeout");
 
         assertThat(List.of(decline, confirmAgain, unknown)).allSatisfy(s -> {
             assertThat(s.changedSeats()).isFalse();

@@ -39,6 +39,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Import;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -94,11 +96,12 @@ class PaymentReconcileTest {
         stubPg.reset();
     }
 
-    @Test
-    @DisplayName("결과 모름 결제를 대사에서 PG가 승인했다고 하면 예매를 확정한다")
-    void unknownThenApprovedIsConfirmed() {
+    @ParameterizedTest(name = "{0}")
+    @EnumSource(Unsettled.class)
+    @DisplayName("결과 모름·고아 결제를 대사에서 PG가 승인했다고 하면 예매를 확정한다")
+    void approvedAtPgIsConfirmed(Unsettled kind) {
         Held held = fixtures.held(2);
-        long paymentId = unknownPayment(held);
+        long paymentId = unsettled(kind, held);
         stubPg.queryWith(PgResult.of(PgStatus.APPROVED, "pg-late-1"));
         double before = counters.count(Metrics.PAYMENT_RECONCILE, Tag.RESULT, "confirmed");
         db.makePaymentDue(paymentId);
@@ -147,11 +150,12 @@ class PaymentReconcileTest {
         assertThat(counters.count(Metrics.PAYMENT_RECONCILE, Tag.RESULT, "waiting") - before).isEqualTo(1);
     }
 
-    @Test
-    @DisplayName("PG에 주문이 없는 고아 결제가 생성 30초를 넘으면 망취소하고 선점을 푼다")
-    void requestedOrphanIsCancelledAfterWindow() {
+    @ParameterizedTest(name = "{0}")
+    @EnumSource(Unsettled.class)
+    @DisplayName("PG에 주문이 없는 결과 모름·고아 결제가 생성 30초를 넘으면 망취소하고 선점을 푼다")
+    void notFoundAfterWindowIsCancelled(Unsettled kind) {
         Held held = fixtures.held(2);
-        long paymentId = orphan(held);
+        long paymentId = unsettled(kind, held);
         assertThat(testRedis.gateKeys(held.pid())).isNotEmpty();
         double before = counters.count(Metrics.PAYMENT_RECONCILE, Tag.RESULT, "cancelled");
         db.agePayment(paymentId, 60);
@@ -383,22 +387,6 @@ class PaymentReconcileTest {
     }
 
     @Test
-    @DisplayName("고아 결제를 대사에서 PG가 승인했다고 하면 예매를 확정한다")
-    void requestedOrphanApprovedIsConfirmed() {
-        Held held = fixtures.held(2);
-        long paymentId = orphan(held);
-        stubPg.queryWith(PgResult.of(PgStatus.APPROVED, "pg-orphan-ok"));
-        db.makePaymentDue(paymentId);
-
-        scheduler.run();
-
-        assertThat(db.payment(paymentId)).containsEntry("status", "APPROVED").containsEntry("next_check_at", null);
-        assertThat(db.holdStatus(held.holdId())).isEqualTo("CONFIRMED");
-        assertThat(db.bookingCountOfHold(held.holdId())).isEqualTo(1);
-        held.seatIds().forEach(seatId -> assertThat(db.seat(seatId)).containsEntry("status", "SOLD"));
-    }
-
-    @Test
     @DisplayName("고아 결제를 대사에서 PG가 거절했다고 하면 선점을 푼다")
     void requestedOrphanDeclinedIsReleased() {
         Held held = fixtures.held(1);
@@ -431,20 +419,8 @@ class PaymentReconcileTest {
         assertThat(stubPg.cancelCalls()).isZero();
     }
 
-    @Test
-    @DisplayName("PG에 없는 결과 모름 결제가 생성 30초를 넘으면 망취소하고 선점을 푼다")
-    void unknownNotFoundIsCancelledAfterWindow() {
-        Held held = fixtures.held(1);
-        long paymentId = unknownPayment(held);
-        db.agePayment(paymentId, 60);
-        db.makePaymentDue(paymentId);
-
-        scheduler.run();
-
-        assertThat(stubPg.cancelCalls()).isEqualTo(1);
-        assertThat(db.payment(paymentId)).containsEntry("status", "CANCELLED").containsEntry("next_check_at", null);
-        assertThat(db.holdStatus(held.holdId())).isEqualTo("RELEASED");
-        assertThat(db.seat(held.seatIds().get(0))).containsEntry("status", "AVAILABLE").containsEntry("hold_id", null);
+    private long unsettled(Unsettled kind, Held held) {
+        return kind == Unsettled.UNKNOWN ? unknownPayment(held) : orphan(held);
     }
 
     // 승인 요청이 타임아웃으로 끝난 결제(UNKNOWN, 게이트 키는 결제 마감+1분)
@@ -479,5 +455,11 @@ class PaymentReconcileTest {
 
     private static String key() {
         return UUID.randomUUID().toString();
+    }
+
+    // 대사가 집는 아직 결론 없는 결제 두 갈래. 고아는 PG를 부르기 전에 멈춰 REQUESTED로 남은 결제다
+    enum Unsettled {
+        REQUESTED,
+        UNKNOWN
     }
 }

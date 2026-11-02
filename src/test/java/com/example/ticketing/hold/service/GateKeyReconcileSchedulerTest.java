@@ -108,9 +108,9 @@ class GateKeyReconcileSchedulerTest {
         double seatBefore = counters.count(Metrics.GATE_ORPHAN_REMOVED, Tag.KIND, "seat");
         double userHoldBefore = counters.count(Metrics.GATE_ORPHAN_REMOVED, Tag.KIND, "userhold");
 
-        GateKeyReconcileScheduler.Removed removed = services.gateKeyReconcileScheduler().build().reconcileOne(pid);
+        Removed removed = reconcile(pid);
 
-        assertThat(removed).isEqualTo(new GateKeyReconcileScheduler.Removed(1, 1));
+        assertThat(removed).isEqualTo(new Removed(1, 1));
         assertThat(redis.hasKey(seatKey)).isFalse();
         assertThat(redis.hasKey(userHoldKey)).isFalse();
         assertThat(redis.hasKey(lookalike)).isTrue();
@@ -131,16 +131,16 @@ class GateKeyReconcileSchedulerTest {
         assertThat(paid.outcome()).isEqualTo(PaymentOutcome.CONFIRMED);
         String token = db.holdToken(hold.holdId());
 
-        assertThat(services.gateKeyReconcileScheduler().build().reconcileOne(pid))
-                .isEqualTo(new GateKeyReconcileScheduler.Removed(0, 0));
+        assertThat(reconcile(pid))
+                .isEqualTo(new Removed(0, 0));
         seats.forEach(seatId -> assertThat(redis.opsForValue().get(RedisKeys.seat(pid, seatId))).isEqualTo(token));
 
         // 취소 뒤 좌석 키 해제가 실패한 상황: 반영 빈을 목으로 바꿔 삼킨다
         services.bookingService(mock(SeatGateReflector.class)).cancel(userId, paid.bookingId());
         seats.forEach(seatId -> assertThat(redis.hasKey(RedisKeys.seat(pid, seatId))).isTrue());
 
-        assertThat(services.gateKeyReconcileScheduler().build().reconcileOne(pid))
-                .isEqualTo(new GateKeyReconcileScheduler.Removed(2, 0));
+        assertThat(reconcile(pid))
+                .isEqualTo(new Removed(2, 0));
         assertThat(testRedis.gateKeys(pid)).isEmpty();
     }
 
@@ -167,8 +167,8 @@ class GateKeyReconcileSchedulerTest {
                 RedisKeys.seat(pid, ids.get(1))).forEach(this::age);
         double skippedBefore = counters.count(Metrics.GATE_ORPHAN_SKIPPED, Tag.REASON, "fresh");
 
-        assertThat(services.gateKeyReconcileScheduler().build().reconcileOne(pid))
-                .isEqualTo(new GateKeyReconcileScheduler.Removed(0, 0));
+        assertThat(reconcile(pid))
+                .isEqualTo(new Removed(0, 0));
 
         assertThat(counters.count(Metrics.GATE_ORPHAN_SKIPPED, Tag.REASON, "fresh") - skippedBefore).isZero();
         assertThat(testRedis.gateKeys(pid)).containsExactlyInAnyOrderElementsOf(keys);
@@ -199,22 +199,21 @@ class GateKeyReconcileSchedulerTest {
         String stale = RedisKeys.seat(pid, target.get(1));
 
         // 대사가 키를 읽은 뒤 DB를 보기 전에 B의 선점 키가 같은 이름으로 들어온 상황
-        GateKeyReconcileScheduler.Removed removed = services.gateKeyReconcileScheduler()
+        Removed removed = reconcile(services.gateKeyReconcileScheduler()
                 .jdbc(hooked((sql, queriedPid) -> {
                     if (sql.contains("JOIN seat s")) {
                         setAged(raced, tokenB);
                     }
                 }))
                 .catalog(services.catalogOf(List.of(pid)))
-                .build()
-                .reconcileOne(pid);
+                .build(), pid);
 
         assertThat(removed.seats()).isEqualTo(1);
         assertThat(redis.hasKey(stale)).isFalse();
         assertThat(redis.opsForValue().get(raced)).isEqualTo(tokenB);
 
         // 다음 주기에도 B의 키는 B의 좌석 행과 맞아 남는다
-        assertThat(services.gateKeyReconcileScheduler().build().reconcileOne(pid).seats()).isZero();
+        assertThat(reconcile(pid).seats()).isZero();
         assertThat(redis.opsForValue().get(raced)).isEqualTo(tokenB);
         assertThat(redis.opsForValue().get(RedisKeys.userHold(userA, pid))).isEqualTo(tokenA);
     }
@@ -232,8 +231,8 @@ class GateKeyReconcileSchedulerTest {
         redis.opsForValue().set(longer, UUID.randomUUID().toString(), holdTtl.plusMinutes(1));
         double skippedBefore = counters.count(Metrics.GATE_ORPHAN_SKIPPED, Tag.REASON, "fresh");
 
-        assertThat(services.gateKeyReconcileScheduler().build().reconcileOne(pid))
-                .isEqualTo(new GateKeyReconcileScheduler.Removed(2, 0));
+        assertThat(reconcile(pid))
+                .isEqualTo(new Removed(2, 0));
 
         assertThat(counters.count(Metrics.GATE_ORPHAN_SKIPPED, Tag.REASON, "fresh") - skippedBefore).isEqualTo(1);
         assertThat(redis.hasKey(fresh)).isTrue();
@@ -257,12 +256,12 @@ class GateKeyReconcileSchedulerTest {
         jdbcTemplate.update("UPDATE seat_hold SET status = 'EXPIRED' WHERE id = ?", expired.holdId());
         jdbcTemplate.update("UPDATE seat SET status = 'AVAILABLE', hold_id = NULL, held_until = NULL WHERE hold_id = ?",
                 expired.holdId());
-        seatHoldTransaction.releaseHold(releasedUser, released.holdId());
+        seatHoldTransaction.heldToReleased(releasedUser, released.holdId());
         assertThat(db.holdStatus(released.holdId())).isEqualTo("RELEASED");
         assertThat(testRedis.gateKeys(pid)).hasSize(4);
 
-        assertThat(services.gateKeyReconcileScheduler().build().reconcileOne(pid))
-                .isEqualTo(new GateKeyReconcileScheduler.Removed(2, 2));
+        assertThat(reconcile(pid))
+                .isEqualTo(new Removed(2, 2));
 
         assertThat(testRedis.gateKeys(pid)).isEmpty();
     }
@@ -348,6 +347,19 @@ class GateKeyReconcileSchedulerTest {
         assertThat(redis.hasKey(LEASE_KEY)).isFalse();
     }
 
+    private Removed reconcile(long pid) {
+        return reconcile(services.gateKeyReconcileScheduler().build(), pid);
+    }
+
+    // 회차 하나를 대사하고 지운 키 수를 카운터 증가분으로 잰다
+    private Removed reconcile(GateKeyReconcileScheduler scheduler, long pid) {
+        double seatsBefore = counters.count(Metrics.GATE_ORPHAN_REMOVED, Tag.KIND, "seat");
+        double userHoldsBefore = counters.count(Metrics.GATE_ORPHAN_REMOVED, Tag.KIND, "userhold");
+        scheduler.reconcileOne(pid);
+        return new Removed((long) (counters.count(Metrics.GATE_ORPHAN_REMOVED, Tag.KIND, "seat") - seatsBefore),
+                (long) (counters.count(Metrics.GATE_ORPHAN_REMOVED, Tag.KIND, "userhold") - userHoldsBefore));
+    }
+
     // 대사의 DB 조회 직전에 끼어들 지점. 두 번째 인자는 조회하는 회차 ID다
     private NamedParameterJdbcTemplate hooked(BiConsumer<String, Long> beforeQuery) {
         return new NamedParameterJdbcTemplate(jdbcTemplate) {
@@ -388,5 +400,8 @@ class GateKeyReconcileSchedulerTest {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
+    }
+
+    private record Removed(long seats, long userHolds) {
     }
 }

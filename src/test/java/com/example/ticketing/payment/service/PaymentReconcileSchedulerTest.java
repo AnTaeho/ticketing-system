@@ -66,11 +66,11 @@ class PaymentReconcileSchedulerTest {
                 .thenReturn(List.of(claimed(1, "o1", false), claimed(2, "o2", false)));
         when(pgClient.query("o1")).thenThrow(new IllegalStateException("boom"));
         when(pgClient.query("o2")).thenReturn(PgResult.of(PgStatus.APPROVED, "tx2"));
-        when(paymentTransaction.confirm(2, "tx2")).thenReturn(seatsChanged(2, PaymentOutcome.CONFIRMED));
+        when(paymentTransaction.openToApproved(2, "tx2")).thenReturn(seatsChanged(2, PaymentOutcome.CONFIRMED));
 
         scheduler(true).run();
 
-        verify(paymentTransaction).confirm(2, "tx2");
+        verify(paymentTransaction).openToApproved(2, "tx2");
         verify(seatGateRedisStore).confirm(new GateHold(11L, 7L, "token", List.of(101L)), Instant.EPOCH);
         assertThat(counters.count(Metrics.PAYMENT_RECONCILE, Tag.RESULT, "confirmed")).isEqualTo(1);
     }
@@ -82,8 +82,8 @@ class PaymentReconcileSchedulerTest {
                 .thenReturn(List.of(claimed(1, "o1", false), claimed(2, "o2", false)));
         when(pgClient.query("o1")).thenReturn(PgResult.of(PgStatus.APPROVED, "tx1"));
         when(pgClient.query("o2")).thenReturn(PgResult.of(PgStatus.DECLINED, null));
-        when(paymentTransaction.confirm(1, "tx1")).thenReturn(seatsChanged(1, PaymentOutcome.CONFIRMED));
-        when(paymentTransaction.decline(2)).thenReturn(seatsChanged(2, PaymentOutcome.DECLINED));
+        when(paymentTransaction.openToApproved(1, "tx1")).thenReturn(seatsChanged(1, PaymentOutcome.CONFIRMED));
+        when(paymentTransaction.openToDeclined(2)).thenReturn(seatsChanged(2, PaymentOutcome.DECLINED));
 
         scheduler(false).run();
 
@@ -97,7 +97,7 @@ class PaymentReconcileSchedulerTest {
     void notAppliedIsNotReflected() {
         when(paymentReconcileTransaction.claim(BATCH)).thenReturn(List.of(claimed(1, "o1", false)));
         when(pgClient.query("o1")).thenReturn(PgResult.of(PgStatus.APPROVED, "tx1"));
-        when(paymentTransaction.confirm(1, "tx1")).thenReturn(settlement(1, PaymentOutcome.CONFIRMED, false));
+        when(paymentTransaction.openToApproved(1, "tx1")).thenReturn(settlement(1, PaymentOutcome.CONFIRMED, false));
 
         scheduler(true).run();
 
@@ -113,12 +113,12 @@ class PaymentReconcileSchedulerTest {
         when(pgClient.query(anyString())).thenReturn(PgResult.of(PgStatus.NOT_FOUND, null));
         when(pgClient.cancel("o1")).thenReturn(PgResult.of(PgStatus.DECLINED, null));
         when(pgClient.cancel("o2")).thenReturn(PgResult.unknown("connect refused"));
-        when(paymentTransaction.decline(1)).thenReturn(seatsChanged(1, PaymentOutcome.DECLINED));
+        when(paymentTransaction.openToDeclined(1)).thenReturn(seatsChanged(1, PaymentOutcome.DECLINED));
 
         scheduler(true).run();
 
-        verify(paymentTransaction).decline(1);
-        verify(paymentTransaction, never()).cancelAndRelease(2);
+        verify(paymentTransaction).openToDeclined(1);
+        verify(paymentTransaction, never()).openToCancelled(2);
         verify(paymentReconcileTransaction).reschedule(2, RECHECK, "PG 취소 UNKNOWN: connect refused");
         assertThat(counters.count(Metrics.PAYMENT_RECONCILE, Tag.RESULT, "declined")).isEqualTo(1);
         assertThat(counters.count(Metrics.PAYMENT_RECONCILE, Tag.RESULT, "query_failed")).isEqualTo(1);
@@ -130,7 +130,7 @@ class PaymentReconcileSchedulerTest {
                 .payment(new Payment(Duration.ofMinutes(10), Duration.ofMinutes(1), Duration.ofSeconds(30),
                         Duration.ofSeconds(5), RECHECK, Duration.ofSeconds(30), true, 2000, BATCH,
                         Duration.ofSeconds(30)))
-                .gate(new Gate(gateEnabled, 20))
+                .gate(new Gate(gateEnabled, 20, false, 30000))
                 .build();
         SeatGateReflector reflector = TestServices.gateReflector(seatGateRedisStore, properties, meterRegistry);
         return TestServices.paymentReconcileScheduler(paymentReconcileTransaction, paymentTransaction, pgClient,

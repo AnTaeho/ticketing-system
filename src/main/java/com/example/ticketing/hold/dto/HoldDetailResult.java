@@ -2,7 +2,7 @@ package com.example.ticketing.hold.dto;
 
 import com.example.ticketing.hold.domain.HoldStatus;
 import com.example.ticketing.hold.domain.SeatHold;
-import com.example.ticketing.seat.domain.Seat;
+import com.example.ticketing.seat.domain.SeatInfo;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -19,7 +19,7 @@ public record HoldDetailResult(
         Long paymentId
 ) {
 
-    public static HoldDetailResult from(SeatHold hold, List<Seat> seats, Long paymentId, LocalDateTime serverNow) {
+    public static HoldDetailResult from(SeatHold hold, List<SeatInfo> seats, Long paymentId, LocalDateTime serverNow) {
         return new HoldDetailResult(hold.getId(), hold.getPerformanceId(), hold.getStatus(), hold.getExpiresAt(),
                 hold.getPayDeadline(), serverNow, seats.stream().map(HoldSeatResult::from).toList(),
                 hold.getTotalAmount(), paymentId);

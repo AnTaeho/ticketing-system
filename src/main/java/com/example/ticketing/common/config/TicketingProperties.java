@@ -49,7 +49,12 @@ public record TicketingProperties(
     ) {
     }
 
-    public record Gate(boolean enabled, int fallbackMaxConcurrency) {
+    public record Gate(
+            boolean enabled,
+            int fallbackMaxConcurrency,
+            boolean reconcileEnabled,
+            long reconcileScanMs // @Scheduled 전용
+    ) {
     }
 
     public record Queue(
@@ -84,7 +89,7 @@ public record TicketingProperties(
     ) {
     }
 
-    public record Ops(boolean orphanEnabled, long orphanScanMs, Duration stalePaymentAfter) {
+    public record Ops(Duration stalePaymentAfter) {
     }
 
     public record Pg(String baseUrl, Duration connectTimeout, Duration readTimeout) {

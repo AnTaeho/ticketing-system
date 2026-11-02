@@ -75,7 +75,7 @@ public class PaymentTransaction {
         this.unknownRecheckMicros = SqlIntervals.micros(properties.payment().unknownRecheckAfter());
     }
 
-    // hold 행 락이 같은 hold의 결제 시작을 줄 세운다. READ_COMMITTED라 기다린 동안 커밋된 결제가 3단계에서 보인다
+    // hold 행 락이 같은 hold의 결제 시작을 줄 세운다. READ_COMMITTED라 기다린 동안 커밋된 결제가 락 뒤의 findByHoldId에서 보인다
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public PaymentStart start(long userId, long holdId, String idempotencyKey) {
         Optional<Payment> sameKey = paymentRepository.findByUserIdAndIdempotencyKey(userId, idempotencyKey);
@@ -106,7 +106,7 @@ public class PaymentTransaction {
 
     // 요청 스레드와 대사가 동시에 불러도 hold 락 뒤 PAYING 확인으로 한 번만 효과가 있다
     @Transactional(isolation = Isolation.READ_COMMITTED)
-    public PaymentSettlement confirm(long paymentId, String pgTxId) {
+    public PaymentSettlement openToApproved(long paymentId, String pgTxId) {
         Locked locked = lock(paymentId);
         if (!locked.paying()) {
             return PaymentSettlement.seatsUnchanged(paymentReader.resultOf(locked.payment(), locked.hold()));
@@ -120,8 +120,8 @@ public class PaymentTransaction {
         }
 
         RowCounts.requireExactly(seatRepository.markSold(holdId), seatIds.size(), "seat SOLD");
-        RowCounts.requireExactly(seatHoldRepository.markConfirmed(holdId), 1, "hold CONFIRMED");
-        RowCounts.requireExactly(paymentRepository.markApproved(paymentId, pgTxId), 1, "payment APPROVED");
+        RowCounts.requireExactly(seatHoldRepository.payingToConfirmed(holdId), 1, "hold CONFIRMED");
+        RowCounts.requireExactly(paymentRepository.openToApproved(paymentId, pgTxId), 1, "payment APPROVED");
         IssuedBooking booking = bookingIssuer.issue(new IssueBookingCommand(hold.getUserId(),
                 hold.getPerformanceId(), holdId, paymentId, hold.getTotalAmount(), seatIds.size(), now));
         // 서버와 DB의 시간대가 달라도 맞도록 DB 시각 기준 남은 시간으로 바꾼다
@@ -133,20 +133,20 @@ public class PaymentTransaction {
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
-    public PaymentSettlement decline(long paymentId) {
+    public PaymentSettlement openToDeclined(long paymentId) {
         return payingToReleased(paymentId, PaymentStatus.DECLINED);
     }
 
     // 망취소가 PG에서 확정된 뒤 대사가 부른다
     @Transactional(isolation = Isolation.READ_COMMITTED)
-    public PaymentSettlement cancelAndRelease(long paymentId) {
+    public PaymentSettlement openToCancelled(long paymentId) {
         return payingToReleased(paymentId, PaymentStatus.CANCELLED);
     }
 
     // 결과를 모를 때는 hold·좌석을 그대로 두고 대사가 조회로 확정하게 한다
     @Transactional(isolation = Isolation.READ_COMMITTED)
-    public PaymentSettlement markUnknown(long paymentId, String detail) {
-        paymentRepository.markUnknown(paymentId, Texts.abbreviate(detail, Payment.MAX_LAST_ERROR),
+    public PaymentSettlement requestedToUnknown(long paymentId, String detail) {
+        paymentRepository.requestedToUnknown(paymentId, Texts.abbreviate(detail, Payment.MAX_LAST_ERROR),
                 unknownRecheckMicros);
         Payment payment = paymentRepository.findById(paymentId).orElseThrow(() -> paymentNotFound(paymentId));
         return PaymentSettlement.seatsUnchanged(paymentReader.resultOf(payment));
@@ -154,10 +154,10 @@ public class PaymentTransaction {
 
     // PG 환불 확정 뒤 RefundRequestedHandler가 부른다. 다시 불려도 조건부 전이라 두 번째는 바꾸는 행이 없다
     @Transactional(isolation = Isolation.READ_COMMITTED)
-    public boolean completeRefund(long paymentId) {
+    public void approvedToCancelled(long paymentId) {
         long holdId = paymentRepository.findHoldIdById(paymentId).orElseThrow(() -> paymentNotFound(paymentId));
-        seatHoldRepository.markReleasedFromRefunding(holdId);
-        return RowCounts.changedOne(paymentRepository.markRefunded(paymentId));
+        seatHoldRepository.refundingToReleased(holdId);
+        paymentRepository.approvedToCancelled(paymentId);
     }
 
     private static void requirePayable(SeatHold hold, LocalDateTime now) {
@@ -177,7 +177,7 @@ public class PaymentTransaction {
     // 좌석을 결제 마감까지 붙잡는다. 만료 경계에서 진 쪽은 HOLD_EXPIRED다
     private void heldToPaying(SeatHold hold, LocalDateTime deadline) {
         long holdId = hold.getId();
-        if (!RowCounts.changedOne(seatHoldRepository.markPaying(holdId, deadline))) {
+        if (!RowCounts.changedOne(seatHoldRepository.heldToPaying(holdId, deadline))) {
             throw new ApiException(ErrorCode.HOLD_EXPIRED, Map.of("holdId", holdId));
         }
         if (!RowCounts.changedExactly(seatRepository.extendHeldUntil(holdId, deadline), hold.getSeatCount())) {
@@ -192,8 +192,8 @@ public class PaymentTransaction {
         long holdId = hold.getId();
         long paymentId = payment.getId();
         RowCounts.requireExactly(seatRepository.releaseHeldSeats(holdId), seatIds.size(), "seat AVAILABLE");
-        RowCounts.requireExactly(seatHoldRepository.markRefunding(holdId), 1, "hold REFUNDING");
-        RowCounts.requireExactly(paymentRepository.markApproved(paymentId, pgTxId), 1, "payment APPROVED");
+        RowCounts.requireExactly(seatHoldRepository.payingToRefunding(holdId), 1, "hold REFUNDING");
+        RowCounts.requireExactly(paymentRepository.openToApproved(paymentId, pgTxId), 1, "payment APPROVED");
         outboxWriter.write(OutboxTaskType.REFUND_REQUESTED, paymentId,
                 new RefundRequestedPayload(paymentId, payment.getOrderId()));
         return PaymentSettlement.seatsChanged(new PaymentResult(paymentId, PaymentOutcome.SEAT_LOST,
@@ -209,10 +209,10 @@ public class PaymentTransaction {
         long holdId = hold.getId();
         List<Long> seatIds = seatRepository.lockHeldSeatIds(holdId);
         RowCounts.requireExactly(seatRepository.releaseHeldSeats(holdId), seatIds.size(), "seat AVAILABLE");
-        RowCounts.requireExactly(seatHoldRepository.markReleasedFromPaying(holdId), 1, "hold RELEASED");
+        RowCounts.requireExactly(seatHoldRepository.payingToReleased(holdId), 1, "hold RELEASED");
         int updated = target == PaymentStatus.DECLINED
-                ? paymentRepository.markDeclined(paymentId)
-                : paymentRepository.markCancelled(paymentId);
+                ? paymentRepository.openToDeclined(paymentId)
+                : paymentRepository.openToCancelled(paymentId);
         RowCounts.requireExactly(updated, 1, "payment " + target);
         return PaymentSettlement.seatsChanged(new PaymentResult(paymentId,
                 PaymentOutcome.of(target, HoldStatus.RELEASED), target, HoldStatus.RELEASED, null, null),

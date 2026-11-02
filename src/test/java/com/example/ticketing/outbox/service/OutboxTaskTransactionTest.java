@@ -46,9 +46,9 @@ class OutboxTaskTransactionTest {
         assertThat(claimed).containsExactly(new ClaimedOutboxTask(2, OutboxTaskType.TICKET_ISSUED, 200,
                 "{\"bookingId\":200}", 0, NOW.plusSeconds(30)));
         verify(outboxTaskJdbcRepository).lock(List.of(2L), NOW.plusSeconds(30));
-        verify(outboxTaskJdbcRepository).markFailedAttemptLocked(1,
+        verify(outboxTaskJdbcRepository).markFailedAttemptUnclaimed(1,
                 new FailedAttempt(OutboxTaskStatus.PENDING, 1, 2, "핸들러 없음: LEGACY_TASK"));
-        verify(outboxTaskJdbcRepository).markFailedAttemptLocked(3,
+        verify(outboxTaskJdbcRepository).markFailedAttemptUnclaimed(3,
                 new FailedAttempt(OutboxTaskStatus.FAILED, 5, 32, "핸들러 없음: LEGACY_TASK"));
     }
 
@@ -61,8 +61,19 @@ class OutboxTaskTransactionTest {
         assertThat(transaction().claim(10)).isEmpty();
 
         verify(outboxTaskJdbcRepository, never()).lock(any(), any());
-        verify(outboxTaskJdbcRepository).markFailedAttemptLocked(eq(1L), any());
+        verify(outboxTaskJdbcRepository).markFailedAttemptUnclaimed(eq(1L), any());
         verify(outboxTaskJdbcRepository, never()).markFailedAttempt(anyLong(), any(), any());
+    }
+
+    @Test
+    @DisplayName("백오프는 2^attempt초로 늘다가 max-backoff(60초)에서 멈춘다")
+    void backoffIsCapped() {
+        long max = 60;
+
+        assertThat(OutboxTaskTransaction.backoffSeconds(1, max)).isEqualTo(2);
+        assertThat(OutboxTaskTransaction.backoffSeconds(5, max)).isEqualTo(32);
+        assertThat(OutboxTaskTransaction.backoffSeconds(6, max)).isEqualTo(60);
+        assertThat(OutboxTaskTransaction.backoffSeconds(40, max)).isEqualTo(60);
     }
 
     private OutboxTaskTransaction transaction() {

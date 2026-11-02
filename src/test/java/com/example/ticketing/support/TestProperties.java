@@ -68,12 +68,12 @@ public final class TestProperties {
     }
 
     public TestProperties gateEnabled(boolean enabled) {
-        this.gate = new Gate(enabled, gate.fallbackMaxConcurrency());
+        this.gate = new Gate(enabled, gate.fallbackMaxConcurrency(), gate.reconcileEnabled(), gate.reconcileScanMs());
         return this;
     }
 
     public TestProperties fallbackMaxConcurrency(int max) {
-        this.gate = new Gate(gate.enabled(), max);
+        this.gate = new Gate(gate.enabled(), max, gate.reconcileEnabled(), gate.reconcileScanMs());
         return this;
     }
 

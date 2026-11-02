@@ -18,7 +18,6 @@ import java.util.Map;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.context.ApplicationContext;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 @IntegrationTest
@@ -36,8 +35,6 @@ class HoldExpiryTransactionTest {
     private TestRedis testRedis;
     @Autowired
     private JdbcTemplate jdbcTemplate;
-    @Autowired
-    private ApplicationContext context;
 
     @Test
     @DisplayName("만료된 선점 120개를 4스레드가 동시에 치우면 각 선점은 정확히 한 번 만료된다")
@@ -133,13 +130,6 @@ class HoldExpiryTransactionTest {
         assertThat(returned).extracting(HoldExpiry::holdId).doesNotContain(holdId);
         assertThat(db.holdStatus(holdId)).isEqualTo("HELD");
         assertThat(db.heldSeats(pid, holdId)).containsExactlyElementsOf(target);
-    }
-
-    @Test
-    @DisplayName("테스트 컨텍스트에는 만료 스케줄러 빈이 없다")
-    void schedulerBeanDisabledInTests() {
-        assertThat(context.getBeanProvider(HoldExpiryScheduler.class).getIfAvailable()).isNull();
-        assertThat(context.getBeanProvider(HoldExpiryTransaction.class).getIfAvailable()).isNotNull();
     }
 
     // 다른 테스트가 남긴 만료 선점이 있을 수 있어 빌 때까지 치운다

@@ -15,14 +15,12 @@ import com.example.ticketing.hold.dto.CreateHoldCommand;
 import com.example.ticketing.hold.dto.CreateHoldResult;
 import com.example.ticketing.hold.dto.HoldDetailResult;
 import com.example.ticketing.hold.dto.HoldPlacement;
-import com.example.ticketing.hold.dto.HoldRelease;
 import com.example.ticketing.hold.dto.HoldSeatResult;
 import com.example.ticketing.hold.repository.SeatGateRedisStore;
 import com.example.ticketing.hold.repository.SeatHoldJdbcRepository;
 import com.example.ticketing.hold.repository.SeatHoldRepository;
 import com.example.ticketing.queue.service.QueueService;
 import com.example.ticketing.seat.dto.SeatSelection;
-import com.example.ticketing.seat.repository.SeatRepository;
 import com.example.ticketing.seat.service.SeatCatalog;
 import java.time.Duration;
 import java.util.Map;
@@ -40,7 +38,6 @@ public class SeatHoldService {
     private final SeatCatalog seatCatalog;
     private final SeatHoldTransaction seatHoldTransaction;
     private final SeatHoldRepository seatHoldRepository;
-    private final SeatRepository seatRepository;
     private final SeatHoldJdbcRepository seatHoldJdbcRepository;
     private final DbClock dbClock;
     private final SeatGateRedisStore gateStore;
@@ -53,14 +50,13 @@ public class SeatHoldService {
     private final ThrottledWarn redisWarn;
 
     public SeatHoldService(SeatCatalog seatCatalog, SeatHoldTransaction seatHoldTransaction,
-                           SeatHoldRepository seatHoldRepository, SeatRepository seatRepository,
-                           SeatHoldJdbcRepository seatHoldJdbcRepository, DbClock dbClock, SeatGateRedisStore gateStore,
-                           SeatGateReflector gateReflector, QueueService queueService, HoldMetrics metrics,
-                           LongSupplier nanoClock, TicketingProperties properties) {
+                           SeatHoldRepository seatHoldRepository, SeatHoldJdbcRepository seatHoldJdbcRepository,
+                           DbClock dbClock, SeatGateRedisStore gateStore, SeatGateReflector gateReflector,
+                           QueueService queueService, HoldMetrics metrics, LongSupplier nanoClock,
+                           TicketingProperties properties) {
         this.seatCatalog = seatCatalog;
         this.seatHoldTransaction = seatHoldTransaction;
         this.seatHoldRepository = seatHoldRepository;
-        this.seatRepository = seatRepository;
         this.seatHoldJdbcRepository = seatHoldJdbcRepository;
         this.dbClock = dbClock;
         this.gateStore = gateStore;
@@ -99,7 +95,7 @@ public class SeatHoldService {
         SeatHold hold = seatHoldRepository.findByIdAndUserId(holdId, userId)
                 .orElseThrow(() -> new ApiException(ErrorCode.HOLD_NOT_FOUND, Map.of("holdId", holdId)));
         return HoldDetailResult.from(hold,
-                seatRepository.findByPerformanceIdAndHoldIdOrderByIdAsc(hold.getPerformanceId(), holdId),
+                seatCatalog.seatsOfHold(hold.getPerformanceId(), holdId),
                 seatHoldJdbcRepository.findPaymentIdByHoldId(holdId).orElse(null), dbClock.now());
     }
 
@@ -113,8 +109,7 @@ public class SeatHoldService {
 
     // 커밋이 끝난 뒤 게이트 키를 지운다
     public void release(long userId, long holdId) {
-        HoldRelease released = seatHoldTransaction.releaseHold(userId, holdId);
-        gateReflector.release(released.gate());
+        gateReflector.release(seatHoldTransaction.heldToReleased(userId, holdId));
     }
 
     // 처리열을 끄는 것은 게이트 스위치와 별개로 ticketing.queue.required뿐이다
@@ -185,7 +180,7 @@ public class SeatHoldService {
         HoldPlacement placement;
         try {
             placement = decideInDb(command.userId(), selection, gateHold.holdToken());
-        } catch (Throwable e) {
+        } catch (RuntimeException e) {
             // 게이트에 방금 쓴 키를 지운다. DB가 거절했든 DB 예외든 같다
             if (releaseGateOnFailure) {
                 gateReflector.release(gateHold);

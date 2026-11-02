@@ -133,8 +133,8 @@ class PaymentConcurrencyTest {
 
         Results<Void> concurrent = Concurrently.of(2).readyWithin(Duration.ofSeconds(10))
                 .within(Duration.ofSeconds(60))
-                .runAll(i -> settlements.add(paymentTransaction.confirm(paymentId, "pg-tx-" + paymentId)));
-        settlements.add(paymentTransaction.confirm(paymentId, "pg-tx-" + paymentId));
+                .runAll(i -> settlements.add(paymentTransaction.openToApproved(paymentId, "pg-tx-" + paymentId)));
+        settlements.add(paymentTransaction.openToApproved(paymentId, "pg-tx-" + paymentId));
 
         assertThat(concurrent.errors()).isEmpty();
         assertThat(settlements).hasSize(3)

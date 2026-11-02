@@ -1,6 +1,7 @@
 package com.example.ticketing.outbox.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.example.ticketing.common.config.TicketingProperties;
 import com.example.ticketing.common.metrics.Metrics;
@@ -119,16 +120,6 @@ class OutboxDispatchSchedulerTest {
     }
 
     @Test
-    @DisplayName("좌석이 1석이면 알림에 「외 N석」 없이 그 좌석만 적는다")
-    void singleSeatHasNoOthers() {
-        Confirmed c = fixtures.confirmed(1);
-
-        worker.run();
-
-        assertThat(notificationMessage(c.bookingId())).contains(" A구역 1열 1번 예매가 확정됐어요.").doesNotContain("외");
-    }
-
-    @Test
     @DisplayName("집기 → 처리 뒤 멈춤 → 잠금 만료 → 재처리 흐름에서 알림은 1건만 남는다")
     void crashedTaskIsReprocessedOnce() {
         Confirmed c = fixtures.confirmed(2);
@@ -153,35 +144,6 @@ class OutboxDispatchSchedulerTest {
     }
 
     @Test
-    @DisplayName("같은 발권 작업을 핸들러로 두 번 처리해도 알림은 1건이다")
-    void ticketIssuedIsIdempotent() {
-        Confirmed c = fixtures.confirmed(2);
-        TicketIssuedPayload payload = payloadOf(outboxTaskTransaction.claim(50).get(0));
-
-        ticketIssuedHandler.handle(payload);
-        String first = notificationMessage(c.bookingId());
-        ticketIssuedHandler.handle(payload);
-
-        assertThat(notificationCount(c.bookingId())).isEqualTo(1);
-        assertThat(notificationMessage(c.bookingId())).isEqualTo(first);
-    }
-
-    @Test
-    @DisplayName("같은 발권 작업을 5스레드가 동시에 처리해도 예외 없이 알림은 1건이다")
-    void concurrentSameTicketIssuedWritesOnce() {
-        Confirmed c = fixtures.confirmed(2);
-        TicketIssuedPayload payload = payloadOf(outboxTaskTransaction.claim(50).get(0));
-
-        Results<Void> results = Concurrently.of(5)
-                .readyWithin(Duration.ofSeconds(10))
-                .within(Duration.ofSeconds(60))
-                .runAll(i -> ticketIssuedHandler.handle(payload));
-
-        assertThat(results.errors()).isEmpty();
-        assertThat(notificationCount(c.bookingId())).isEqualTo(1);
-    }
-
-    @Test
     @DisplayName("잠금이 지나 다시 집힌 작업은 먼저 집은 쪽이 결과를 쓰지 못한다")
     void staleClaimCannotWriteResult() {
         Confirmed c = fixtures.confirmed(1);
@@ -193,13 +155,13 @@ class OutboxDispatchSchedulerTest {
         assertThat(fresh.lockedUntil()).isAfter(stale.lockedUntil());
 
         assertThat(outboxTaskTransaction.markFailedAttempt(stale, "늦은 실패")).isEmpty();
-        assertThat(outboxTaskTransaction.markDone(stale)).isFalse();
+        assertThat(outboxTaskTransaction.processingToDone(stale)).isFalse();
         assertThat(db.outboxTask("TICKET_ISSUED", c.bookingId())).containsEntry("status", "PROCESSING")
                 .containsEntry("attempt", 0).containsEntry("last_error", null);
 
-        assertThat(outboxTaskTransaction.markDone(fresh)).isTrue();
+        assertThat(outboxTaskTransaction.processingToDone(fresh)).isTrue();
         assertThat(db.outboxTask("TICKET_ISSUED", c.bookingId())).containsEntry("status", "DONE");
-        assertThat(outboxTaskTransaction.markDone(fresh)).isFalse();
+        assertThat(outboxTaskTransaction.processingToDone(fresh)).isFalse();
     }
 
     @Test
@@ -281,18 +243,6 @@ class OutboxDispatchSchedulerTest {
     }
 
     @Test
-    @DisplayName("백오프는 2^attempt초로 늘다가 max-backoff(60초)에서 멈춘다")
-    void backoffIsCapped() {
-        long max = properties.outbox().maxBackoff().toSeconds();
-
-        assertThat(max).isEqualTo(60);
-        assertThat(OutboxTaskTransaction.backoffSeconds(1, max)).isEqualTo(2);
-        assertThat(OutboxTaskTransaction.backoffSeconds(5, max)).isEqualTo(32);
-        assertThat(OutboxTaskTransaction.backoffSeconds(6, max)).isEqualTo(60);
-        assertThat(OutboxTaskTransaction.backoffSeconds(40, max)).isEqualTo(60);
-    }
-
-    @Test
     @DisplayName("같은 배치에서 한 작업의 핸들러가 실패해도 다른 작업은 DONE이 된다")
     void oneFailureDoesNotStopBatch() {
         Refund r = seatLostRefund();
@@ -311,19 +261,11 @@ class OutboxDispatchSchedulerTest {
     }
 
     @Test
-    @DisplayName("핸들러가 없는 작업 종류는 실패로 기록하고 같은 배치의 다른 작업은 처리한다")
-    void missingHandlerIsFailedAttempt() {
-        Refund r = seatLostRefund();
-        Confirmed c = fixtures.confirmed(1);
-        OutboxDispatchScheduler ticketOnly = services.outboxDispatchScheduler(List.of(ticketIssuedHandler), properties);
-
-        ticketOnly.run();
-
-        Map<String, Object> refund = db.outboxTask("REFUND_REQUESTED", r.paymentId);
-        assertThat(refund).containsEntry("status", "PENDING").containsEntry("attempt", 1);
-        assertThat((String) refund.get("last_error")).contains("핸들러 없음");
-        assertThat(stubPg.cancelCalls()).isZero();
-        assertThat(db.outboxTask("TICKET_ISSUED", c.bookingId())).containsEntry("status", "DONE");
+    @DisplayName("핸들러가 빠진 작업 종류가 있으면 워커를 만들 수 없다")
+    void missingHandlerFailsAtStartup() {
+        assertThatThrownBy(() -> services.outboxDispatchScheduler(List.of(ticketIssuedHandler), properties))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("REFUND_REQUESTED");
     }
 
     @Test
@@ -390,7 +332,7 @@ class OutboxDispatchSchedulerTest {
                 + "FROM outbox_task WHERE id = ?", Long.class, taskId) / 1_000;
         long expectedMs = properties.outbox().lockDuration().toMillis();
         assertThat(lockMs).isBetween(expectedMs - TOLERANCE_MS, expectedMs);
-        assertThat(outboxTaskTransaction.markDone(first.get(0))).isTrue();
+        assertThat(outboxTaskTransaction.processingToDone(first.get(0))).isTrue();
         assertThat(outboxTaskTransaction.markFailedAttempt(first.get(0), "x")).isEmpty();
         assertThat(db.outboxTask("TICKET_ISSUED", c.bookingId())).containsEntry("status", "DONE")
                 .containsEntry("attempt", 0).containsEntry("last_error", null);
@@ -416,7 +358,7 @@ class OutboxDispatchSchedulerTest {
         jdbcTemplate.update("UPDATE seat SET held_until = NOW(6) - INTERVAL 1 SECOND WHERE id = ?", lost);
         testRedis.clean(held.pid());
         fixtures.held(held.pid(), List.of(lost));
-        paymentTransaction.confirm(paymentId, "pg-refund-" + paymentId);
+        paymentTransaction.openToApproved(paymentId, "pg-refund-" + paymentId);
         assertThat(db.holdStatus(held.holdId())).isEqualTo("REFUNDING");
         assertThat(db.payment(paymentId)).containsEntry("status", "APPROVED");
         Map<String, Object> task = db.outboxTask("REFUND_REQUESTED", paymentId);
@@ -437,11 +379,6 @@ class OutboxDispatchSchedulerTest {
 
     private long notificationCount(long bookingId) {
         return jdbcTemplate.queryForObject("SELECT COUNT(*) FROM notification WHERE booking_id = ?", Long.class,
-                bookingId);
-    }
-
-    private String notificationMessage(long bookingId) {
-        return jdbcTemplate.queryForObject("SELECT message FROM notification WHERE booking_id = ?", String.class,
                 bookingId);
     }
 

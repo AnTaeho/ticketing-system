@@ -45,6 +45,11 @@ public class OutboxDispatchScheduler {
                 throw new IllegalStateException("Outbox 핸들러가 둘이다: " + handler.type());
             }
         }
+        for (OutboxTaskType type : OutboxTaskType.values()) {
+            if (!this.handlers.containsKey(type)) {
+                throw new IllegalStateException("Outbox 핸들러가 없다: " + type);
+            }
+        }
         // 옛 행에 남은 다른 키는 무시하고, 빠진 키는 0으로 채우지 않고 실패로 돌린다
         this.payloadMapper = jsonMapper.rebuild()
                 .disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
@@ -71,18 +76,13 @@ public class OutboxDispatchScheduler {
     }
 
     private void process(ClaimedOutboxTask task) {
-        OutboxHandler<?> handler = handlers.get(task.taskType());
-        if (handler == null) {
-            fail(task, "핸들러 없음: " + task.taskType(), null);
-            return;
-        }
         try {
-            dispatch(handler, task);
+            dispatch(handlers.get(task.taskType()), task);
         } catch (RuntimeException e) {
             fail(task, e.toString(), e);
             return;
         }
-        if (taskTransaction.markDone(task)) {
+        if (taskTransaction.processingToDone(task)) {
             counters.get(task.taskType()).done().increment();
         } else {
             log.info("[outbox] 잠금이 지나 다른 워커가 다시 집었다. 결과는 그쪽이 쓴다 taskId={}", task.id());

@@ -26,28 +26,28 @@ public interface PaymentRepository extends JpaRepository<Payment, Long> {
             UPDATE booking_payment
                SET status = 'APPROVED', pg_tx_id = :pgTxId, next_check_at = NULL, updated_at = NOW(6)
              WHERE id = :id AND status IN ('REQUESTED', 'UNKNOWN')""", nativeQuery = true)
-    int markApproved(@Param("id") long id, @Param("pgTxId") String pgTxId);
+    int openToApproved(@Param("id") long id, @Param("pgTxId") String pgTxId);
 
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query(value = """
             UPDATE booking_payment
                SET status = 'DECLINED', next_check_at = NULL, updated_at = NOW(6)
              WHERE id = :id AND status IN ('REQUESTED', 'UNKNOWN')""", nativeQuery = true)
-    int markDeclined(@Param("id") long id);
+    int openToDeclined(@Param("id") long id);
 
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query(value = """
             UPDATE booking_payment
                SET status = 'CANCELLED', next_check_at = NULL, updated_at = NOW(6)
              WHERE id = :id AND status IN ('REQUESTED', 'UNKNOWN')""", nativeQuery = true)
-    int markCancelled(@Param("id") long id);
+    int openToCancelled(@Param("id") long id);
 
     // 승인된 결제의 환불이 PG에서 확정됐을 때만 부른다
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query(value = """
             UPDATE booking_payment SET status = 'CANCELLED', updated_at = NOW(6)
              WHERE id = :id AND status = 'APPROVED'""", nativeQuery = true)
-    int markRefunded(@Param("id") long id);
+    int approvedToCancelled(@Param("id") long id);
 
     // 대사가 다음 확인 시각을 정한다. 넘긴 오류가 없으면 이전 last_error를 둔다
     @Modifying(clearAutomatically = true, flushAutomatically = true)
@@ -66,6 +66,6 @@ public interface PaymentRepository extends JpaRepository<Payment, Long> {
                SET status = 'UNKNOWN', last_error = :lastError,
                    next_check_at = DATE_ADD(NOW(6), INTERVAL :recheckMicros MICROSECOND), updated_at = NOW(6)
              WHERE id = :id AND status = 'REQUESTED'""", nativeQuery = true)
-    int markUnknown(@Param("id") long id, @Param("lastError") String lastError,
-                    @Param("recheckMicros") long recheckMicros);
+    int requestedToUnknown(@Param("id") long id, @Param("lastError") String lastError,
+                           @Param("recheckMicros") long recheckMicros);
 }
