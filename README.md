@@ -177,7 +177,7 @@ cp src/main/resources/application-local.yml.example src/main/resources/applicati
 - 결제 화면에서 로컬 전용 「결제 상황」(정상 승인 / 거절 / 응답 지연)을 골라 PG 타임아웃 흐름을 시연할 수 있습니다.
 
 ```bash
-./gradlew test           # 통합 테스트 432건. MySQL·Redis 필요
+./gradlew test           # 통합 테스트 421건. MySQL·Redis 필요
 ```
 
 테스트는 전용 DB `ticketing_booking_test`(자동 생성)와 Redis DB 1을 써서 시연 데이터와 섞이지 않습니다.
@@ -223,7 +223,7 @@ src/main/java/com/example/ticketing/
 각 기능 안:  controller/  dto/  service/  repository/  domain/
 
 src/main/resources/
-├── scripts/booking/      Lua (hold · release · extend · confirm · queue_* · seatmap_lease)
+├── scripts/booking/      Lua (hold · extend · confirm · queue_* · seatmap_lease · delete_if_equals)
 ├── templates/booking/    화면 템플릿
 └── static/booking/       화면 CSS·JS (api.js·bk-ui.js 공용 부품 + 화면별 파일)
 
