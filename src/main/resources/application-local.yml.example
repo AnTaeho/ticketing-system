@@ -19,7 +19,6 @@ spring:
 
 # 로컬에서 바꿔 볼 만한 설정. 주석을 풀어 쓴다. 나머지 ticketing.* 기본값은 application.yml에 있다
 # ticketing.gate.enabled: false          # Redis 게이트 없이 DB 판정만으로 선점(부하 테스트 비교용)
-# ticketing.queue.required: false        # 줄을 서지 않고 바로 선점(부하 테스트 비교용)
 # ticketing.queue.capacity: 200          # 좌석 화면에 동시에 들어갈 수 있는 인원
 # ticketing.seed.enabled: false          # 띄울 때 시연용 공연을 만들지 않는다
 # ticketing.fake-pg.delay-min: 200ms     # 가짜 결제 응답 지연 최소

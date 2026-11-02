@@ -399,22 +399,6 @@ class QueueServiceTest {
     }
 
     @Test
-    @DisplayName("입장 시각이 없는 처리열 토큰은 생존 신호로 늘리지 않고 남은 시간만 돌려준다")
-    void heartbeatKeepsScoreWithoutAdmittedAt() {
-        long pid = openPerformance();
-        long owner = USER_BASE + 1;
-        String token = queueService.enter(owner, pid).queueToken();
-        long expireAt = System.currentTimeMillis() + 5_000;
-        redis.opsForZSet().add(RedisKeys.queueProcessing(pid), token, expireAt);
-        redis.opsForZSet().remove(RedisKeys.queueAdmitted(pid), token);
-
-        QueueHeartbeatResult result = queueService.heartbeat(owner, pid, token);
-
-        assertThat(result.expiresInMs()).isPositive().isLessThanOrEqualTo(5_000L);
-        assertThat(queueRedisStore.processingScore(pid, token)).isEqualTo((double) expireAt);
-    }
-
-    @Test
     @DisplayName("떠남 신호를 받으면 처리열 점수를 지금 + 떠남 유예로 줄이고, 다시 생존 신호가 오면 무응답 한도만큼 되돌린다")
     void leaveShortensAndHeartbeatRestores() {
         long pid = openPerformance();

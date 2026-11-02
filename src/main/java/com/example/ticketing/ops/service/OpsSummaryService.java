@@ -13,12 +13,9 @@ import com.example.ticketing.ops.domain.OpsPerformanceRow;
 import com.example.ticketing.ops.domain.StatusCount;
 import com.example.ticketing.ops.dto.OpsSummary;
 import com.example.ticketing.ops.dto.OpsSummary.Attention;
-import com.example.ticketing.ops.dto.OpsSummary.FailedTask;
 import com.example.ticketing.ops.dto.OpsSummary.GateKeys;
-import com.example.ticketing.ops.dto.OpsSummary.PerformanceInfo;
+import com.example.ticketing.ops.dto.OpsSummary.OpsPerformance;
 import com.example.ticketing.ops.dto.OpsSummary.Queue;
-import com.example.ticketing.ops.dto.OpsSummary.RefundingHold;
-import com.example.ticketing.ops.dto.OpsSummary.StalePayment;
 import com.example.ticketing.ops.repository.OpsJdbcRepository;
 import com.example.ticketing.ops.repository.OpsRedisStore;
 import com.example.ticketing.outbox.domain.OutboxTaskStatus;
@@ -84,18 +81,9 @@ public class OpsSummaryService {
     }
 
     private Attention attention(long performanceId) {
-        List<FailedTask> failed = opsJdbcRepository.findFailedTasks(performanceId, LIST_LIMIT).stream()
-                .map(r -> new FailedTask(r.id(), r.taskType(), r.aggregateId(), r.attempt(), r.lastError(),
-                        r.updatedAt()))
-                .toList();
-        List<RefundingHold> refunding = opsJdbcRepository.findRefundingHolds(performanceId, LIST_LIMIT).stream()
-                .map(r -> new RefundingHold(r.holdId(), r.userId(), r.seatCount(), r.totalAmount(), r.updatedAt()))
-                .toList();
-        List<StalePayment> stale = opsJdbcRepository.findStalePayments(performanceId, stalePaymentMicros, LIST_LIMIT)
-                .stream()
-                .map(r -> new StalePayment(r.paymentId(), r.holdId(), r.status(), r.createdAt(), r.lastError()))
-                .toList();
-        return new Attention(failed, refunding, stale);
+        return new Attention(opsJdbcRepository.findFailedTasks(performanceId, LIST_LIMIT),
+                opsJdbcRepository.findRefundingHolds(performanceId, LIST_LIMIT),
+                opsJdbcRepository.findStalePayments(performanceId, stalePaymentMicros, LIST_LIMIT));
     }
 
     // 한 명령이라도 실패하면 Redis 칸 전체를 비운다. 연결이 죽었으면 나머지도 타임아웃까지 기다리게 되므로
@@ -112,8 +100,8 @@ public class OpsSummaryService {
         }
     }
 
-    private static PerformanceInfo info(OpsPerformanceRow row) {
-        return new PerformanceInfo(row.performanceId(), row.showTitle(), row.venueName(), row.startsAt(),
+    private static OpsPerformance info(OpsPerformanceRow row) {
+        return new OpsPerformance(row.performanceId(), row.showTitle(), row.venueName(), row.startsAt(),
                 row.openAt(), row.gateCloseAt());
     }
 

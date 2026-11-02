@@ -24,18 +24,18 @@ public class FakePgTransaction {
     }
 
     public int processingToApproved(String orderId, String pgTxId) {
-        return repository.approveProcessing(orderId, pgTxId);
+        return repository.processingToApproved(orderId, pgTxId);
     }
 
     public int processingToDeclined(String orderId) {
-        return repository.declineProcessing(orderId);
+        return repository.processingToDeclined(orderId);
     }
 
     public int staleProcessingToDeclined(String orderId, long staleMicros) {
-        return repository.declineStaleProcessing(orderId, staleMicros);
+        return repository.staleProcessingToDeclined(orderId, staleMicros);
     }
 
     public int approvedToCancelled(String orderId) {
-        return repository.cancelApproved(orderId);
+        return repository.approvedToCancelled(orderId);
     }
 }

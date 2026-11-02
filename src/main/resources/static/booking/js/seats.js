@@ -13,8 +13,7 @@
   var body = document.body;
   var pid = body.dataset.performanceId;
   var maxSeats = Number(body.dataset.maxSeats) || 4;
-  // 0이면 줄을 세우지 않는 설정이라 신호를 보내지 않는다
-  var heartbeatMs = Number(body.dataset.heartbeatMs) || 0;
+  var heartbeatMs = Number(body.dataset.heartbeatMs);
   var showId = bk.positiveId(bk.query('show'));
   var tokenKey = bk.keys.queueToken(pid);
   var el = bk.el;
@@ -575,7 +574,7 @@
   bk.syncBar(ui.bar);
   bk.loadPerformanceHeader(showId, pid);
   mapPoller.now();
-  if (heartbeatMs > 0 && bk.session.get(tokenKey)) {
+  if (bk.session.get(tokenKey)) {
     heartbeat.now();
     // 잡기에 성공해 넘어갈 때도 보내지만 토큰이 이미 소모돼 서버는 아무 일도 하지 않는다
     window.addEventListener('pagehide', function () { bk.leaveQueue(pid); });

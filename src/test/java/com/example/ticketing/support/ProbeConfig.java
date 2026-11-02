@@ -15,13 +15,13 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-// 예매 컨트롤러가 생기기 전 예외 처리 순서를 확인하려고 booking 패키지 안에 둔 시험용 컨트롤러
+// API 예외 처리기가 사용자 식별·헤더·본문 검증 실패를 어떻게 답하는지 확인하는 시험용 컨트롤러
 @TestConfiguration(proxyBeanMethods = false)
 public class ProbeConfig {
 
     @RestController
-    @RequestMapping("/test/booking-probe")
-    static class BookingProbeController {
+    @RequestMapping("/test/probe")
+    static class ProbeController {
 
         @GetMapping("/me")
         Map<String, Long> me(@CurrentUser Long userId) {

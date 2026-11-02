@@ -8,9 +8,12 @@
   var about = document.getElementById('show-about');
   var list = document.getElementById('show-perfs');
   var el = bk.el;
-  var countdowns = [];
-  var lastReloadAt = 0;
   var DAY_MS = 24 * 60 * 60 * 1000;
+
+  var state = {
+    countdowns: [],   // 오픈을 기다리는 회차의 남은 시간 칸
+    lastReloadAt: 0   // 열릴 시각이 지나 상태를 다시 받은 서버 시각
+  };
 
   function action(performance) {
     if (performance.state === 'OPEN') {
@@ -22,7 +25,7 @@
     }
     if (performance.state === 'BEFORE_OPEN') {
       var box = el('p', { class: 'btn is-off num' });
-      countdowns.push({ node: box, openAt: bk.epochOf(performance.openAt), openText: performance.openAt });
+      state.countdowns.push({ node: box, openAt: bk.epochOf(performance.openAt), openText: performance.openAt });
       return box;
     }
     return el('p', { class: 'btn is-off', text: '예매가 끝났어요' });
@@ -41,7 +44,7 @@
     bk.setTitle(show.title);
     about.textContent = show.description || '';
     about.hidden = !show.description;
-    countdowns = [];
+    state.countdowns = [];
     list.textContent = '';
     if (show.performances.length === 0) {
       list.appendChild(el('p', { class: 'panel empty', text: '예정된 날짜가 없어요' }));
@@ -61,7 +64,7 @@
   function tick() {
     var now = bk.serverNow();
     var due = false;
-    countdowns.forEach(function (c) {
+    state.countdowns.forEach(function (c) {
       var left = c.openAt - now;
       if (left <= 0) {
         due = true;
@@ -73,8 +76,8 @@
       }
     });
     // 열릴 시각이 지나면 상태를 다시 받는다. 시계가 어긋나도 3초에 한 번만 묻는다
-    if (due && now - lastReloadAt > 3000) {
-      lastReloadAt = now;
+    if (due && now - state.lastReloadAt > 3000) {
+      state.lastReloadAt = now;
       load();
     }
   }
@@ -91,6 +94,6 @@
     });
   }
 
-  setInterval(function () { if (countdowns.length) tick(); }, 1000);
+  setInterval(function () { if (state.countdowns.length) tick(); }, 1000);
   load();
 })();

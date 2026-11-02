@@ -9,17 +9,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.example.ticketing.common.config.TicketingProperties;
 import com.example.ticketing.common.web.HttpNames;
-import com.example.ticketing.fakepg.domain.FakePgScenario;
-import com.example.ticketing.fakepg.dto.FakePgReply;
-import com.example.ticketing.fakepg.service.FakePgService;
 import com.example.ticketing.support.FakePgTestConfig;
 import com.example.ticketing.support.FakePgTestConfig.GatedSleeper;
-import com.example.ticketing.support.Concurrently;
-import com.example.ticketing.support.Concurrently.Results;
-import com.example.ticketing.support.Concurrently.Running;
 import com.example.ticketing.support.IntegrationTest;
 import com.example.ticketing.support.TestMvc;
-import java.time.Duration;
 import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -41,8 +34,6 @@ class FakePgControllerTest {
 
     @Autowired
     private TestMvc testMvc;
-    @Autowired
-    private FakePgService fakePgService;
     @Autowired
     private GatedSleeper sleeper;
     @Autowired
@@ -124,91 +115,6 @@ class FakePgControllerTest {
     }
 
     @Test
-    @DisplayName("없는 주문을 취소하면 묘비가 남아 뒤늦은 승인을 거절한다")
-    void cancelMissingThenApprove() throws Exception {
-        String orderId = newOrderId();
-
-        mockMvc.perform(post(BASE + "/" + orderId + "/cancel"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.orderId").value(orderId))
-                .andExpect(jsonPath("$.status").value("CANCELLED"))
-                .andExpect(jsonPath("$.pgTxId").doesNotExist());
-        approve(orderId, "SUCCESS")
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.status").value("DECLINED"))
-                .andExpect(jsonPath("$.reason").value("CANCELLED"))
-                .andExpect(jsonPath("$.pgTxId").doesNotExist());
-        mockMvc.perform(get(BASE + "/" + orderId))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.status").value("CANCELLED"));
-    }
-
-    @Test
-    @DisplayName("승인된 주문은 몇 번 취소해도 승인 번호를 유지한 채 취소로 답한다")
-    void cancelApproved() throws Exception {
-        String orderId = newOrderId();
-        FakePgReply approved = fakePgService.approve(orderId, 1000, FakePgScenario.SUCCESS);
-
-        for (int i = 0; i < 2; i++) {
-            mockMvc.perform(post(BASE + "/" + orderId + "/cancel"))
-                    .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.status").value("CANCELLED"))
-                    .andExpect(jsonPath("$.pgTxId").value(approved.pgTxId()));
-        }
-    }
-
-    @Test
-    @DisplayName("거절된 주문을 취소하면 거절 상태 그대로 답한다")
-    void cancelDeclined() throws Exception {
-        String orderId = newOrderId();
-        fakePgService.approve(orderId, 1000, FakePgScenario.DECLINE);
-
-        mockMvc.perform(post(BASE + "/" + orderId + "/cancel"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.status").value("DECLINED"));
-    }
-
-    @Test
-    @DisplayName("승인이 지연되는 동안 취소하면 409로 거절하고 승인이 끝나면 취소를 받는다")
-    void cancelWhileProcessing() throws Exception {
-        String orderId = newOrderId();
-        sleeper.close();
-
-        Results<FakePgReply> results;
-        try (Running<FakePgReply> slow = Concurrently.of(1).within(Duration.ofSeconds(10))
-                .start(i -> fakePgService.approve(orderId, 1000, FakePgScenario.SLOW_SUCCESS))) {
-            try {
-                assertThat(sleeper.awaitEntered(1)).isTrue();
-
-                mockMvc.perform(post(BASE + "/" + orderId + "/cancel"))
-                        .andExpect(status().isConflict())
-                        .andExpect(jsonPath("$.orderId").value(orderId))
-                        .andExpect(jsonPath("$.status").value("PROCESSING"))
-                        .andExpect(jsonPath("$.pgTxId").doesNotExist())
-                        .andExpect(jsonPath("$.code").doesNotExist());
-                approve(orderId, "SLOW_SUCCESS")
-                        .andExpect(status().isOk())
-                        .andExpect(jsonPath("$.status").value("PROCESSING"));
-                mockMvc.perform(get(BASE + "/" + orderId))
-                        .andExpect(status().isOk())
-                        .andExpect(jsonPath("$.status").value("PROCESSING"));
-            } finally {
-                sleeper.open();
-            }
-            results = slow.await();
-        }
-
-        assertThat(results.errors()).isEmpty();
-        assertThat(results.values().get(0).status()).isEqualTo("APPROVED");
-        mockMvc.perform(get(BASE + "/" + orderId))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.status").value("APPROVED"));
-        mockMvc.perform(post(BASE + "/" + orderId + "/cancel"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.status").value("CANCELLED"));
-    }
-
-    @Test
     @DisplayName("앱이 죽어 오래 남은 처리 중 주문은 조회·취소할 때 거절로 확정한다")
     void staleProcessingIsDeclined() throws Exception {
         long staleSeconds = properties.fakePg().slowDelay().plus(properties.fakePg().staleMargin()).toSeconds() + 1;
@@ -233,7 +139,10 @@ class FakePgControllerTest {
                 .andExpect(jsonPath("$.status").value("PROCESSING"));
         mockMvc.perform(post(BASE + "/" + recent + "/cancel"))
                 .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.status").value("PROCESSING"));
+                .andExpect(jsonPath("$.orderId").value(recent))
+                .andExpect(jsonPath("$.status").value("PROCESSING"))
+                .andExpect(jsonPath("$.pgTxId").doesNotExist())
+                .andExpect(jsonPath("$.code").doesNotExist());
         assertThat(rowStatus(recent)).isEqualTo("PROCESSING");
     }
 

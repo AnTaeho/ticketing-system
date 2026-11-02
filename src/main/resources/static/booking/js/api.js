@@ -369,7 +369,6 @@
     safePath: safePath,
     positiveId: positiveId,
     queueTokenPath: queueTokenPath,
-    leaveQueue: leaveQueue,
-    loginUrl: loginUrl
+    leaveQueue: leaveQueue
   };
 })();

@@ -23,7 +23,7 @@ import org.springframework.stereotype.Component;
 public class SeatJdbcRepository {
 
     private static final String PERFORMANCE_SQL =
-            "SELECT show_id, open_at, starts_at, gate_close_at FROM performance WHERE id = :pid";
+            "SELECT open_at, starts_at, gate_close_at FROM performance WHERE id = :pid";
 
     private static final String SEAT_INFO_SQL =
             "SELECT id, section, row_no, seat_no, grade, price FROM seat WHERE performance_id = :pid ORDER BY id";
@@ -51,13 +51,11 @@ public class SeatJdbcRepository {
     // 회차 행과 좌석을 함께 읽는다. 회차가 없으면 빈 Optional
     public Optional<PerformanceInfo> findPerformanceWithSeats(long performanceId) {
         Map<String, Long> pid = Map.of("pid", performanceId);
-        List<PerformanceInfo> found = jdbcTemplate.query(PERFORMANCE_SQL, pid,
-                (rs, i) -> new PerformanceInfo(performanceId, rs.getLong("show_id"),
-                        rs.getObject("open_at", LocalDateTime.class),
-                        rs.getObject("starts_at", LocalDateTime.class),
-                        rs.getObject("gate_close_at", LocalDateTime.class),
-                        Map.of()));
-        if (found.isEmpty()) {
+        List<Times> times = jdbcTemplate.query(PERFORMANCE_SQL, pid, (rs, i) -> new Times(
+                rs.getObject("open_at", LocalDateTime.class),
+                rs.getObject("starts_at", LocalDateTime.class),
+                rs.getObject("gate_close_at", LocalDateTime.class)));
+        if (times.isEmpty()) {
             return Optional.empty();
         }
         Map<Long, SeatInfo> seats = new LinkedHashMap<>();
@@ -66,9 +64,9 @@ public class SeatJdbcRepository {
             seats.put(id, new SeatInfo(id, rs.getString("section"), rs.getInt("row_no"), rs.getInt("seat_no"),
                     SeatGrade.valueOf(rs.getString("grade")), rs.getInt("price")));
         });
-        PerformanceInfo times = found.get(0);
-        return Optional.of(new PerformanceInfo(performanceId, times.showId(), times.openAt(), times.startsAt(),
-                times.gateCloseAt(), Collections.unmodifiableMap(seats)));
+        Times t = times.get(0);
+        return Optional.of(new PerformanceInfo(performanceId, t.openAt(), t.startsAt(), t.gateCloseAt(),
+                Collections.unmodifiableMap(seats)));
     }
 
     public List<Long> findOpenPerformanceIds() {
@@ -96,5 +94,8 @@ public class SeatJdbcRepository {
             seatsByHold.computeIfAbsent(rs.getLong("hold_id"), k -> new ArrayList<>()).add(rs.getLong("id"));
         });
         return seatsByHold;
+    }
+
+    private record Times(LocalDateTime openAt, LocalDateTime startsAt, LocalDateTime gateCloseAt) {
     }
 }

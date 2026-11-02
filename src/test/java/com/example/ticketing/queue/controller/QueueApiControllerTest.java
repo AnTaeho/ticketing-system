@@ -1,6 +1,6 @@
 package com.example.ticketing.queue.controller;
 
-import static com.example.ticketing.support.TestMvc.USER;
+import static com.example.ticketing.common.web.HttpNames.USER_ID_HEADER;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -52,7 +52,7 @@ class QueueApiControllerTest {
         long pid = openPerformance();
         long userId = fixtures.newUser();
 
-        JsonNode entered = testMvc.body(mockMvc.perform(post(TOKENS, pid).header(USER, userId))
+        JsonNode entered = testMvc.body(mockMvc.perform(post(TOKENS, pid).header(USER_ID_HEADER, userId))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("PROCESSING"))
                 .andExpect(jsonPath("$.token").isString())
@@ -60,13 +60,13 @@ class QueueApiControllerTest {
         String token = entered.get("token").asString();
         assertThat(token).startsWith(userId + ".");
 
-        mockMvc.perform(get(TOKEN, pid, token).header(USER, userId))
+        mockMvc.perform(get(TOKEN, pid, token).header(USER_ID_HEADER, userId))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("PROCESSING"))
                 .andExpect(jsonPath("$.position").value(0))
                 .andExpect(jsonPath("$.estimatedWaitSeconds").value(0));
 
-        mockMvc.perform(post(TOKENS, pid).header(USER, userId))
+        mockMvc.perform(post(TOKENS, pid).header(USER_ID_HEADER, userId))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.token").value(token));
     }
@@ -81,12 +81,12 @@ class QueueApiControllerTest {
         }
         long userId = fixtures.newUser();
 
-        String token = testMvc.body(mockMvc.perform(post(TOKENS, pid).header(USER, userId))
+        String token = testMvc.body(mockMvc.perform(post(TOKENS, pid).header(USER_ID_HEADER, userId))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("WAITING"))
                 .andReturn()).get("token").asString();
 
-        mockMvc.perform(get(TOKEN, pid, token).header(USER, userId))
+        mockMvc.perform(get(TOKEN, pid, token).header(USER_ID_HEADER, userId))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("WAITING"))
                 .andExpect(jsonPath("$.position").value(1))
@@ -99,17 +99,17 @@ class QueueApiControllerTest {
         long pid = openPerformance();
         long owner = fixtures.newUser();
         long stranger = fixtures.newUser();
-        String token = testMvc.body(mockMvc.perform(post(TOKENS, pid).header(USER, owner)).andReturn())
+        String token = testMvc.body(mockMvc.perform(post(TOKENS, pid).header(USER_ID_HEADER, owner)).andReturn())
                 .get("token").asString();
 
-        mockMvc.perform(get(TOKEN, pid, token).header(USER, stranger))
+        mockMvc.perform(get(TOKEN, pid, token).header(USER_ID_HEADER, stranger))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("QUEUE_TOKEN_NOT_FOUND"));
 
         LocalDateTime now = fixtures.dbNow();
         long notOpen = fixtures.newPerformance(fixtures.newShow(), now.plusHours(1), now.plusDays(1), 1, 1, 1);
 
-        mockMvc.perform(post(TOKENS, notOpen).header(USER, owner))
+        mockMvc.perform(post(TOKENS, notOpen).header(USER_ID_HEADER, owner))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("NOT_OPEN"));
     }
@@ -123,16 +123,16 @@ class QueueApiControllerTest {
             testRedis.template().opsForZSet().add(RedisKeys.queueProcessing(pid), "filler." + i, now + 600_000);
         }
         long waiter = fixtures.newUser();
-        String token = testMvc.body(mockMvc.perform(post(TOKENS, pid).header(USER, waiter)).andReturn())
+        String token = testMvc.body(mockMvc.perform(post(TOKENS, pid).header(USER_ID_HEADER, waiter)).andReturn())
                 .get("token").asString();
         seatMapRedisStore.putSoldOut(pid, true, Duration.ofSeconds(30));
 
-        mockMvc.perform(get(TOKEN, pid, token).header(USER, waiter))
+        mockMvc.perform(get(TOKEN, pid, token).header(USER_ID_HEADER, waiter))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("SOLD_OUT"))
                 .andExpect(jsonPath("$.position").value(0))
                 .andExpect(jsonPath("$.estimatedWaitSeconds").value(0));
-        mockMvc.perform(post(TOKENS, pid).header(USER, fixtures.newUser()))
+        mockMvc.perform(post(TOKENS, pid).header(USER_ID_HEADER, fixtures.newUser()))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("SOLD_OUT"))
                 .andExpect(jsonPath("$.message").value("모든 자리가 팔렸어요"));
@@ -144,20 +144,20 @@ class QueueApiControllerTest {
         long pid = openPerformance();
         long owner = fixtures.newUser();
         long stranger = fixtures.newUser();
-        String token = testMvc.body(mockMvc.perform(post(TOKENS, pid).header(USER, owner)).andReturn())
+        String token = testMvc.body(mockMvc.perform(post(TOKENS, pid).header(USER_ID_HEADER, owner)).andReturn())
                 .get("token").asString();
 
-        mockMvc.perform(post(HEARTBEAT, pid, token).header(USER, owner))
+        mockMvc.perform(post(HEARTBEAT, pid, token).header(USER_ID_HEADER, owner))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("PROCESSING"))
                 .andExpect(jsonPath("$.expiresInMs").value(120_000));
 
-        mockMvc.perform(post(HEARTBEAT, pid, token).header(USER, stranger))
+        mockMvc.perform(post(HEARTBEAT, pid, token).header(USER_ID_HEADER, stranger))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("QUEUE_TOKEN_NOT_FOUND"));
 
         testRedis.template().opsForZSet().add(RedisKeys.queueProcessing(pid), token, System.currentTimeMillis() - 1);
-        mockMvc.perform(post(HEARTBEAT, pid, token).header(USER, owner))
+        mockMvc.perform(post(HEARTBEAT, pid, token).header(USER_ID_HEADER, owner))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code").value("NOT_ADMITTED"));
     }
@@ -168,20 +168,20 @@ class QueueApiControllerTest {
         long pid = openPerformance();
         long owner = fixtures.newUser();
         long stranger = fixtures.newUser();
-        String token = testMvc.body(mockMvc.perform(post(TOKENS, pid).header(USER, owner)).andReturn())
+        String token = testMvc.body(mockMvc.perform(post(TOKENS, pid).header(USER_ID_HEADER, owner)).andReturn())
                 .get("token").asString();
 
-        mockMvc.perform(post(LEAVE, pid, token).header(USER, stranger))
+        mockMvc.perform(post(LEAVE, pid, token).header(USER_ID_HEADER, stranger))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("QUEUE_TOKEN_NOT_FOUND"));
         long before = System.currentTimeMillis();
-        mockMvc.perform(post(LEAVE, pid, token).header(USER, owner))
+        mockMvc.perform(post(LEAVE, pid, token).header(USER_ID_HEADER, owner))
                 .andExpect(status().isNoContent());
         long after = System.currentTimeMillis();
 
         assertThat(testRedis.template().opsForZSet().score(RedisKeys.queueProcessing(pid), token))
                 .isBetween(before + 10_000.0, after + 10_000.0);
-        mockMvc.perform(post(LEAVE, pid, owner + ".no-such-token").header(USER, owner))
+        mockMvc.perform(post(LEAVE, pid, owner + ".no-such-token").header(USER_ID_HEADER, owner))
                 .andExpect(status().isNoContent());
     }
 

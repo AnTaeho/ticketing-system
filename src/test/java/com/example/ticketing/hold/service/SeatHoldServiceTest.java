@@ -10,7 +10,6 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import com.example.ticketing.common.config.TicketingProperties;
 import com.example.ticketing.common.error.ApiException;
 import com.example.ticketing.common.error.ErrorCode;
 import com.example.ticketing.common.time.DbClock;
@@ -20,11 +19,11 @@ import com.example.ticketing.hold.dto.CreateHoldCommand;
 import com.example.ticketing.hold.dto.CreateHoldResult;
 import com.example.ticketing.hold.dto.HoldPlacement;
 import com.example.ticketing.hold.repository.SeatGateRedisStore;
+import com.example.ticketing.queue.service.QueueService;
 import com.example.ticketing.seat.dto.SeatSelection;
 import com.example.ticketing.support.Fixtures;
 import com.example.ticketing.support.IntegrationTest;
 import com.example.ticketing.support.TestDb;
-import com.example.ticketing.support.TestProperties;
 import com.example.ticketing.support.TestRedis;
 import com.example.ticketing.support.TestServices;
 import java.time.Duration;
@@ -51,8 +50,6 @@ class SeatHoldServiceTest {
     private TestServices services;
     @Autowired
     private JdbcTemplate jdbcTemplate;
-    @Autowired
-    private TicketingProperties properties;
 
     @Test
     @DisplayName("선점하면 선점과 좌석이 DB 시각 기준 5분 뒤까지 잡힌다")
@@ -194,7 +191,8 @@ class SeatHoldServiceTest {
         SeatHoldService dbBehind = serviceWith(TestDbClock.withDbShift(jdbcTemplate, Duration.ofHours(-2)), tx);
 
         assertThat(dbAhead.hold(
-                new CreateHoldCommand(1L, opensInAnHour, db.seatIds(opensInAnHour).subList(0, 1), null)).holdId())
+                new CreateHoldCommand(1L, opensInAnHour, db.seatIds(opensInAnHour).subList(0, 1), "1.admitted"))
+                .holdId())
                 .isEqualTo(1L);
         verify(tx).persistHold(anyLong(), any(SeatSelection.class), anyString());
 
@@ -208,10 +206,11 @@ class SeatHoldServiceTest {
 
     // 처리열·게이트는 통과시키고 DB 판정은 목으로 받아 사전 판정만 본다
     private SeatHoldService serviceWith(DbClock clock, SeatHoldTransaction tx) {
-        TicketingProperties noQueue = TestProperties.from(properties).queueRequired(false).build();
+        QueueService admitAll = mock(QueueService.class);
+        when(admitAll.isAdmitted(anyLong(), anyLong(), anyString())).thenReturn(true);
         SeatGateRedisStore openGate = mock(SeatGateRedisStore.class);
         when(openGate.tryHold(any(), any())).thenReturn(GateResult.ok());
-        return services.seatHoldService().properties(noQueue).gateStore(openGate).transaction(tx).dbClock(clock)
+        return services.seatHoldService().queueService(admitAll).gateStore(openGate).transaction(tx).dbClock(clock)
                 .build();
     }
 }

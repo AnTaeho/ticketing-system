@@ -20,7 +20,7 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
 public class ApiExceptionHandler {
 
     @ExceptionHandler(ApiException.class)
-    public ResponseEntity<ErrorResponse> handleBooking(ApiException e) {
+    public ResponseEntity<ErrorResponse> handleApiException(ApiException e) {
         return respond(e.getCode(), e.getDetail());
     }
 
@@ -38,12 +38,13 @@ public class ApiExceptionHandler {
         return respond(ErrorCode.INVALID_REQUEST, Map.of("header", e.getHeaderName()));
     }
 
-    // 날짜 형식이 틀린 본문이나 숫자가 아닌 경로 변수도 예매 형식의 400으로 답한다
+    // 날짜 형식이 틀린 본문처럼 읽지 못한 본문도 같은 형식의 400으로 답한다
     @ExceptionHandler(HttpMessageNotReadableException.class)
     public ResponseEntity<ErrorResponse> handleUnreadable(HttpMessageNotReadableException e) {
-        return respond(ErrorCode.INVALID_REQUEST, Map.of("reason", "요청 본문을 읽지 못했다"));
+        return respond(ErrorCode.INVALID_REQUEST, Map.of("reason", "UNREADABLE_BODY"));
     }
 
+    // 숫자가 아닌 경로 변수도 같은 형식의 400으로 답한다
     @ExceptionHandler(MethodArgumentTypeMismatchException.class)
     public ResponseEntity<ErrorResponse> handleTypeMismatch(MethodArgumentTypeMismatchException e) {
         return respond(ErrorCode.INVALID_REQUEST, Map.of("parameter", e.getName()));

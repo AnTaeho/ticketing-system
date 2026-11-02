@@ -15,8 +15,6 @@ import tools.jackson.databind.json.JsonMapper;
 @RequiredArgsConstructor
 public class TestMvc {
 
-    public static final String USER = "X-User-Id";
-
     private final WebApplicationContext context;
     private final JsonMapper jsonMapper;
 

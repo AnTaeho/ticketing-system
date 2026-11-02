@@ -65,9 +65,14 @@ public record TicketingProperties(
             Duration waitingLeaveGrace,
             Duration waitingTokenTtl,
             boolean promoteEnabled,
-            long promoteIntervalMs,
-            boolean required
+            long promoteIntervalMs
     ) {
+
+        // 입장 직후 처리열 자리가 남는 시간. 생존 신호가 오기 전까지다
+        public Duration admissionWindow() {
+            return processingIdleTimeout.compareTo(processingMaxSession) < 0 ? processingIdleTimeout
+                    : processingMaxSession;
+        }
     }
 
     public record Seatmap(

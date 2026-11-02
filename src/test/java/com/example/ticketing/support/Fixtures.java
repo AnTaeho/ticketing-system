@@ -100,8 +100,7 @@ public class Fixtures {
     public String forceAdmit(long performanceId, long userId) {
         String queueToken = userId + "." + UUID.randomUUID();
         long now = System.currentTimeMillis();
-        long expireAt = now + Math.min(properties.queue().processingIdleTimeout().toMillis(),
-                properties.queue().processingMaxSession().toMillis());
+        long expireAt = now + properties.queue().admissionWindow().toMillis();
         testRedis.template().opsForZSet().add(RedisKeys.queueProcessing(performanceId), queueToken, expireAt);
         testRedis.template().opsForZSet().add(RedisKeys.queueAdmitted(performanceId), queueToken, now);
         testRedis.template().opsForValue().set(RedisKeys.queueUser(userId, performanceId), queueToken,

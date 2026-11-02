@@ -10,20 +10,19 @@ import com.example.ticketing.show.dto.ShowSummaryResult;
 import com.example.ticketing.show.repository.PerformanceRepository;
 import com.example.ticketing.show.repository.ShowRepository;
 import java.time.LocalDateTime;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.function.BinaryOperator;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Sort;
-import org.springframework.stereotype.Service;
+import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
-@Service
+@Component
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
-public class ShowQueryService {
+public class ShowReader {
 
     private final ShowRepository showRepository;
     private final PerformanceRepository performanceRepository;
@@ -43,9 +42,7 @@ public class ShowQueryService {
         Show show = showRepository.findById(showId)
                 .orElseThrow(() -> new ApiException(ErrorCode.SHOW_NOT_FOUND, Map.of("showId", showId)));
         LocalDateTime now = dbClock.now();
-        List<Performance> performances = performanceRepository.findByShowIdOrderByStartsAtAsc(showId).stream()
-                .sorted(Comparator.comparing(Performance::getStartsAt).thenComparing(Performance::getId))
-                .toList();
+        List<Performance> performances = performanceRepository.findByShowIdOrderByStartsAtAscIdAsc(showId);
         return ShowDetailResult.from(show, performances, now);
     }
 }

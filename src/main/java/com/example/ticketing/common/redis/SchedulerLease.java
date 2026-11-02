@@ -43,7 +43,7 @@ public class SchedulerLease {
     // TTL이 지나 다른 인스턴스가 잡은 리스는 값이 달라 지우지 않는다. 못 지우면 TTL이 푼다
     private void release(String name, String key) {
         try {
-            RedisFailures.translate(() -> redis.execute(RedisScripts.RELEASE, List.of(key), instanceId));
+            RedisFailures.translate(() -> redis.execute(RedisScripts.DELETE_IF_EQUALS, List.of(key), instanceId));
         } catch (RedisUnavailableException e) {
             log.debug("[lease] 리스 해제 실패, TTL로 풀린다 name={} cause={}", name, RedisFailures.describe(e));
         }

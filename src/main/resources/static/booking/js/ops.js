@@ -21,10 +21,11 @@
   var reduceMotion = false;
   try { reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { /* 없으면 움직인다 */ }
 
-  // 지난번 숫자. 키는 'seats.HELD'처럼 칸마다 하나
-  var previous = null;
-  var current = {};
-  var headerDone = false;
+  var state = {
+    previous: null,     // 지난번 숫자. 키는 'seats.HELD'처럼 칸마다 하나
+    current: {},        // 이번에 그리는 숫자
+    headerDone: false
+  };
 
   var poller = bk.poller({
     interval: POLL_MS,
@@ -41,14 +42,14 @@
   });
 
   function num(key, value, extraClass) {
-    current[key] = value;
+    state.current[key] = value;
     var cls = 'n num';
     if (value == null) cls += ' na';
     else if (value === 0) cls += ' zero';
     if (extraClass) cls += ' ' + extraClass;
     var node = el('span', { class: cls, 'data-k': key, text: value == null ? '읽지 못함' : bk.count(value) });
-    if (previous && value != null && previous[key] !== undefined && previous[key] !== value && !reduceMotion
-        && !STEADY[key]) {
+    var before = state.previous ? state.previous[key] : undefined;
+    if (value != null && before !== undefined && before !== value && !reduceMotion && !STEADY[key]) {
       node.classList.add('bump');
     }
     return node;
@@ -204,18 +205,18 @@
   }
 
   function render(data) {
-    current = {};
+    state.current = {};
     loading.hidden = true;
     errorBox.hidden = true;
     body.classList.remove('is-stale');
     redisDown.hidden = data.redisAvailable !== false;
 
-    if (!headerDone && data.performance) {
+    if (!state.headerDone && data.performance) {
       var p = data.performance;
       bk.setHeader('운영 현황 · 회차 ' + p.performanceId,
         '「' + p.showTitle + '」 ' + bk.dateTime(p.startsAt) + ' · ' + p.venueName);
       bk.setTitle('운영 현황', p.showTitle);
-      headerDone = true;
+      state.headerDone = true;
     }
     at.textContent = '마지막으로 읽은 때 ' + (data.generatedAt || '').replace('T', ' ').slice(0, 19);
 
@@ -247,7 +248,7 @@
     ];
     grid.textContent = '';
     cards.forEach(function (c) { grid.appendChild(c); });
-    previous = current;
+    state.previous = state.current;
   }
 
   function showError(text, stale) {

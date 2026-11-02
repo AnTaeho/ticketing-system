@@ -1,6 +1,7 @@
 package com.example.ticketing.seat.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.example.ticketing.common.config.TicketingProperties;
@@ -55,7 +56,6 @@ class SeatCatalogTest {
         assertThat(info.openAt()).isEqualTo(performance.getOpenAt());
         assertThat(info.startsAt()).isEqualTo(performance.getStartsAt());
         assertThat(info.gateCloseAt()).isEqualTo(performance.getGateCloseAt());
-        assertThat(info.showId()).isEqualTo(performance.getShowId());
 
         List<SeatInfo> fromDb = jdbcTemplate.query(
                 "SELECT id, section, row_no, seat_no, grade, price FROM seat WHERE performance_id = ?",
@@ -165,8 +165,9 @@ class SeatCatalogTest {
         long pid = fixtures.newPerformance(1, 1, 1);
         PerformanceInfo info = seatCatalog.performance(pid);
 
-        assertThat(seatCatalog.requireOpen(pid, info.openAt())).isSameAs(info);
-        assertThat(seatCatalog.requireOpen(pid, info.startsAt().minusNanos(1000))).isSameAs(info);
+        assertThatCode(() -> seatCatalog.requireOpen(pid, info.openAt())).doesNotThrowAnyException();
+        assertThatCode(() -> seatCatalog.requireOpen(pid, info.startsAt().minusNanos(1000)))
+                .doesNotThrowAnyException();
         assertNotOpen(pid, info.openAt().minusNanos(1000));
         assertNotOpen(pid, info.startsAt());
         assertThat(info.stateAt(info.openAt().minusNanos(1000))).isEqualTo(PerformanceState.BEFORE_OPEN);

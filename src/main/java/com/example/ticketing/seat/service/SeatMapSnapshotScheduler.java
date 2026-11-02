@@ -62,10 +62,10 @@ public class SeatMapSnapshotScheduler {
         }
     }
 
-    // 반환: 이번 주기에 이 인스턴스가 스냅샷을 만들었는지. 매진 표시도 함께 써 취소로 빈자리가 생기면 다음 주기에 풀린다
-    boolean snapshotOne(long performanceId) {
+    // 매진 표시도 함께 써 취소로 빈자리가 생기면 다음 주기에 풀린다
+    private void snapshotOne(long performanceId) {
         if (!store.tryLease(performanceId, instanceId, leaseTtl)) {
-            return false;
+            return;
         }
         Optional<SeatMapSnapshot> snapshot = builder.snapshot(performanceId);
         rebuilds.increment();
@@ -73,6 +73,5 @@ public class SeatMapSnapshotScheduler {
             store.put(performanceId, builder.json(value), snapshotTtl);
             store.putSoldOut(performanceId, value.everySeatSold(), snapshotTtl);
         });
-        return snapshot.isPresent();
     }
 }

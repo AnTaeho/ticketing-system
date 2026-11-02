@@ -14,23 +14,32 @@ public final class RedisScripts {
     public static final RedisScript<List> HOLD = load("hold.lua", List.class);
     public static final RedisScript<Long> EXTEND = load("extend.lua", Long.class);
     public static final RedisScript<Long> CONFIRM = load("confirm.lua", Long.class);
-    public static final RedisScript<Long> RELEASE = load("release.lua", Long.class);
+    public static final RedisScript<Long> DELETE_IF_EQUALS = load("delete_if_equals.lua", Long.class);
     @SuppressWarnings("rawtypes")
     public static final RedisScript<List> QUEUE_ENTER = load("queue_enter.lua", List.class);
     public static final RedisScript<Long> QUEUE_PROMOTE = load("queue_promote.lua", Long.class);
     public static final RedisScript<Long> QUEUE_CONSUME = load("queue_consume.lua", Long.class);
     public static final RedisScript<Long> QUEUE_HEARTBEAT = load("queue_heartbeat.lua", Long.class);
-    public static final RedisScript<Long> QUEUE_LEAVE = load("queue_leave.lua", Long.class);
-    public static final RedisScript<Long> QUEUE_PURGE = load("queue_purge.lua", Long.class);
+    public static final RedisScript<Void> QUEUE_LEAVE = load("queue_leave.lua");
+    public static final RedisScript<Void> QUEUE_PURGE = load("queue_purge.lua");
     public static final RedisScript<Long> SEATMAP_LEASE = load("seatmap_lease.lua", Long.class);
 
     private RedisScripts() {
     }
 
     private static <T> RedisScript<T> load(String name, Class<T> resultType) {
+        return RedisScript.of(read(name), resultType);
+    }
+
+    // 돌려주는 값이 없는 스크립트
+    private static RedisScript<Void> load(String name) {
+        return RedisScript.of(read(name));
+    }
+
+    private static String read(String name) {
         ClassPathResource resource = new ClassPathResource("scripts/booking/" + name);
         try {
-            return RedisScript.of(resource.getContentAsString(StandardCharsets.UTF_8), resultType);
+            return resource.getContentAsString(StandardCharsets.UTF_8);
         } catch (IOException e) {
             throw new UncheckedIOException("Redis 스크립트를 읽지 못했다: " + name, e);
         }

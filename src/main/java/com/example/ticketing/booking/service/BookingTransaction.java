@@ -57,7 +57,7 @@ public class BookingTransaction {
                 .orElseThrow(() -> new IllegalStateException("예매 " + bookingId + "의 hold가 없다"));
         // 게이트 키를 지울 좌석 ID는 hold_id를 비우기 전에 읽어 둔다
         List<Long> seatIds = seatRepository.lockSoldSeatIds(hold.getId());
-        RowCounts.requireExactly(seatRepository.releaseSoldSeats(hold.getId()), seatIds.size(), "seat AVAILABLE");
+        RowCounts.requireExactly(seatRepository.soldToAvailable(hold.getId()), seatIds.size(), "seat AVAILABLE");
         outboxWriter.write(OutboxTaskType.REFUND_REQUESTED, payment.paymentId(),
                 new RefundRequestedPayload(payment.paymentId(), payment.orderId()));
         return BookingCancellation.cancelled(

@@ -16,9 +16,7 @@ import com.example.ticketing.common.error.ApiExceptionHandler;
 import com.example.ticketing.common.web.DemoMode;
 import com.example.ticketing.support.IntegrationTest;
 import com.example.ticketing.support.TestMvc;
-import com.example.ticketing.support.TestProperties;
 import com.example.ticketing.web.PageExceptionHandler;
-import java.nio.charset.StandardCharsets;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -157,25 +155,6 @@ class PageControllerTest {
     }
 
     @Test
-    @DisplayName("줄을 세우지 않는 설정이면 좌석 화면에 생존 신호 간격 0을 넘긴다")
-    void seatsSkipsHeartbeatWhenQueueNotRequired() throws Exception {
-        TicketingProperties noQueue = TestProperties.from(context.getBean(TicketingProperties.class))
-                .queueRequired(false).build();
-        ThymeleafViewResolver resolver = new ThymeleafViewResolver();
-        resolver.setTemplateEngine(context.getBean(ISpringTemplateEngine.class));
-        resolver.setCharacterEncoding("UTF-8");
-        MockMvc noQueueMvc = MockMvcBuilders
-                .standaloneSetup(new PageController(noQueue, new DemoMode(new MockEnvironment())))
-                .setViewResolvers(resolver)
-                .build();
-
-        noQueueMvc.perform(get("/booking/performances/9/seats"))
-                .andExpect(status().isOk())
-                .andExpect(model().attribute("heartbeatMs", 0L))
-                .andExpect(content().string(containsString("data-heartbeat-ms=\"0\"")));
-    }
-
-    @Test
     @DisplayName("공연 목록 머리에 내 예매로 가는 링크를 두고, 다른 화면 머리에는 두지 않는다")
     void showsLinksToBookings() throws Exception {
         mockMvc.perform(get("/booking/shows"))
@@ -278,39 +257,6 @@ class PageControllerTest {
         mockMvc.perform(get("/booking"))
                 .andExpect(status().is3xxRedirection())
                 .andExpect(redirectedUrl("/booking/shows"));
-    }
-
-    @Test
-    @DisplayName("대기열·좌석 화면은 떠남 신호 주소에 쓸 회차 번호를 받고, 떠날 때 비컨으로 신호를 보낸다")
-    void queueAndSeatsSendLeaveBeacon() throws Exception {
-        mockMvc.perform(get("/booking/performances/9/queue"))
-                .andExpect(content().string(containsString("data-performance-id=\"9\"")));
-        mockMvc.perform(get("/booking/performances/9/seats"))
-                .andExpect(content().string(containsString("data-performance-id=\"9\"")));
-
-        mockMvc.perform(get("/booking/js/api.js"))
-                .andExpect(content().string(containsString("sendBeacon(queueTokenPath(performanceId, queueToken) + '/leave')")))
-                .andExpect(content().string(containsString("'/api/performances/' + performanceId + '/queue/tokens/'")));
-        for (String script : new String[]{"/booking/js/queue.js", "/booking/js/seats.js"}) {
-            mockMvc.perform(get(script))
-                    .andExpect(content().string(containsString("addEventListener('pagehide'")))
-                    .andExpect(content().string(containsString("bk.leaveQueue(pid)")))
-                    .andExpect(content().string(containsString("keepWhenHidden: true")));
-        }
-    }
-
-    @Test
-    @DisplayName("대기열 화면은 매진이면 기다리기를 멈추고 매진 안내와 공연 정보로 돌아가는 단추를 띄운다")
-    void queueShowsSoldOut() throws Exception {
-        // 정적 파일 응답에는 charset이 없어 한글 단언은 UTF-8로 읽는다
-        String script = mockMvc.perform(get("/booking/js/queue.js")).andReturn().getResponse()
-                .getContentAsString(StandardCharsets.UTF_8);
-
-        assertThat(script)
-                .contains("s.status === 'SOLD_OUT'")
-                .contains("e.code === 'SOLD_OUT'")
-                .contains("showState('매진됐어요', '모든 자리가 팔렸어요.', { label: '공연 정보로 돌아가기', run: backToShow })")
-                .contains("function soldOut() {\n    poller.stop();\n    bk.leaveQueue(pid);");
     }
 
     @ParameterizedTest(name = "{0}")

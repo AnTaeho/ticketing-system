@@ -1,6 +1,6 @@
 package com.example.ticketing.payment.controller;
 
-import static com.example.ticketing.support.TestMvc.USER;
+import static com.example.ticketing.common.web.HttpNames.USER_ID_HEADER;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.example.ticketing.common.config.TicketingProperties;
@@ -64,7 +64,7 @@ class PaymentHttpTest {
 
         ResponseEntity<String> response = client().post()
                 .uri("/api/holds/{holdId}/payments", held.holdId())
-                .header(USER, String.valueOf(held.userId()))
+                .header(USER_ID_HEADER, String.valueOf(held.userId()))
                 .header("Idempotency-Key", UUID.randomUUID().toString())
                 .header("X-Fake-Pg-Scenario", "SUCCESS")
                 .contentType(MediaType.APPLICATION_JSON)
@@ -93,7 +93,7 @@ class PaymentHttpTest {
 
         ResponseEntity<String> response = client.post()
                 .uri("/api/holds/{holdId}/payments", held.holdId())
-                .header(USER, String.valueOf(held.userId()))
+                .header(USER_ID_HEADER, String.valueOf(held.userId()))
                 .header("Idempotency-Key", UUID.randomUUID().toString())
                 .header("X-Fake-Pg-Scenario", "SLOW_SUCCESS")
                 .contentType(MediaType.APPLICATION_JSON)
@@ -114,7 +114,7 @@ class PaymentHttpTest {
 
         ResponseEntity<String> view = client.get()
                 .uri("/api/payments/{paymentId}", paymentId)
-                .header(USER, String.valueOf(held.userId()))
+                .header(USER_ID_HEADER, String.valueOf(held.userId()))
                 .retrieve()
                 .toEntity(String.class);
 

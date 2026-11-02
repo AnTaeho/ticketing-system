@@ -11,17 +11,16 @@ import org.springframework.web.bind.annotation.PathVariable;
 @Controller
 public class PageController {
 
-    private final TicketingProperties properties;
+    private final int maxSeats;
     // 결제 결과를 미리 고르는 시연 상자는 prod가 아닐 때만 그린다. 서버도 prod에서는 그 헤더를 무시한다
     private final boolean demoPg;
-    // 좌석 화면의 생존 신호 간격. 무응답 한도 안에 세 번 가게 하고, 줄을 세우지 않으면 지킬 자리가 없어 0(보내지 않음)이다
+    // 좌석 화면의 생존 신호 간격. 무응답 한도 안에 세 번 가게 한다
     private final long heartbeatMs;
 
     public PageController(TicketingProperties properties, DemoMode demoMode) {
-        this.properties = properties;
+        this.maxSeats = properties.hold().maxSeats();
         this.demoPg = demoMode.enabled();
-        this.heartbeatMs = properties.queue().required()
-                ? properties.queue().processingIdleTimeout().toMillis() / 3 : 0;
+        this.heartbeatMs = properties.queue().processingIdleTimeout().toMillis() / 3;
     }
 
     @GetMapping({"/booking", "/booking/"})
@@ -54,7 +53,7 @@ public class PageController {
     @GetMapping("/booking/performances/{performanceId}/seats")
     public String seats(@PathVariable long performanceId, Model model) {
         model.addAttribute("performanceId", performanceId);
-        model.addAttribute("maxSeats", properties.hold().maxSeats());
+        model.addAttribute("maxSeats", maxSeats);
         model.addAttribute("heartbeatMs", heartbeatMs);
         return "booking/seats";
     }

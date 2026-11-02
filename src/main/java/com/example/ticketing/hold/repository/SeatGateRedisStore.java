@@ -115,7 +115,7 @@ public class SeatGateRedisStore {
 
     // 값이 holdToken인 키만 지운다. 반환: 지운 키 수
     public long releaseIfOwned(String holdToken, List<String> keys) {
-        Long removed = RedisFailures.translate(() -> redis.execute(RedisScripts.RELEASE, keys, holdToken));
+        Long removed = RedisFailures.translate(() -> redis.execute(RedisScripts.DELETE_IF_EQUALS, keys, holdToken));
         return removed == null ? 0 : removed;
     }
 

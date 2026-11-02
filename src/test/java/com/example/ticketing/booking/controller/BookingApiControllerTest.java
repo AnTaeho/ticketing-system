@@ -1,6 +1,6 @@
 package com.example.ticketing.booking.controller;
 
-import static com.example.ticketing.support.TestMvc.USER;
+import static com.example.ticketing.common.web.HttpNames.USER_ID_HEADER;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -68,7 +68,7 @@ class BookingApiControllerTest {
         fixtures.confirmed(1);
         issueTicket(older.bookingId());
 
-        JsonNode list = testMvc.body(mockMvc.perform(get("/api/bookings").header(USER, userId))
+        JsonNode list = testMvc.body(mockMvc.perform(get("/api/bookings").header(USER_ID_HEADER, userId))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.length()").value(2))
                 .andExpect(jsonPath("$[0].bookingId").value(newer.bookingId()))
@@ -113,14 +113,14 @@ class BookingApiControllerTest {
         long userId = b.userId();
         issueTicket(b.bookingId());
 
-        mockMvc.perform(get("/api/bookings/{id}", b.bookingId()).header(USER, userId))
+        mockMvc.perform(get("/api/bookings/{id}", b.bookingId()).header(USER_ID_HEADER, userId))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.bookingId").value(b.bookingId()))
                 .andExpect(jsonPath("$.status").value("CONFIRMED"))
                 .andExpect(jsonPath("$.cancellable").value(true));
 
         JsonNode cancel = testMvc.body(mockMvc.perform(post("/api/bookings/{id}/cancel", b.bookingId())
-                        .header(USER, userId))
+                        .header(USER_ID_HEADER, userId))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.bookingId").value(b.bookingId()))
                 .andExpect(jsonPath("$.status").value("CANCELLED"))
@@ -128,7 +128,7 @@ class BookingApiControllerTest {
                 .andReturn());
         assertThat(cancel.propertyNames()).containsExactlyInAnyOrder("bookingId", "status", "refund");
 
-        mockMvc.perform(get("/api/bookings/{id}", b.bookingId()).header(USER, userId))
+        mockMvc.perform(get("/api/bookings/{id}", b.bookingId()).header(USER_ID_HEADER, userId))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("CANCELLED"))
                 .andExpect(jsonPath("$.cancelledAt").isString())
@@ -138,7 +138,7 @@ class BookingApiControllerTest {
                 .andExpect(jsonPath("$.notification").isString());
 
         // 두 번째 취소도 같은 200
-        mockMvc.perform(post("/api/bookings/{id}/cancel", b.bookingId()).header(USER, userId))
+        mockMvc.perform(post("/api/bookings/{id}/cancel", b.bookingId()).header(USER_ID_HEADER, userId))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("CANCELLED"))
                 .andExpect(jsonPath("$.refund").value("REQUESTED"));
@@ -152,10 +152,10 @@ class BookingApiControllerTest {
         long userId = b.userId();
         long stranger = fixtures.newUser();
 
-        mockMvc.perform(get("/api/bookings/{id}", b.bookingId()).header(USER, stranger))
+        mockMvc.perform(get("/api/bookings/{id}", b.bookingId()).header(USER_ID_HEADER, stranger))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("BOOKING_NOT_FOUND"));
-        mockMvc.perform(post("/api/bookings/{id}/cancel", b.bookingId()).header(USER, stranger))
+        mockMvc.perform(post("/api/bookings/{id}/cancel", b.bookingId()).header(USER_ID_HEADER, stranger))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("BOOKING_NOT_FOUND"));
         mockMvc.perform(get("/api/bookings"))
@@ -163,10 +163,10 @@ class BookingApiControllerTest {
                 .andExpect(jsonPath("$.code").value("LOGIN_REQUIRED"));
 
         jdbcTemplate.update("UPDATE performance SET starts_at = NOW(6) - INTERVAL 1 SECOND WHERE id = ?", b.pid());
-        mockMvc.perform(post("/api/bookings/{id}/cancel", b.bookingId()).header(USER, userId))
+        mockMvc.perform(post("/api/bookings/{id}/cancel", b.bookingId()).header(USER_ID_HEADER, userId))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("CANCEL_NOT_ALLOWED"));
-        mockMvc.perform(get("/api/bookings/{id}", b.bookingId()).header(USER, userId))
+        mockMvc.perform(get("/api/bookings/{id}", b.bookingId()).header(USER_ID_HEADER, userId))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("CONFIRMED"))
                 .andExpect(jsonPath("$.cancellable").value(false));

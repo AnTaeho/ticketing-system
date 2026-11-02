@@ -119,7 +119,7 @@ public class PaymentTransaction {
             return payingToRefunding(locked, pgTxId, seatIds);
         }
 
-        RowCounts.requireExactly(seatRepository.markSold(holdId), seatIds.size(), "seat SOLD");
+        RowCounts.requireExactly(seatRepository.heldToSold(holdId), seatIds.size(), "seat SOLD");
         RowCounts.requireExactly(seatHoldRepository.payingToConfirmed(holdId), 1, "hold CONFIRMED");
         RowCounts.requireExactly(paymentRepository.openToApproved(paymentId, pgTxId), 1, "payment APPROVED");
         IssuedBooking booking = bookingIssuer.issue(new IssueBookingCommand(hold.getUserId(),
@@ -191,7 +191,7 @@ public class PaymentTransaction {
         Payment payment = locked.payment();
         long holdId = hold.getId();
         long paymentId = payment.getId();
-        RowCounts.requireExactly(seatRepository.releaseHeldSeats(holdId), seatIds.size(), "seat AVAILABLE");
+        RowCounts.requireExactly(seatRepository.heldToAvailable(holdId), seatIds.size(), "seat AVAILABLE");
         RowCounts.requireExactly(seatHoldRepository.payingToRefunding(holdId), 1, "hold REFUNDING");
         RowCounts.requireExactly(paymentRepository.openToApproved(paymentId, pgTxId), 1, "payment APPROVED");
         outboxWriter.write(OutboxTaskType.REFUND_REQUESTED, paymentId,
@@ -208,7 +208,7 @@ public class PaymentTransaction {
         }
         long holdId = hold.getId();
         List<Long> seatIds = seatRepository.lockHeldSeatIds(holdId);
-        RowCounts.requireExactly(seatRepository.releaseHeldSeats(holdId), seatIds.size(), "seat AVAILABLE");
+        RowCounts.requireExactly(seatRepository.heldToAvailable(holdId), seatIds.size(), "seat AVAILABLE");
         RowCounts.requireExactly(seatHoldRepository.payingToReleased(holdId), 1, "hold RELEASED");
         int updated = target == PaymentStatus.DECLINED
                 ? paymentRepository.openToDeclined(paymentId)

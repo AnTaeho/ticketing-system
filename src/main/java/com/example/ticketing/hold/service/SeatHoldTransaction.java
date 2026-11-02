@@ -60,7 +60,8 @@ public class SeatHoldTransaction {
 
         SeatHold hold = seatHoldRepository.save(SeatHold.held(userId, performanceId, holdToken,
                 selection.seatIds().size(), selection.totalAmount(), expiresAt));
-        int updated = seatRepository.holdSeats(performanceId, selection.seatIds(), hold.getId(), expiresAt);
+        int updated = seatRepository.availableOrExpiredToHeld(performanceId, selection.seatIds(), hold.getId(),
+                expiresAt);
         if (!RowCounts.changedExactly(updated, selection.seatIds().size())) {
             throw new ApiException(ErrorCode.SEAT_STATE_CHANGED, Map.of("seatIds", selection.seatIds()));
         }
@@ -77,7 +78,7 @@ public class SeatHoldTransaction {
                     Map.of("holdId", holdId, "status", hold.getStatus().name()));
         }
         List<Long> seatIds = seatRepository.findHeldSeatIds(holdId);
-        seatRepository.releaseHeldSeats(holdId);
+        seatRepository.heldToAvailable(holdId);
         return new GateHold(userId, hold.getPerformanceId(), hold.getHoldToken(), seatIds);
     }
 }

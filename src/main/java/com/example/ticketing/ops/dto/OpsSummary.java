@@ -1,5 +1,8 @@
 package com.example.ticketing.ops.dto;
 
+import com.example.ticketing.ops.domain.FailedTask;
+import com.example.ticketing.ops.domain.RefundingHold;
+import com.example.ticketing.ops.domain.StalePayment;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
@@ -7,7 +10,7 @@ import java.util.Map;
 // Redis를 못 읽으면 queue·gateKeys의 값만 null이고 redisAvailable이 false다. counters는 서버가 켜진 뒤 모든 회차를 합친 수
 public record OpsSummary(
         LocalDateTime generatedAt,
-        PerformanceInfo performance,
+        OpsPerformance performance,
         Map<String, Long> seats,
         Map<String, Long> holds,
         Map<String, Long> payments,
@@ -20,23 +23,12 @@ public record OpsSummary(
         Map<String, CounterView> counters
 ) {
 
-    public record PerformanceInfo(long performanceId, String showTitle, String venueName, LocalDateTime startsAt,
-                                  LocalDateTime openAt, LocalDateTime gateCloseAt) {
+    public record OpsPerformance(long performanceId, String showTitle, String venueName, LocalDateTime startsAt,
+                                 LocalDateTime openAt, LocalDateTime gateCloseAt) {
     }
 
     public record Attention(List<FailedTask> failedTasks, List<RefundingHold> refundingHolds,
                             List<StalePayment> stalePayments) {
-    }
-
-    public record FailedTask(long id, String type, long aggregateId, int attempt, String lastError,
-                             LocalDateTime updatedAt) {
-    }
-
-    public record RefundingHold(long holdId, long userId, int seatCount, int totalAmount, LocalDateTime updatedAt) {
-    }
-
-    public record StalePayment(long paymentId, long holdId, String status, LocalDateTime createdAt,
-                               String lastError) {
     }
 
     public record Queue(Long waiting, Long processing) {

@@ -41,7 +41,7 @@ public class DemoLoginService {
         int length = nickname.codePointCount(0, nickname.length());
         if (length < MIN_NICKNAME_LENGTH || length > MAX_NICKNAME_LENGTH) {
             throw new ApiException(ErrorCode.INVALID_REQUEST,
-                    Map.of("reason", "닉네임은 %d~%d자여야 한다".formatted(MIN_NICKNAME_LENGTH, MAX_NICKNAME_LENGTH)));
+                    Map.of("reason", "NICKNAME_LENGTH", "min", MIN_NICKNAME_LENGTH, "max", MAX_NICKNAME_LENGTH));
         }
         return nickname;
     }

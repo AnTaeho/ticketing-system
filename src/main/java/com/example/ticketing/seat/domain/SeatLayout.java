@@ -5,7 +5,8 @@ import java.util.List;
 
 public final class SeatLayout {
 
-    private static final int MAX_SECTIONS = 26;
+    // 구역 이름이 A~Z 한 글자다
+    public static final int MAX_SECTIONS = 26;
 
     private SeatLayout() {
     }

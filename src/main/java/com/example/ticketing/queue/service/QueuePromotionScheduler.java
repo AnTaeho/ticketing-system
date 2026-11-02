@@ -29,7 +29,7 @@ public class QueuePromotionScheduler {
     private final SeatMapQueryService seatMap;
     private final Clock clock;
     private final int capacity;
-    private final long idleTimeoutMs;
+    private final long admissionWindowMs;
     private final long maxSessionMs;
     private final long waitingTtlMs;
     private final double intervalSeconds;
@@ -43,7 +43,7 @@ public class QueuePromotionScheduler {
         this.seatMap = seatMap;
         this.clock = clock;
         this.capacity = properties.queue().capacity();
-        this.idleTimeoutMs = properties.queue().processingIdleTimeout().toMillis();
+        this.admissionWindowMs = properties.queue().admissionWindow().toMillis();
         this.maxSessionMs = properties.queue().processingMaxSession().toMillis();
         this.waitingTtlMs = properties.queue().waitingTokenTtl().toMillis();
         long intervalMs = properties.queue().promoteIntervalMs();
@@ -76,7 +76,7 @@ public class QueuePromotionScheduler {
         long now = clock.millis();
         store.purgeExpired(performanceId, now, waitingTtlMs, maxSessionMs);
         long moved = seatMap.isSoldOut(performanceId) ? 0
-                : store.promote(performanceId, now, now + Math.min(idleTimeoutMs, maxSessionMs), capacity);
+                : store.promote(performanceId, now, now + admissionWindowMs, capacity);
         double rate = 0.8 * store.rate(performanceId) + 0.2 * moved / intervalSeconds;
         store.saveRate(performanceId, rate, RATE_TTL);
         return moved;

@@ -208,28 +208,13 @@ class SeatHoldQueueTest {
     }
 
     @Test
-    @DisplayName("처리열이 필수가 아니면 토큰 없이 잡고 처리열을 건드리지 않는다")
-    void queueNotRequired() {
-        long pid = fixtures.newPerformance(1, 1, 4);
-        long userId = fixtures.newUser();
-        QueueService queue = mock(QueueService.class);
-        TicketingProperties noQueue = TestProperties.from(properties).queueRequired(false).build();
-
-        CreateHoldResult hold = services.seatHoldService().queueService(queue).properties(noQueue).build()
-                .hold(new CreateHoldCommand(userId, pid, db.seatIds(pid).subList(0, 1), null));
-
-        assertThat(hold.holdId()).isPositive();
-        verifyNoInteractions(queue);
-    }
-
-    @Test
     @DisplayName("게이트가 꺼져 있어도 처리열 확인과 소모는 한다")
     void gateOffStillChecksQueue() {
         long pid = fixtures.newPerformance(1, 1, 4);
         List<Long> target = db.seatIds(pid).subList(0, 1);
         long userId = fixtures.newUser();
         SeatGateRedisStore offGate = mock(SeatGateRedisStore.class);
-        TicketingProperties off = TestProperties.from(properties).gateEnabled(false).queueRequired(true).build();
+        TicketingProperties off = TestProperties.from(properties).gateEnabled(false).build();
         SeatHoldService gateOff = services.seatHoldService().gateStore(offGate).properties(off).build();
 
         assertThatThrownBy(() -> gateOff.hold(new CreateHoldCommand(userId, pid, target, null)))

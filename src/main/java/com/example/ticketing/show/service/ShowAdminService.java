@@ -24,7 +24,6 @@ import org.springframework.transaction.annotation.Transactional;
 public class ShowAdminService {
 
     static final Duration DEFAULT_GATE_OPEN_PERIOD = Duration.ofHours(24);
-    static final int MAX_SECTIONS = 26;
     static final int MAX_ROWS = 30;
     static final int MAX_SEATS_PER_ROW = 50;
 
@@ -35,7 +34,7 @@ public class ShowAdminService {
     @Transactional
     public CreateShowResult createShow(CreateShowCommand command) {
         if (isBlank(command.title()) || isBlank(command.venueName())) {
-            throw invalid("title, venueName은 비울 수 없다");
+            throw invalid(Map.of("reason", "REQUIRED"));
         }
         Show show = showRepository.save(
                 Show.create(command.title().trim(), command.venueName().trim(), command.description()));
@@ -65,27 +64,27 @@ public class ShowAdminService {
     private static void validate(CreatePerformanceCommand command) {
         if (command.showId() == null || command.startsAt() == null || command.openAt() == null
                 || command.sections() == null || command.rows() == null || command.seatsPerRow() == null) {
-            throw invalid("showId, startsAt, openAt, sections, rows, seatsPerRow는 필수다");
+            throw invalid(Map.of("reason", "REQUIRED"));
         }
         if (!command.openAt().isBefore(command.startsAt())) {
-            throw invalid("openAt은 startsAt보다 앞서야 한다");
+            throw invalid(Map.of("reason", "OPEN_NOT_BEFORE_START"));
         }
         if (command.gateCloseAt() != null && !command.gateCloseAt().isAfter(command.openAt())) {
-            throw invalid("gateCloseAt은 openAt보다 뒤여야 한다");
+            throw invalid(Map.of("reason", "GATE_CLOSE_NOT_AFTER_OPEN"));
         }
-        checkRange("sections", command.sections(), MAX_SECTIONS);
+        checkRange("sections", command.sections(), SeatLayout.MAX_SECTIONS);
         checkRange("rows", command.rows(), MAX_ROWS);
         checkRange("seatsPerRow", command.seatsPerRow(), MAX_SEATS_PER_ROW);
     }
 
     private static void checkRange(String field, int value, int max) {
         if (value < 1 || value > max) {
-            throw invalid("%s는 1~%d 사이여야 한다".formatted(field, max));
+            throw invalid(Map.of("reason", "OUT_OF_RANGE", "field", field, "max", max));
         }
     }
 
-    private static ApiException invalid(String reason) {
-        return new ApiException(ErrorCode.INVALID_REQUEST, Map.of("reason", reason));
+    private static ApiException invalid(Map<String, Object> detail) {
+        return new ApiException(ErrorCode.INVALID_REQUEST, detail);
     }
 
     private static boolean isBlank(String value) {

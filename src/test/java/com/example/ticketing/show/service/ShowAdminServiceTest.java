@@ -129,7 +129,7 @@ class ShowAdminServiceTest {
 
         assertInvalid(new CreatePerformanceCommand(showId, now, now, null, 1, 1, 1));
         assertInvalid(new CreatePerformanceCommand(showId, now, now.plusMinutes(1), null, 1, 1, 1));
-        assertThat(performanceRepository.findByShowIdOrderByStartsAtAsc(showId)).isEmpty();
+        assertThat(performanceRepository.findByShowIdOrderByStartsAtAscIdAsc(showId)).isEmpty();
     }
 
     @Test
@@ -147,7 +147,7 @@ class ShowAdminServiceTest {
         assertInvalid(new CreatePerformanceCommand(showId, startsAt, now, null, 4, 10, 51));
         assertInvalid(new CreatePerformanceCommand(showId, startsAt, now, null, null, 10, 20));
         assertInvalid(new CreatePerformanceCommand(showId, startsAt, now, now, 4, 10, 20));
-        assertThat(performanceRepository.findByShowIdOrderByStartsAtAsc(showId)).isEmpty();
+        assertThat(performanceRepository.findByShowIdOrderByStartsAtAscIdAsc(showId)).isEmpty();
     }
 
     @Test

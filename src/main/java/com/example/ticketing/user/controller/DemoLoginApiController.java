@@ -19,7 +19,7 @@ public class DemoLoginApiController {
 
     private final DemoLoginService demoLoginService;
 
-    // 닉네임 길이는 화면에 같은 문장을 내려고 서비스가 검사한다
+    // 닉네임 검사는 앞뒤 공백을 지운 뒤 글자 수로 해야 해서 Bean Validation 대신 서비스가 한다
     @PostMapping("/api/demo/login")
     public ResponseEntity<DemoLoginResponse> login(@RequestBody DemoLoginRequest request) {
         DemoLoginResult result = demoLoginService.login(request.nickname());

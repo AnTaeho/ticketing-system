@@ -41,7 +41,7 @@ public class FakePgService {
         try {
             transaction.insertProcessing(orderId, amount);
         } catch (DataIntegrityViolationException e) {
-            return FakePgReply.toRepeatedApprove(find(orderId).orElseThrow(() -> e));
+            return FakePgReply.toRepeatedApprove(reader.find(orderId).orElseThrow(() -> e));
         }
 
         FakePgDecider.Plan plan = decider.plan(scenario);
@@ -54,7 +54,7 @@ public class FakePgService {
             return FakePgReply.of(orderId, plan.approve() ? FakePgStatus.APPROVED : FakePgStatus.DECLINED, pgTxId);
         }
         // 지연 중에 행이 바뀌었으면 지금 행을 그대로 알린다
-        return FakePgReply.toRepeatedApprove(find(orderId).orElseThrow(
+        return FakePgReply.toRepeatedApprove(reader.find(orderId).orElseThrow(
                 () -> new IllegalStateException("fake_pg_transaction 행이 사라졌다: " + orderId)));
     }
 
@@ -89,16 +89,12 @@ public class FakePgService {
 
     // 가장 느린 승인보다도 오래 PROCESSING이면 승인 시간 초과로 거절을 확정한 뒤 규칙을 적용한다
     private Optional<FakePgOrder> findSettlingStale(String orderId) {
-        Optional<FakePgOrder> row = find(orderId);
+        Optional<FakePgOrder> row = reader.find(orderId);
         if (row.isEmpty() || row.get().getStatus() != FakePgStatus.PROCESSING) {
             return row;
         }
         int updated = transaction.staleProcessingToDeclined(orderId, staleMicros);
-        return RowCounts.changedOne(updated) ? find(orderId) : row;
-    }
-
-    private Optional<FakePgOrder> find(String orderId) {
-        return reader.find(orderId);
+        return RowCounts.changedOne(updated) ? reader.find(orderId) : row;
     }
 
     // 끊겨도 PROCESSING에 묶이지 않게 결과는 쓰고 끊김 표시만 되살린다

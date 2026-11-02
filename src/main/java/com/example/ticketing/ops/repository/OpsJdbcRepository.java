@@ -1,10 +1,10 @@
 package com.example.ticketing.ops.repository;
 
-import com.example.ticketing.ops.domain.FailedTaskRow;
+import com.example.ticketing.ops.domain.FailedTask;
 import com.example.ticketing.ops.domain.OpsPerformanceRow;
 import com.example.ticketing.ops.domain.OutboxStatusCount;
-import com.example.ticketing.ops.domain.RefundingHoldRow;
-import com.example.ticketing.ops.domain.StalePaymentRow;
+import com.example.ticketing.ops.domain.RefundingHold;
+import com.example.ticketing.ops.domain.StalePayment;
 import com.example.ticketing.ops.domain.StatusCount;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -101,23 +101,23 @@ public class OpsJdbcRepository {
     }
 
     // 최신순
-    public List<FailedTaskRow> findFailedTasks(long performanceId, int limit) {
+    public List<FailedTask> findFailedTasks(long performanceId, int limit) {
         return jdbcTemplate.query(FAILED_TASK_SQL, Map.of("pid", performanceId, "limit", limit),
-                (rs, i) -> new FailedTaskRow(rs.getLong("id"), rs.getString("task_type"), rs.getLong("aggregate_id"),
+                (rs, i) -> new FailedTask(rs.getLong("id"), rs.getString("task_type"), rs.getLong("aggregate_id"),
                         rs.getInt("attempt"), rs.getString("last_error"),
                         rs.getObject("updated_at", LocalDateTime.class)));
     }
 
-    public List<RefundingHoldRow> findRefundingHolds(long performanceId, int limit) {
+    public List<RefundingHold> findRefundingHolds(long performanceId, int limit) {
         return jdbcTemplate.query(REFUNDING_SQL, Map.of("pid", performanceId, "limit", limit),
-                (rs, i) -> new RefundingHoldRow(rs.getLong("id"), rs.getLong("user_id"), rs.getInt("seat_count"),
+                (rs, i) -> new RefundingHold(rs.getLong("id"), rs.getLong("user_id"), rs.getInt("seat_count"),
                         rs.getInt("total_amount"), rs.getObject("updated_at", LocalDateTime.class)));
     }
 
-    public List<StalePaymentRow> findStalePayments(long performanceId, long staleMicros, int limit) {
+    public List<StalePayment> findStalePayments(long performanceId, long staleMicros, int limit) {
         return jdbcTemplate.query(STALE_PAYMENT_SQL,
                 Map.of("pid", performanceId, "staleMicros", staleMicros, "limit", limit),
-                (rs, i) -> new StalePaymentRow(rs.getLong("id"), rs.getLong("hold_id"), rs.getString("status"),
+                (rs, i) -> new StalePayment(rs.getLong("id"), rs.getLong("hold_id"), rs.getString("status"),
                         rs.getObject("created_at", LocalDateTime.class), rs.getString("last_error")));
     }
 

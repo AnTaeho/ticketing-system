@@ -26,13 +26,13 @@ public interface FakePgOrderRepository extends JpaRepository<FakePgOrder, String
     @Query(value = """
             UPDATE fake_pg_transaction SET status = 'APPROVED', pg_tx_id = :pgTxId, updated_at = NOW(6)
              WHERE order_id = :orderId AND status = 'PROCESSING'""", nativeQuery = true)
-    int approveProcessing(@Param("orderId") String orderId, @Param("pgTxId") String pgTxId);
+    int processingToApproved(@Param("orderId") String orderId, @Param("pgTxId") String pgTxId);
 
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query(value = """
             UPDATE fake_pg_transaction SET status = 'DECLINED', updated_at = NOW(6)
              WHERE order_id = :orderId AND status = 'PROCESSING'""", nativeQuery = true)
-    int declineProcessing(@Param("orderId") String orderId);
+    int processingToDeclined(@Param("orderId") String orderId);
 
     // 승인 지연 중에 앱이 죽어 남은 PROCESSING을 승인 시간 초과로 보고 거절로 끝낸다
     @Modifying(clearAutomatically = true, flushAutomatically = true)
@@ -40,11 +40,11 @@ public interface FakePgOrderRepository extends JpaRepository<FakePgOrder, String
             UPDATE fake_pg_transaction SET status = 'DECLINED', updated_at = NOW(6)
              WHERE order_id = :orderId AND status = 'PROCESSING'
                AND created_at < DATE_SUB(NOW(6), INTERVAL :staleMicros MICROSECOND)""", nativeQuery = true)
-    int declineStaleProcessing(@Param("orderId") String orderId, @Param("staleMicros") long staleMicros);
+    int staleProcessingToDeclined(@Param("orderId") String orderId, @Param("staleMicros") long staleMicros);
 
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query(value = """
             UPDATE fake_pg_transaction SET status = 'CANCELLED', updated_at = NOW(6)
              WHERE order_id = :orderId AND status = 'APPROVED'""", nativeQuery = true)
-    int cancelApproved(@Param("orderId") String orderId);
+    int approvedToCancelled(@Param("orderId") String orderId);
 }

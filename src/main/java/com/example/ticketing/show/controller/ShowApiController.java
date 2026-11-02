@@ -2,7 +2,7 @@ package com.example.ticketing.show.controller;
 
 import com.example.ticketing.show.dto.ShowDetailResponse;
 import com.example.ticketing.show.dto.ShowSummaryResponse;
-import com.example.ticketing.show.service.ShowQueryService;
+import com.example.ticketing.show.service.ShowReader;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -15,15 +15,15 @@ import org.springframework.web.bind.annotation.RestController;
 @RequiredArgsConstructor
 public class ShowApiController {
 
-    private final ShowQueryService showQueryService;
+    private final ShowReader showReader;
 
     @GetMapping
     public List<ShowSummaryResponse> list() {
-        return showQueryService.listShows().stream().map(ShowSummaryResponse::from).toList();
+        return showReader.listShows().stream().map(ShowSummaryResponse::from).toList();
     }
 
     @GetMapping("/{showId}")
     public ShowDetailResponse get(@PathVariable Long showId) {
-        return ShowDetailResponse.from(showQueryService.getShow(showId));
+        return ShowDetailResponse.from(showReader.getShow(showId));
     }
 }

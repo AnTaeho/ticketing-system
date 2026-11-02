@@ -30,8 +30,7 @@ public class QueueRedisStore {
                         RedisKeys.queueUser(entry.userId(), pid), RedisKeys.queueAdmitted(pid),
                         RedisKeys.queueLeaving(pid)),
                 entry.queueToken(), String.valueOf(entry.enteredAtMs()), String.valueOf(entry.processingExpireAtMs()),
-                String.valueOf(entry.enteredAtMs()), String.valueOf(entry.capacity()),
-                String.valueOf(entry.waitingTtlMs())));
+                String.valueOf(entry.capacity()), String.valueOf(entry.waitingTtlMs())));
         if (reply == null || reply.size() != 2) {
             throw new IllegalStateException("queue_enter.lua 응답이 예상과 다르다: " + reply);
         }
@@ -96,13 +95,12 @@ public class QueueRedisStore {
         RedisFailures.translate(() -> redis.opsForZSet().remove(RedisKeys.queueLeaving(performanceId), queueToken));
     }
 
-    // 반환: 두 열에서 지운 수의 합. 처리열에서 빠진 토큰은 입장 시각도 함께 지우고, 떠난 뒤 유예가 지난 대기자도 뺀다
-    public long purgeExpired(long performanceId, long nowMs, long waitingTtlMs, long maxSessionMs) {
-        Long removed = RedisFailures.translate(() -> redis.execute(RedisScripts.QUEUE_PURGE,
+    // 처리열에서 빠진 토큰은 입장 시각도 함께 지우고, 떠난 뒤 유예가 지난 대기자도 뺀다
+    public void purgeExpired(long performanceId, long nowMs, long waitingTtlMs, long maxSessionMs) {
+        RedisFailures.translate(() -> redis.execute(RedisScripts.QUEUE_PURGE,
                 List.of(RedisKeys.queueProcessing(performanceId), RedisKeys.queueWaiting(performanceId),
                         RedisKeys.queueAdmitted(performanceId), RedisKeys.queueLeaving(performanceId)),
                 String.valueOf(nowMs), String.valueOf(waitingTtlMs), String.valueOf(maxSessionMs)));
-        return removed == null ? 0 : removed;
     }
 
     // 명/초. 기록이 없으면 0

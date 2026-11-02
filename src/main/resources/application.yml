@@ -72,7 +72,6 @@ ticketing:
     waiting-token-ttl: 60m
     promote-enabled: true
     promote-interval-ms: 1000
-    required: true             # false면 선점이 처리열 토큰을 확인·소모하지 않는다(부하 테스트의 Redis 없음 기준선용)
   seatmap:
     snapshot-enabled: true
     snapshot-interval-ms: 1000

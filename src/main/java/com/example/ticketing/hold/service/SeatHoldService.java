@@ -44,7 +44,6 @@ public class SeatHoldService {
     private final SeatGateReflector gateReflector;
     private final QueueService queueService;
     private final HoldMetrics metrics;
-    private final boolean queueRequired;
     private final Duration holdTtl;
     private final Semaphore fallbackPermits;
     private final ThrottledWarn redisWarn;
@@ -64,7 +63,6 @@ public class SeatHoldService {
         this.queueService = queueService;
         this.metrics = metrics;
         this.redisWarn = new ThrottledWarn(log, nanoClock);
-        this.queueRequired = properties.queue().required();
         this.holdTtl = properties.hold().ttl();
         this.fallbackPermits = new Semaphore(properties.gate().fallbackMaxConcurrency());
     }
@@ -112,11 +110,7 @@ public class SeatHoldService {
         gateReflector.release(seatHoldTransaction.heldToReleased(userId, holdId));
     }
 
-    // 처리열을 끄는 것은 게이트 스위치와 별개로 ticketing.queue.required뿐이다
     private Check checkAdmission(CreateHoldCommand command) {
-        if (!queueRequired) {
-            return Check.PASSED;
-        }
         String queueToken = command.queueToken();
         if (queueToken == null || queueToken.isBlank()) {
             throw new ApiException(ErrorCode.NOT_ADMITTED);
@@ -187,9 +181,7 @@ public class SeatHoldService {
             }
             throw e;
         }
-        if (queueRequired) {
-            queueService.consumeQuietly(command.userId(), command.performanceId(), command.queueToken());
-        }
+        queueService.consumeQuietly(command.userId(), command.performanceId(), command.queueToken());
         return new CreateHoldResult(placement.holdId(), placement.expiresAt(),
                 selection.seats().stream().map(HoldSeatResult::from).toList(), selection.totalAmount());
     }

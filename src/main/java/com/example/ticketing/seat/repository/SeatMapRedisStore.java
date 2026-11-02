@@ -50,7 +50,7 @@ public class SeatMapRedisStore {
 
     // 값이 owner일 때만 지운다. TTL이 지나 남이 잡은 리스는 건드리지 않는다
     public void releaseLease(long performanceId, String owner) {
-        RedisFailures.translate(
-                () -> redis.execute(RedisScripts.RELEASE, List.of(RedisKeys.seatMapLease(performanceId)), owner));
+        RedisFailures.translate(() -> redis.execute(RedisScripts.DELETE_IF_EQUALS,
+                List.of(RedisKeys.seatMapLease(performanceId)), owner));
     }
 }

@@ -1,6 +1,6 @@
 package com.example.ticketing.payment.controller;
 
-import static com.example.ticketing.support.TestMvc.USER;
+import static com.example.ticketing.common.web.HttpNames.USER_ID_HEADER;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -69,7 +69,7 @@ class PaymentApiControllerTest {
     void missingIdempotencyKey() throws Exception {
         Held held = newHold();
 
-        mockMvc.perform(post("/api/holds/{holdId}/payments", held.holdId()).header(USER, held.userId())
+        mockMvc.perform(post("/api/holds/{holdId}/payments", held.holdId()).header(USER_ID_HEADER, held.userId())
                         .contentType(MediaType.APPLICATION_JSON).content("{\"method\":\"CARD\"}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("IDEMPOTENCY_KEY_REQUIRED"));
@@ -113,7 +113,7 @@ class PaymentApiControllerTest {
         assertThat(stubPg.approvals()).singleElement()
                 .satisfies(call -> assertThat(call.scenario()).isEqualTo(Optional.of(PgScenario.SUCCESS.name())));
 
-        mockMvc.perform(get("/api/payments/{paymentId}", paymentId).header(USER, held.userId()))
+        mockMvc.perform(get("/api/payments/{paymentId}", paymentId).header(USER_ID_HEADER, held.userId()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.paymentId").value(paymentId))
                 .andExpect(jsonPath("$.status").value("APPROVED"))
@@ -121,7 +121,7 @@ class PaymentApiControllerTest {
                 .andExpect(jsonPath("$.bookingId").value(body.get("bookingId").asLong()))
                 .andExpect(jsonPath("$.bookingNumber").value(body.get("bookingNumber").asString()));
 
-        mockMvc.perform(get("/api/holds/{holdId}", held.holdId()).header(USER, held.userId()))
+        mockMvc.perform(get("/api/holds/{holdId}", held.holdId()).header(USER_ID_HEADER, held.userId()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("CONFIRMED"))
                 .andExpect(jsonPath("$.paymentId").value(paymentId))
@@ -145,12 +145,12 @@ class PaymentApiControllerTest {
         assertThat(stubPg.approvals()).singleElement()
                 .satisfies(call -> assertThat(call.scenario()).isEmpty());
 
-        mockMvc.perform(get("/api/payments/{paymentId}", paymentId).header(USER, held.userId()))
+        mockMvc.perform(get("/api/payments/{paymentId}", paymentId).header(USER_ID_HEADER, held.userId()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("UNKNOWN"))
                 .andExpect(jsonPath("$.holdStatus").value("PAYING"))
                 .andExpect(jsonPath("$.bookingId").doesNotExist());
-        mockMvc.perform(get("/api/holds/{holdId}", held.holdId()).header(USER, held.userId()))
+        mockMvc.perform(get("/api/holds/{holdId}", held.holdId()).header(USER_ID_HEADER, held.userId()))
                 .andExpect(jsonPath("$.status").value("PAYING"))
                 .andExpect(jsonPath("$.paymentId").value(paymentId))
                 .andExpect(jsonPath("$.payDeadline").isString());
@@ -214,7 +214,7 @@ class PaymentApiControllerTest {
         Held held = newHold();
         long stranger = fixtures.newUser();
 
-        mockMvc.perform(post("/api/holds/{holdId}/payments", held.holdId()).header(USER, stranger)
+        mockMvc.perform(post("/api/holds/{holdId}/payments", held.holdId()).header(USER_ID_HEADER, stranger)
                         .header(KEY, UUID.randomUUID().toString())
                         .contentType(MediaType.APPLICATION_JSON).content("{\"method\":\"CARD\"}"))
                 .andExpect(status().isNotFound())
@@ -228,10 +228,10 @@ class PaymentApiControllerTest {
 
         long paymentId = testMvc.body(pay(held, UUID.randomUUID().toString()).andExpect(status().isOk()).andReturn())
                 .get("paymentId").asLong();
-        mockMvc.perform(get("/api/payments/{paymentId}", paymentId).header(USER, stranger))
+        mockMvc.perform(get("/api/payments/{paymentId}", paymentId).header(USER_ID_HEADER, stranger))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("PAYMENT_NOT_FOUND"));
-        mockMvc.perform(get("/api/payments/{paymentId}", Long.MAX_VALUE).header(USER, held.userId()))
+        mockMvc.perform(get("/api/payments/{paymentId}", Long.MAX_VALUE).header(USER_ID_HEADER, held.userId()))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("PAYMENT_NOT_FOUND"));
     }
@@ -242,7 +242,7 @@ class PaymentApiControllerTest {
 
     private MockHttpServletRequestBuilder payRequest(Held held, String key) {
         return post("/api/holds/{holdId}/payments", held.holdId())
-                .header(USER, held.userId())
+                .header(USER_ID_HEADER, held.userId())
                 .header(KEY, key)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"method\":\"CARD\"}");

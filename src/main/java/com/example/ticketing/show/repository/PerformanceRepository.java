@@ -9,7 +9,7 @@ import org.springframework.data.repository.query.Param;
 
 public interface PerformanceRepository extends JpaRepository<Performance, Long> {
 
-    List<Performance> findByShowIdOrderByStartsAtAsc(Long showId);
+    List<Performance> findByShowIdOrderByStartsAtAscIdAsc(Long showId);
 
     // 서버 시계나 SeatCatalog 캐시 대신 DB 시각으로 회차 시작 여부를 본다
     @Query(value = "SELECT COUNT(*) FROM performance WHERE id = :id AND starts_at <= NOW(6)", nativeQuery = true)

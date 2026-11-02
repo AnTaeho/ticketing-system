@@ -44,6 +44,6 @@ class ShowAdminRollbackTest {
         assertThatThrownBy(() -> showAdminService.createPerformance(
                 new CreatePerformanceCommand(showId, now.plusDays(1), now, null, 1, 1, 1)))
                 .isInstanceOf(DataIntegrityViolationException.class);
-        assertThat(performanceRepository.findByShowIdOrderByStartsAtAsc(showId)).isEmpty();
+        assertThat(performanceRepository.findByShowIdOrderByStartsAtAscIdAsc(showId)).isEmpty();
     }
 }

@@ -136,7 +136,7 @@ public class GateKeyReconcileScheduler {
         return keys.stream().filter(key -> !live.contains(key.holdToken())).toList();
     }
 
-    // 읽은 뒤 값이 바뀐 키(새 선점이 같은 좌석을 잡음)는 release.lua가 값을 비교해 남긴다
+    // 읽은 뒤 값이 바뀐 키(새 선점이 같은 좌석을 잡음)는 delete_if_equals.lua가 값을 비교해 남긴다
     private long release(List<GateKeyEntry> orphans) {
         Map<String, List<String>> keysByToken = new LinkedHashMap<>();
         orphans.forEach(key -> keysByToken.computeIfAbsent(key.holdToken(), t -> new ArrayList<>()).add(key.name()));

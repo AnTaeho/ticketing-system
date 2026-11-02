@@ -18,10 +18,10 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
 @IntegrationTest
-class ShowQueryServiceTest {
+class ShowReaderTest {
 
     @Autowired
-    private ShowQueryService showQueryService;
+    private ShowReader showReader;
     @Autowired
     private Fixtures fixtures;
 
@@ -34,7 +34,7 @@ class ShowQueryServiceTest {
         long open = fixtures.newPerformance(showId, now.minusMinutes(1), now.plusDays(1), 1, 1, 1);
         long beforeOpen = fixtures.newPerformance(showId, now.plusHours(1), now.plusDays(2), 1, 1, 1);
 
-        ShowDetailResult detail = showQueryService.getShow(showId);
+        ShowDetailResult detail = showReader.getShow(showId);
 
         assertThat(detail.id()).isEqualTo(showId);
         assertThat(detail.performances())
@@ -56,7 +56,7 @@ class ShowQueryServiceTest {
         long finishedShowId = fixtures.newShow();
         fixtures.newPerformance(finishedShowId, now.minusDays(2), now.minusDays(1), 1, 1, 1);
 
-        var shows = showQueryService.listShows();
+        var shows = showReader.listShows();
 
         ShowSummaryResult summary = shows.stream().filter(s -> s.id() == showId).findFirst().orElseThrow();
         assertThat(summary.nextPerformance().id()).isEqualTo(open);
@@ -68,7 +68,7 @@ class ShowQueryServiceTest {
     @Test
     @DisplayName("없는 공연을 조회하면 SHOW_NOT_FOUND로 거절한다")
     void unknownShow() {
-        assertThatThrownBy(() -> showQueryService.getShow(Long.MAX_VALUE))
+        assertThatThrownBy(() -> showReader.getShow(Long.MAX_VALUE))
                 .isInstanceOf(ApiException.class)
                 .extracting(e -> ((ApiException) e).getCode())
                 .isEqualTo(ErrorCode.SHOW_NOT_FOUND);

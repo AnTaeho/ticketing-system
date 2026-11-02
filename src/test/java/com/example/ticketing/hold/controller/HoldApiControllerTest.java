@@ -1,6 +1,6 @@
 package com.example.ticketing.hold.controller;
 
-import static com.example.ticketing.support.TestMvc.USER;
+import static com.example.ticketing.common.web.HttpNames.USER_ID_HEADER;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.startsWith;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -78,7 +78,8 @@ class HoldApiControllerTest {
         JsonNode body = testMvc.body(created);
         long holdId = body.get("holdId").asLong();
 
-        JsonNode detail = testMvc.body(mockMvc.perform(get("/api/holds/{holdId}", holdId).header(USER, userId))
+        JsonNode detail = testMvc.body(mockMvc.perform(
+                        get("/api/holds/{holdId}", holdId).header(USER_ID_HEADER, userId))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.holdId").value(holdId))
                 .andExpect(jsonPath("$.performanceId").value(pid))
@@ -97,16 +98,16 @@ class HoldApiControllerTest {
         LocalDateTime serverNow = LocalDateTime.parse(detail.get("serverNow").asString());
         assertThat(serverNow).isBefore(LocalDateTime.parse(body.get("expiresAt").asString()));
 
-        mockMvc.perform(delete("/api/holds/{holdId}", holdId).header(USER, userId))
+        mockMvc.perform(delete("/api/holds/{holdId}", holdId).header(USER_ID_HEADER, userId))
                 .andExpect(status().isNoContent())
                 .andExpect(content().string(""));
 
-        mockMvc.perform(get("/api/holds/{holdId}", holdId).header(USER, userId))
+        mockMvc.perform(get("/api/holds/{holdId}", holdId).header(USER_ID_HEADER, userId))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("RELEASED"))
                 .andExpect(jsonPath("$.seats.length()").value(0));
 
-        mockMvc.perform(delete("/api/holds/{holdId}", holdId).header(USER, userId))
+        mockMvc.perform(delete("/api/holds/{holdId}", holdId).header(USER_ID_HEADER, userId))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("HOLD_NOT_CANCELLABLE"))
                 .andExpect(jsonPath("$.detail.status").value("RELEASED"));
@@ -121,13 +122,13 @@ class HoldApiControllerTest {
         long holdId = testMvc.body(hold(owner, pid, List.of(db.seatIds(pid).get(0)))
                 .andExpect(status().isCreated()).andReturn()).get("holdId").asLong();
 
-        mockMvc.perform(get("/api/holds/{holdId}", holdId).header(USER, stranger))
+        mockMvc.perform(get("/api/holds/{holdId}", holdId).header(USER_ID_HEADER, stranger))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("HOLD_NOT_FOUND"));
-        mockMvc.perform(delete("/api/holds/{holdId}", holdId).header(USER, stranger))
+        mockMvc.perform(delete("/api/holds/{holdId}", holdId).header(USER_ID_HEADER, stranger))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("HOLD_NOT_FOUND"));
-        mockMvc.perform(get("/api/holds/{holdId}", Long.MAX_VALUE).header(USER, owner))
+        mockMvc.perform(get("/api/holds/{holdId}", Long.MAX_VALUE).header(USER_ID_HEADER, owner))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("HOLD_NOT_FOUND"));
         assertThat(db.holdStatus(holdId)).isEqualTo("HELD");
@@ -143,7 +144,7 @@ class HoldApiControllerTest {
                 .andExpect(status().isCreated()).andReturn()).get("holdId").asLong();
         jdbcTemplate.update("UPDATE seat_hold SET status = 'PAYING' WHERE id = ?", holdId);
 
-        mockMvc.perform(delete("/api/holds/{holdId}", holdId).header(USER, userId))
+        mockMvc.perform(delete("/api/holds/{holdId}", holdId).header(USER_ID_HEADER, userId))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("HOLD_NOT_CANCELLABLE"))
                 .andExpect(jsonPath("$.detail.status").value("PAYING"));
@@ -162,7 +163,7 @@ class HoldApiControllerTest {
                     .andExpect(status().isCreated()).andReturn()).get("holdId").asLong();
             jdbcTemplate.update("UPDATE seat_hold SET status = ? WHERE id = ?", finished, holdId);
 
-            mockMvc.perform(delete("/api/holds/{holdId}", holdId).header(USER, userId))
+            mockMvc.perform(delete("/api/holds/{holdId}", holdId).header(USER_ID_HEADER, userId))
                     .andExpect(status().isConflict())
                     .andExpect(jsonPath("$.code").value("HOLD_NOT_CANCELLABLE"))
                     .andExpect(jsonPath("$.message").value("지금은 이 자리를 놓을 수 없어요"))
@@ -286,7 +287,7 @@ class HoldApiControllerTest {
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("HOLD_NOT_FOUND"));
 
-        mockMvc.perform(delete("/api/holds/{holdId}", holdId).header(USER, owner))
+        mockMvc.perform(delete("/api/holds/{holdId}", holdId).header(USER_ID_HEADER, owner))
                 .andExpect(status().isNoContent());
 
         mine(owner, pid)
@@ -308,7 +309,7 @@ class HoldApiControllerTest {
     }
 
     private ResultActions mine(long userId, long pid) throws Exception {
-        return mockMvc.perform(get("/api/performances/{pid}/holds/mine", pid).header(USER, userId));
+        return mockMvc.perform(get("/api/performances/{pid}/holds/mine", pid).header(USER_ID_HEADER, userId));
     }
 
     private long holdId(long userId, long pid, long seatId) throws Exception {
@@ -327,7 +328,7 @@ class HoldApiControllerTest {
                 ? "{\"seatIds\":[%s]}".formatted(ids)
                 : "{\"seatIds\":[%s],\"queueToken\":\"%s\"}".formatted(ids, queueToken);
         return mockMvc.perform(post("/api/performances/{pid}/holds", pid)
-                .header(USER, userId)
+                .header(USER_ID_HEADER, userId)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(body));
     }
