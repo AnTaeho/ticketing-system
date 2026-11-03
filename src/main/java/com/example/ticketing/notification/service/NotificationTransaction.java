@@ -1,11 +1,9 @@
 package com.example.ticketing.notification.service;
 
-import com.example.ticketing.notification.domain.IssuedSeat;
 import com.example.ticketing.notification.domain.IssuedTicket;
 import com.example.ticketing.notification.domain.Notification;
 import com.example.ticketing.notification.domain.TicketIssuedMessage;
 import com.example.ticketing.notification.repository.NotificationRepository;
-import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Isolation;
@@ -25,11 +23,7 @@ public class NotificationTransaction {
         }
         IssuedTicket ticket = notificationRepository.findIssuedTicket(bookingId)
                 .orElseThrow(() -> new IllegalStateException("예매 " + bookingId + "가 없다"));
-        List<IssuedSeat> seats = notificationRepository.findIssuedSeats(bookingId);
-        if (seats.isEmpty()) {
-            throw new IllegalStateException("예매 " + bookingId + "의 좌석이 없다");
-        }
         notificationRepository.save(Notification.ticketIssued(ticket.userId(), bookingId,
-                TicketIssuedMessage.of(ticket, seats)));
+                TicketIssuedMessage.of(ticket, notificationRepository.findIssuedSeats(bookingId))));
     }
 }

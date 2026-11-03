@@ -121,9 +121,6 @@ public class GateKeyReconcileScheduler {
     }
 
     private List<GateKeyEntry> orphanSeatKeys(long performanceId, List<GateKeyEntry> keys) {
-        if (keys.isEmpty()) {
-            return List.of();
-        }
         // 좌석 행은 hold 하나만 가리키므로 좌석 키마다 살아 있는 토큰은 하나다
         Map<String, String> liveTokenByKey = new HashMap<>();
         inChunks(tokens(keys), chunk -> seatHoldRepository.findLiveGateSeats(performanceId, chunk))
@@ -132,9 +129,6 @@ public class GateKeyReconcileScheduler {
     }
 
     private List<GateKeyEntry> orphanUserHoldKeys(long performanceId, List<GateKeyEntry> keys) {
-        if (keys.isEmpty()) {
-            return List.of();
-        }
         Set<String> live = new HashSet<>(
                 inChunks(tokens(keys), chunk -> seatHoldRepository.findLiveUserHoldTokens(performanceId, chunk)));
         return keys.stream().filter(key -> !live.contains(key.holdToken())).toList();
