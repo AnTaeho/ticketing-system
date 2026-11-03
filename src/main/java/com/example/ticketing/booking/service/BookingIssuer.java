@@ -28,7 +28,8 @@ public class BookingIssuer {
         Booking booking = bookingRepository.save(Booking.confirmed(BookingNumber.of(command.dbNow(), command.holdId()),
                 command.holdId(), command.paymentId(), command.userId(), command.performanceId(),
                 command.totalAmount(), command.seats()));
-        outboxWriter.write(OutboxTaskType.TICKET_ISSUED, booking.getId(), new TicketIssuedPayload(booking.getId()));
+        outboxWriter.write(OutboxTaskType.TICKET_ISSUED, booking.getId(), new TicketIssuedPayload(booking.getId()),
+                command.dbNow());
         return new IssuedBooking(booking.getId(), booking.getBookingNumber());
     }
 

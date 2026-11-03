@@ -15,10 +15,7 @@ import java.time.LocalDateTime;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
-import org.hibernate.annotations.CurrentTimestamp;
 import org.hibernate.annotations.JdbcTypeCode;
-import org.hibernate.annotations.SourceType;
-import org.hibernate.generator.EventType;
 import org.hibernate.type.SqlTypes;
 import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.annotation.LastModifiedDate;
@@ -62,7 +59,6 @@ public class OutboxTask {
     private int attempt;
 
     // 집기가 DB 시각과 비교하므로 처음 값도 서버 시계가 아닌 DB 시각으로 넣는다
-    @CurrentTimestamp(event = EventType.INSERT, source = SourceType.DB)
     @Column(name = "next_attempt_at", nullable = false)
     private LocalDateTime nextAttemptAt;
 
@@ -80,14 +76,15 @@ public class OutboxTask {
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
 
-    // 바로 집을 수 있는 작업으로 남는다
-    public static OutboxTask pending(OutboxTaskType taskType, long aggregateId, String payload) {
+    // dbNow부터 집을 수 있다
+    public static OutboxTask pending(OutboxTaskType taskType, long aggregateId, String payload, LocalDateTime dbNow) {
         OutboxTask task = new OutboxTask();
         task.taskType = taskType;
         task.aggregateId = aggregateId;
         task.payload = payload;
         task.status = OutboxTaskStatus.PENDING;
         task.attempt = 0;
+        task.nextAttemptAt = dbNow;
         return task;
     }
 }

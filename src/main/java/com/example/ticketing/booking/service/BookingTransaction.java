@@ -17,6 +17,7 @@ import com.example.ticketing.outbox.service.OutboxWriter;
 import com.example.ticketing.seat.domain.Seat;
 import com.example.ticketing.seat.repository.SeatRepository;
 import com.example.ticketing.show.repository.PerformanceRepository;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import lombok.RequiredArgsConstructor;
@@ -53,7 +54,8 @@ public class BookingTransaction {
         String orderId = bookingRepository.findPaymentOrderId(booking.getPaymentId())
                 .orElseThrow(() -> new IllegalStateException("예매 " + bookingId + "의 결제가 없다"));
 
-        booking.confirmedToCancelled(dbClock.now());
+        LocalDateTime now = dbClock.now();
+        booking.confirmedToCancelled(now);
         SeatHold hold = seatHoldRepository.findById(booking.getHoldId())
                 .orElseThrow(() -> new IllegalStateException("예매 " + bookingId + "의 hold가 없다"));
         // 게이트 키를 지울 좌석 ID는 hold_id를 비우기 전에 읽어 둔다
@@ -61,7 +63,7 @@ public class BookingTransaction {
         List<Long> seatIds = seats.stream().map(Seat::getId).toList();
         seats.forEach(Seat::soldToAvailable);
         outboxWriter.write(OutboxTaskType.REFUND_REQUESTED, booking.getPaymentId(),
-                new RefundRequestedPayload(booking.getPaymentId(), orderId));
+                new RefundRequestedPayload(booking.getPaymentId(), orderId), now);
         return BookingCancellation.cancelled(
                 new GateHold(booking.getUserId(), booking.getPerformanceId(), hold.getHoldToken(), seatIds));
     }

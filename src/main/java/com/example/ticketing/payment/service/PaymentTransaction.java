@@ -117,7 +117,7 @@ public class PaymentTransaction {
         List<Long> seatIds = idsOf(seats);
         LocalDateTime now = dbClock.now();
         if (seats.size() != hold.getSeatCount()) {
-            return payingToRefunding(locked, pgTxId, seats);
+            return payingToRefunding(locked, pgTxId, seats, now);
         }
 
         hold.payingToConfirmed();
@@ -193,7 +193,7 @@ public class PaymentTransaction {
     }
 
     // 결제 마감이 지나 남이 좌석을 가져갔다. 돈은 받았으므로 남은 좌석을 풀고 환불을 맡긴다
-    private PaymentSettlement payingToRefunding(Locked locked, String pgTxId, List<Seat> seats) {
+    private PaymentSettlement payingToRefunding(Locked locked, String pgTxId, List<Seat> seats, LocalDateTime dbNow) {
         SeatHold hold = locked.hold();
         Payment payment = locked.payment();
         long paymentId = payment.getId();
@@ -202,7 +202,7 @@ public class PaymentTransaction {
         payment.openToApproved(pgTxId);
         RowCounts.requireExactly(seatRepository.heldToAvailable(hold.getId()), seats.size(), "seat AVAILABLE");
         outboxWriter.write(OutboxTaskType.REFUND_REQUESTED, paymentId,
-                new RefundRequestedPayload(paymentId, payment.getOrderId()));
+                new RefundRequestedPayload(paymentId, payment.getOrderId()), dbNow);
         return PaymentSettlement.seatsChanged(new PaymentResult(paymentId, PaymentOutcome.SEAT_LOST,
                 PaymentStatus.APPROVED, HoldStatus.REFUNDING, null, null), gateOf(hold, seatIds), null);
     }

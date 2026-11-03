@@ -3,6 +3,7 @@ package com.example.ticketing.outbox.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.example.ticketing.common.time.DbClock;
 import com.example.ticketing.outbox.domain.OutboxTaskType;
 import com.example.ticketing.outbox.dto.RefundRequestedPayload;
 import com.example.ticketing.outbox.dto.TicketIssuedPayload;
@@ -25,6 +26,8 @@ class OutboxWriterTest {
     @Autowired
     private JdbcTemplate jdbcTemplate;
     @Autowired
+    private DbClock dbClock;
+    @Autowired
     private PlatformTransactionManager transactionManager;
 
     @Test
@@ -33,7 +36,7 @@ class OutboxWriterTest {
         long aggregateId = randomAggregateId();
 
         assertThatThrownBy(() -> outboxWriter.write(OutboxTaskType.TICKET_ISSUED, aggregateId,
-                new TicketIssuedPayload(aggregateId)))
+                new TicketIssuedPayload(aggregateId), dbClock.now()))
                 .isInstanceOf(IllegalTransactionStateException.class);
         assertThat(count(aggregateId)).isZero();
     }
@@ -45,7 +48,7 @@ class OutboxWriterTest {
         TransactionTemplate tx = new TransactionTemplate(transactionManager);
 
         tx.executeWithoutResult(s -> outboxWriter.write(OutboxTaskType.REFUND_REQUESTED, aggregateId,
-                new RefundRequestedPayload(aggregateId, "order-1")));
+                new RefundRequestedPayload(aggregateId, "order-1"), dbClock.now()));
 
         Map<String, Object> row = jdbcTemplate.queryForMap("SELECT task_type, aggregate_id, payload, status, attempt, "
                 + "locked_until, last_error, TIMESTAMPDIFF(MICROSECOND, next_attempt_at, NOW(6)) AS age_us "
@@ -58,7 +61,8 @@ class OutboxWriterTest {
 
         long rolledBack = randomAggregateId();
         tx.executeWithoutResult(s -> {
-            outboxWriter.write(OutboxTaskType.TICKET_ISSUED, rolledBack, new TicketIssuedPayload(rolledBack));
+            outboxWriter.write(OutboxTaskType.TICKET_ISSUED, rolledBack, new TicketIssuedPayload(rolledBack),
+                    dbClock.now());
             s.setRollbackOnly();
         });
 
