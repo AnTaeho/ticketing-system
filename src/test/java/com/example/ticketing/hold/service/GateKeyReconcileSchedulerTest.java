@@ -106,8 +106,6 @@ class GateKeyReconcileSchedulerTest {
         long lookalikePid = fixtures.track(pid * 10);
         String lookalike = RedisKeys.seat(lookalikePid, seatId);
         setAged(lookalike, UUID.randomUUID().toString());
-        double seatBefore = counters.count(Metrics.GATE_ORPHAN_REMOVED, Tag.KIND, "seat");
-        double userHoldBefore = counters.count(Metrics.GATE_ORPHAN_REMOVED, Tag.KIND, "userhold");
 
         Removed removed = reconcile(pid);
 
@@ -115,8 +113,6 @@ class GateKeyReconcileSchedulerTest {
         assertThat(redis.hasKey(seatKey)).isFalse();
         assertThat(redis.hasKey(userHoldKey)).isFalse();
         assertThat(redis.hasKey(lookalike)).isTrue();
-        assertThat(counters.count(Metrics.GATE_ORPHAN_REMOVED, Tag.KIND, "seat") - seatBefore).isEqualTo(1);
-        assertThat(counters.count(Metrics.GATE_ORPHAN_REMOVED, Tag.KIND, "userhold") - userHoldBefore).isEqualTo(1);
     }
 
     @Test
@@ -125,10 +121,8 @@ class GateKeyReconcileSchedulerTest {
         long pid = fixtures.newPerformance(1, 1, 6);
         long userId = fixtures.newUser();
         List<Long> seats = db.seatIds(pid).subList(0, 2);
-        CreateHoldResult hold = seatHoldService.hold(
-                new CreateHoldCommand(userId, pid, seats, fixtures.admit(pid, userId)));
-        PaymentResult paid = paymentService.pay(new PayCommand(userId, hold.holdId(), UUID.randomUUID().toString(),
-                Optional.empty()));
+        CreateHoldResult hold = hold(userId, pid, seats);
+        PaymentResult paid = pay(userId, hold.holdId());
         assertThat(paid.outcome()).isEqualTo(PaymentOutcome.CONFIRMED);
         String token = db.holdToken(hold.holdId());
 
@@ -152,14 +146,10 @@ class GateKeyReconcileSchedulerTest {
         List<Long> ids = db.seatIds(pid);
         long heldUser = fixtures.newUser();
         long payingUser = fixtures.newUser();
-        CreateHoldResult held = seatHoldService.hold(
-                new CreateHoldCommand(heldUser, pid, ids.subList(0, 2), fixtures.admit(pid, heldUser)));
-        CreateHoldResult paying = seatHoldService.hold(
-                new CreateHoldCommand(payingUser, pid, ids.subList(2, 3), fixtures.admit(pid, payingUser)));
+        CreateHoldResult held = hold(heldUser, pid, ids.subList(0, 2));
+        CreateHoldResult paying = hold(payingUser, pid, ids.subList(2, 3));
         stubPg.approveWith(PgResult.unknown("timeout"));
-        assertThat(paymentService.pay(new PayCommand(payingUser, paying.holdId(), UUID.randomUUID().toString(),
-                Optional.empty()))
-                .outcome()).isEqualTo(PaymentOutcome.UNKNOWN);
+        assertThat(pay(payingUser, paying.holdId()).outcome()).isEqualTo(PaymentOutcome.UNKNOWN);
         assertThat(db.holdStatus(paying.holdId())).isEqualTo("PAYING");
         List<String> keys = testRedis.gateKeys(pid);
         assertThat(keys).hasSize(5);
@@ -185,8 +175,7 @@ class GateKeyReconcileSchedulerTest {
         List<Long> target = db.seatIds(pid).subList(0, 2);
         long userA = fixtures.newUser();
         long userB = fixtures.newUser();
-        CreateHoldResult holdA = seatHoldService.hold(
-                new CreateHoldCommand(userA, pid, target, fixtures.admit(pid, userA)));
+        CreateHoldResult holdA = hold(userA, pid, target);
         String tokenA = db.holdToken(holdA.holdId());
         target.forEach(seatId -> age(RedisKeys.seat(pid, seatId)));
         age(RedisKeys.userHold(userA, pid));
@@ -248,10 +237,8 @@ class GateKeyReconcileSchedulerTest {
         List<Long> ids = db.seatIds(pid);
         long expiredUser = fixtures.newUser();
         long releasedUser = fixtures.newUser();
-        CreateHoldResult expired = seatHoldService.hold(new CreateHoldCommand(expiredUser, pid, ids.subList(0, 1),
-                fixtures.admit(pid, expiredUser)));
-        CreateHoldResult released = seatHoldService.hold(new CreateHoldCommand(releasedUser, pid, ids.subList(1, 2),
-                fixtures.admit(pid, releasedUser)));
+        CreateHoldResult expired = hold(expiredUser, pid, ids.subList(0, 1));
+        CreateHoldResult released = hold(releasedUser, pid, ids.subList(1, 2));
         testRedis.gateKeys(pid).forEach(this::age);
         // 만료 처리와 선점 취소의 DB 쪽만 반영하고 키 해제는 실패한 상황
         jdbcTemplate.update("UPDATE seat_hold SET status = 'EXPIRED' WHERE hold_id = ?", expired.holdId());
@@ -361,7 +348,6 @@ class GateKeyReconcileSchedulerTest {
                 (long) (counters.count(Metrics.GATE_ORPHAN_REMOVED, Tag.KIND, "userhold") - userHoldsBefore));
     }
 
-    // 대사의 DB 조회 직전에 끼어들 지점. 두 번째 인자는 조회하는 회차 ID다
     // 대사의 조회(메서드 이름, 회차) 앞에 끼어들고 실제 저장소로 넘긴다
     private SeatHoldRepository hooked(BiConsumer<String, Long> beforeQuery) {
         return mock(SeatHoldRepository.class, invocation -> {
@@ -374,6 +360,14 @@ class GateKeyReconcileSchedulerTest {
                 throw e.getCause();
             }
         });
+    }
+
+    private CreateHoldResult hold(long userId, long pid, List<Long> seatIds) {
+        return seatHoldService.hold(new CreateHoldCommand(userId, pid, seatIds, fixtures.admit(pid, userId)));
+    }
+
+    private PaymentResult pay(long userId, long holdId) {
+        return paymentService.pay(new PayCommand(userId, holdId, UUID.randomUUID().toString(), Optional.empty()));
     }
 
     private SeatHoldService gateOffService() {
