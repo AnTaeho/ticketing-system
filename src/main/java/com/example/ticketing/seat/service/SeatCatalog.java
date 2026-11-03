@@ -31,7 +31,6 @@ public class SeatCatalog {
     private final LongSupplier nanoClock;
 
     private final ConcurrentMap<Long, PerformanceInfo> performances = new ConcurrentHashMap<>();
-    private final Object openIdsLock = new Object();
     private volatile OpenIds openIds;
 
     public SeatCatalog(SeatRepository seatRepository, TicketingProperties properties,
@@ -41,6 +40,7 @@ public class SeatCatalog {
         this.nanoClock = nanoClock;
     }
 
+    // 맵 잠금을 쥔 채 DB를 읽지 않으려고 computeIfAbsent를 쓰지 않는다. 겹쳐 읽어도 같은 값이다
     public PerformanceInfo performance(long performanceId) {
         PerformanceInfo cached = performances.get(performanceId);
         if (cached != null) {
@@ -88,21 +88,15 @@ public class SeatCatalog {
         return seatRepository.findSeatIdsOfHold(performanceId, holdId).stream().map(seats::get).toList();
     }
 
-    // 스케줄러가 매 주기 부르므로 10초 묶어 둔다
+    // 스케줄러가 매 주기 부르므로 10초 묶어 둔다. 스케줄러끼리 겹쳐 한 번 더 읽어도 결과는 같다
     public List<Long> openPerformanceIds() {
+        long now = nanoClock.getAsLong();
         OpenIds current = openIds;
-        if (current != null && current.isFresh(nanoClock.getAsLong())) {
-            return current.ids();
+        if (current == null || now - current.loadedAtNanos() >= OPEN_IDS_TTL_NANOS) {
+            current = new OpenIds(List.copyOf(seatRepository.findOpenPerformanceIds()), now);
+            openIds = current;
         }
-        synchronized (openIdsLock) {
-            current = openIds;
-            if (current != null && current.isFresh(nanoClock.getAsLong())) {
-                return current.ids();
-            }
-            List<Long> ids = seatRepository.findOpenPerformanceIds();
-            openIds = new OpenIds(List.copyOf(ids), nanoClock.getAsLong());
-            return openIds.ids();
-        }
+        return current.ids();
     }
 
     private static ApiException invalidSelection(Map<String, Object> detail) {
@@ -110,9 +104,5 @@ public class SeatCatalog {
     }
 
     private record OpenIds(List<Long> ids, long loadedAtNanos) {
-
-        boolean isFresh(long nowNanos) {
-            return nowNanos - loadedAtNanos < OPEN_IDS_TTL_NANOS;
-        }
     }
 }
