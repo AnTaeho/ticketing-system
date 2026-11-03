@@ -22,11 +22,9 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Import;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import tools.jackson.databind.JsonNode;
-import tools.jackson.databind.json.JsonMapper;
 
 @IntegrationTest
 @Import(StubPgTestConfig.class)
@@ -42,10 +40,6 @@ class BookingApiControllerTest {
     private TestDb db;
     @Autowired
     private TestMvc testMvc;
-    @Autowired
-    private JdbcTemplate jdbcTemplate;
-    @Autowired
-    private JsonMapper jsonMapper;
 
     private MockMvc mockMvc;
 
@@ -168,8 +162,6 @@ class BookingApiControllerTest {
 
     // 워커 대신 발권 핸들러를 바로 불러 알림을 만든다
     private void issueTicket(long bookingId) {
-        String payload = jdbcTemplate.queryForObject("SELECT payload FROM outbox_task "
-                + "WHERE task_type = 'TICKET_ISSUED' AND aggregate_id = ?", String.class, bookingId);
-        ticketIssuedHandler.handle(jsonMapper.readValue(payload, TicketIssuedPayload.class));
+        ticketIssuedHandler.handle(new TicketIssuedPayload(bookingId));
     }
 }
