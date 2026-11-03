@@ -83,6 +83,11 @@ public interface SeatRepository extends JpaRepository<Seat, Long> {
     @Query("update Seat s set s.heldUntil = :heldUntil where s.holdId = :holdId and s.status = HELD")
     int extendHeldUntil(@Param("holdId") long holdId, @Param("heldUntil") LocalDateTime heldUntil);
 
+    // lockHeldSeats로 잠근 좌석을 한 문장으로 판다
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("update Seat s set s.status = SOLD, s.heldUntil = null where s.holdId = :holdId and s.status = HELD")
+    int heldToSold(@Param("holdId") long holdId);
+
     // hold_id 조건 덕분에 남이 이미 가져간 좌석은 건드리지 않는다
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("""

@@ -6,6 +6,7 @@ import com.example.ticketing.booking.service.BookingIssuer;
 import com.example.ticketing.common.config.TicketingProperties;
 import com.example.ticketing.common.error.ApiException;
 import com.example.ticketing.common.error.ErrorCode;
+import com.example.ticketing.common.jdbc.RowCounts;
 import com.example.ticketing.common.text.Texts;
 import com.example.ticketing.common.time.DbClock;
 import com.example.ticketing.hold.domain.GateHold;
@@ -39,7 +40,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
-// 락 순서: seat_hold → booking_payment → seat(id 오름차순). 잠근 행은 엔티티 메서드로 바꾼다. 이 안에서는 PG·Redis를 부르지 않는다
+// 락 순서: seat_hold → booking_payment → seat(id 오름차순). 잠근 행은 엔티티 메서드로, 잠근 좌석 여러 개는 UPDATE 한 문장으로 바꾼다. 이 안에서는 PG·Redis를 부르지 않는다
 @Component
 public class PaymentTransaction {
 
@@ -119,9 +120,10 @@ public class PaymentTransaction {
             return payingToRefunding(locked, pgTxId, seats);
         }
 
-        seats.forEach(Seat::heldToSold);
         hold.payingToConfirmed();
         locked.payment().openToApproved(pgTxId);
+        // 좌석 UPDATE가 앞의 엔티티 변경을 flush한 뒤 영속성 컨텍스트를 비우므로 엔티티 변경 뒤에 부른다
+        RowCounts.requireExactly(seatRepository.heldToSold(holdId), seats.size(), "seat SOLD");
         IssuedBooking booking = bookingIssuer.issue(new IssueBookingCommand(hold.getUserId(),
                 hold.getPerformanceId(), holdId, paymentId, hold.getTotalAmount(),
                 seats.stream().map(Seat::info).toList(), now));
@@ -196,9 +198,9 @@ public class PaymentTransaction {
         Payment payment = locked.payment();
         long paymentId = payment.getId();
         List<Long> seatIds = idsOf(seats);
-        seats.forEach(Seat::heldToAvailable);
         hold.payingToRefunding();
         payment.openToApproved(pgTxId);
+        RowCounts.requireExactly(seatRepository.heldToAvailable(hold.getId()), seats.size(), "seat AVAILABLE");
         outboxWriter.write(OutboxTaskType.REFUND_REQUESTED, paymentId,
                 new RefundRequestedPayload(paymentId, payment.getOrderId()));
         return PaymentSettlement.seatsChanged(new PaymentResult(paymentId, PaymentOutcome.SEAT_LOST,
@@ -212,13 +214,13 @@ public class PaymentTransaction {
             return PaymentSettlement.seatsUnchanged(paymentReader.resultOf(locked.payment(), hold));
         }
         List<Seat> seats = seatRepository.lockHeldSeats(hold.getId());
-        seats.forEach(Seat::heldToAvailable);
         hold.payingToReleased();
         if (target == PaymentStatus.DECLINED) {
             locked.payment().openToDeclined();
         } else {
             locked.payment().openToCancelled();
         }
+        RowCounts.requireExactly(seatRepository.heldToAvailable(hold.getId()), seats.size(), "seat AVAILABLE");
         return PaymentSettlement.seatsChanged(new PaymentResult(paymentId,
                 PaymentOutcome.of(target, HoldStatus.RELEASED), target, HoldStatus.RELEASED, null, null),
                 gateOf(hold, idsOf(seats)), null);
