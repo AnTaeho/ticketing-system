@@ -1,6 +1,6 @@
 package com.example.ticketing.fakepg.service;
 
-import com.example.ticketing.fakepg.domain.FakePgOrder;
+import com.example.ticketing.fakepg.domain.FakePgStatus;
 import com.example.ticketing.fakepg.repository.FakePgOrderRepository;
 import java.time.Duration;
 import lombok.RequiredArgsConstructor;
@@ -19,11 +19,12 @@ public class FakePgTransaction {
 
     // 같은 주문이 이미 있으면 DataIntegrityViolationException이다
     public void insertProcessing(String orderId, int amount) {
-        repository.saveAndFlush(FakePgOrder.processing(orderId, amount));
+        repository.insert(orderId, amount, FakePgStatus.PROCESSING);
     }
 
+    // 승인 전에 도착한 취소가 남기는 묘비. 이후 승인 요청은 거절된다
     public void insertCancelled(String orderId) {
-        repository.saveAndFlush(FakePgOrder.tombstone(orderId));
+        repository.insert(orderId, 0, FakePgStatus.CANCELLED);
     }
 
     public int processingToApproved(String orderId, String pgTxId) {
