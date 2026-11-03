@@ -13,6 +13,7 @@ import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Map;
 import java.util.function.LongSupplier;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -26,10 +27,7 @@ public class SeatGateReflector {
     private final SeatGateRedisStore store;
     private final boolean enabled;
     private final Duration reholdCooldown;
-    private final Counter releaseFailure;
-    private final Counter extendFailure;
-    private final Counter confirmFailure;
-    private final Counter cooldownFailure;
+    private final Map<String, Counter> failures;
     private final ThrottledWarn failureWarn;
 
     public SeatGateReflector(SeatGateRedisStore store, TicketingProperties properties, MeterRegistry meterRegistry,
@@ -37,10 +35,8 @@ public class SeatGateReflector {
         this.store = store;
         this.enabled = properties.gate().enabled();
         this.reholdCooldown = properties.hold().reholdCooldown();
-        this.releaseFailure = failureCounter(meterRegistry, ReflectOp.RELEASE);
-        this.extendFailure = failureCounter(meterRegistry, ReflectOp.EXTEND);
-        this.confirmFailure = failureCounter(meterRegistry, ReflectOp.CONFIRM);
-        this.cooldownFailure = failureCounter(meterRegistry, ReflectOp.COOLDOWN);
+        this.failures = Metrics.counters(meterRegistry, Metrics.REDIS_REFLECT_FAILURE, Tag.OP,
+                ReflectOp.RELEASE, ReflectOp.EXTEND, ReflectOp.CONFIRM, ReflectOp.COOLDOWN);
         this.failureWarn = new ThrottledWarn(log, nanoClock);
     }
 
@@ -50,44 +46,40 @@ public class SeatGateReflector {
     }
 
     public void release(GateHold hold) {
-        reflect(ReflectOp.RELEASE, releaseFailure, hold, () -> store.release(hold));
+        reflect(ReflectOp.RELEASE, hold, () -> store.release(hold));
     }
 
     // 예매 취소용. 확정 때 userhold는 이미 지웠으므로 좌석 키만 지운다
     public void releaseSeatsOnly(GateHold hold) {
-        reflect(ReflectOp.RELEASE, releaseFailure, hold, () -> store.releaseSeatsOnly(hold));
+        reflect(ReflectOp.RELEASE, hold, () -> store.releaseSeatsOnly(hold));
     }
 
     public void extend(GateHold hold, Duration ttl) {
-        reflect(ReflectOp.EXTEND, extendFailure, hold, () -> store.extend(hold, ttl));
+        reflect(ReflectOp.EXTEND, hold, () -> store.extend(hold, ttl));
     }
 
     public void confirm(GateHold hold, Instant gateCloseAt) {
-        reflect(ReflectOp.CONFIRM, confirmFailure, hold, () -> store.confirm(hold, gateCloseAt));
+        reflect(ReflectOp.CONFIRM, hold, () -> store.confirm(hold, gateCloseAt));
     }
 
     // 쿨다운을 먼저 걸어 키가 풀린 틈에 같은 사용자가 다시 잡지 못하게 한다. 쥔 좌석이 없으면 쿨다운도 없다
     public void expire(GateHold hold) {
         if (!hold.seatIds().isEmpty()) {
-            reflect(ReflectOp.COOLDOWN, cooldownFailure, hold, () -> store.setReholdCooldown(hold, reholdCooldown));
+            reflect(ReflectOp.COOLDOWN, hold, () -> store.setReholdCooldown(hold, reholdCooldown));
         }
         release(hold);
     }
 
-    private void reflect(String op, Counter failure, GateHold hold, Runnable call) {
+    private void reflect(String op, GateHold hold, Runnable call) {
         if (!enabled) {
             return;
         }
         try {
             call.run();
         } catch (RedisUnavailableException e) {
-            failure.increment();
+            failures.get(op).increment();
             failureWarn.warn("[gate] Redis 반영 실패 op={} performanceId={} cause={}", op, hold.performanceId(),
                     RedisFailures.describe(e));
         }
-    }
-
-    private static Counter failureCounter(MeterRegistry meterRegistry, String op) {
-        return meterRegistry.counter(Metrics.REDIS_REFLECT_FAILURE, Tag.OP, op);
     }
 }
