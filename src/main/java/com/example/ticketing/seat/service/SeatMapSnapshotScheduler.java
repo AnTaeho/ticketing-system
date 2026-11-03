@@ -30,7 +30,6 @@ public class SeatMapSnapshotScheduler {
     private final SeatMapRedisStore store;
     private final String instanceId;
     private final Duration leaseTtl;
-    private final Duration snapshotTtl;
     private final Counter rebuilds;
     private final ThrottledWarn failureWarn;
 
@@ -42,8 +41,8 @@ public class SeatMapSnapshotScheduler {
         this.store = store;
         this.instanceId = instanceId.value();
         this.failureWarn = new ThrottledWarn(log, nanoClock);
-        this.leaseTtl = properties.seatmap().leaseTtl();
-        this.snapshotTtl = properties.seatmap().snapshotTtl();
+        // 리더가 한 주기를 늦어도 리스를 잃지 않고, 멈추면 두 주기 뒤 다른 서버가 잡는다
+        this.leaseTtl = Duration.ofMillis(properties.seatmap().snapshotIntervalMs() * 2);
         this.rebuilds = SeatMapBuilder.rebuildCounter(meterRegistry, RebuildSource.SCHEDULER);
     }
 
@@ -70,8 +69,8 @@ public class SeatMapSnapshotScheduler {
         Optional<SeatMapSnapshot> snapshot = builder.snapshot(performanceId);
         rebuilds.increment();
         snapshot.ifPresent(value -> {
-            store.put(performanceId, builder.json(value), snapshotTtl);
-            store.putSoldOut(performanceId, value.everySeatSold(), snapshotTtl);
+            store.put(performanceId, builder.json(value));
+            store.putSoldOut(performanceId, value.everySeatSold());
         });
     }
 }

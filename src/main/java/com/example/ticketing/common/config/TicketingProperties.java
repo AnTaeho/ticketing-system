@@ -71,12 +71,10 @@ public record TicketingProperties(
         }
     }
 
+    // 로컬 캐시와 스케줄러 리스 길이는 주기에서 정한다
     public record Seatmap(
             boolean snapshotEnabled,
-            long snapshotIntervalMs, // @Scheduled 전용
-            Duration snapshotTtl,
-            Duration localCache,
-            Duration leaseTtl
+            long snapshotIntervalMs
     ) {
     }
 

@@ -255,14 +255,14 @@ class QueuePromotionSchedulerTest {
         String paying = service.enter(USER_BASE + 2, pid).queueToken();
         String next = service.enter(USER_BASE + 3, pid).queueToken();
         service.consume(USER_BASE + 1, pid, gone);
-        seatMapRedisStore.putSoldOut(pid, true, properties.seatmap().snapshotTtl());
+        seatMapRedisStore.putSoldOut(pid, true);
 
         assertThat(scheduler.promoteOne(pid)).isZero();
         assertThat(service.isAdmitted(USER_BASE + 2, pid, paying)).isTrue();
         assertThat(queueRedisStore.waitingScore(pid, next)).isNotNull();
         assertThat(redis.opsForZSet().zCard(RedisKeys.queueProcessing(pid))).isEqualTo(1);
 
-        seatMapRedisStore.putSoldOut(pid, false, properties.seatmap().snapshotTtl());
+        seatMapRedisStore.putSoldOut(pid, false);
         assertThat(scheduler.promoteOne(pid)).isEqualTo(1);
         assertThat(service.isAdmitted(USER_BASE + 3, pid, next)).isTrue();
     }

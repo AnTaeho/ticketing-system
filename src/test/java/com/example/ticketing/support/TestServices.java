@@ -140,11 +140,11 @@ public class TestServices {
     }
 
     public SeatMapQueryService seatMapQueryService(SeatMapRedisStore store, SeatMapBuilder builder) {
-        return new SeatMapQueryService(bean(SeatCatalog.class), builder, store, bean(InstanceId.class),
-                System::nanoTime, contextProperties(), meterRegistry());
+        return new SeatMapQueryService(bean(SeatCatalog.class), builder, store, System::nanoTime,
+                contextProperties(), meterRegistry());
     }
 
-    // 동시 요청이 single-flight 안에서 겹치도록 빌드를 늦춘다
+    // 동시 요청이 빌드 잠금 앞에서 겹치도록 빌드를 늦춘다
     public SeatMapBuilder slowSeatMapBuilder(long delayMs) {
         return new SeatMapBuilder(bean(SeatRepository.class), bean(JsonMapper.class), Clock.systemDefaultZone()) {
             @Override

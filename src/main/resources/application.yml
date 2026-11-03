@@ -77,9 +77,6 @@ ticketing:
   seatmap:
     snapshot-enabled: true
     snapshot-interval-ms: 1000
-    snapshot-ttl: 30s
-    local-cache: 1s
-    lease-ttl: 2s
   outbox:
     worker-enabled: true
     poll-interval-ms: 500

@@ -485,7 +485,7 @@ class QueueServiceTest {
     }
 
     private void markSoldOut(long pid, boolean soldOut) {
-        seatMapRedisStore.putSoldOut(pid, soldOut, properties.seatmap().snapshotTtl());
+        seatMapRedisStore.putSoldOut(pid, soldOut);
     }
 
     private Double leaveDeadline(long pid, String token) {
