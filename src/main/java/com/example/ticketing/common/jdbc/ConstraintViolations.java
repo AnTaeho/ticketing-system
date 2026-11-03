@@ -17,9 +17,6 @@ public final class ConstraintViolations {
             if (cause.getMessage() != null && cause.getMessage().contains(constraintName)) {
                 return true;
             }
-            if (cause.getCause() == cause) {
-                break;
-            }
         }
         return false;
     }

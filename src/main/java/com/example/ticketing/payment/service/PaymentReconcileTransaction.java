@@ -1,8 +1,6 @@
 package com.example.ticketing.payment.service;
 
 import com.example.ticketing.common.config.TicketingProperties;
-import com.example.ticketing.common.jdbc.RowCounts;
-import com.example.ticketing.common.jdbc.SqlIntervals;
 import com.example.ticketing.common.text.Texts;
 import com.example.ticketing.common.time.DbClock;
 import com.example.ticketing.payment.domain.DuePayment;
@@ -13,6 +11,7 @@ import com.example.ticketing.payment.repository.PaymentRepository;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
@@ -35,7 +34,7 @@ public class PaymentReconcileTransaction {
         this.paymentRepository = paymentRepository;
         this.dbClock = dbClock;
         this.notFoundCancelAfter = properties.payment().notFoundCancelAfter();
-        this.claimLeaseMicros = SqlIntervals.micros(properties.payment().reconcileClaimLease());
+        this.claimLeaseMicros = TimeUnit.MICROSECONDS.convert(properties.payment().reconcileClaimLease());
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
@@ -56,7 +55,7 @@ public class PaymentReconcileTransaction {
     // 끝난 결제는 건드리지 않는다. 바꿨으면 true
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public boolean reschedule(long paymentId, Duration delay, String lastError) {
-        return RowCounts.changedOne(paymentRepository.reschedule(paymentId, SqlIntervals.micros(delay),
-                Texts.abbreviate(lastError, Payment.MAX_LAST_ERROR)));
+        return paymentRepository.reschedule(paymentId, TimeUnit.MICROSECONDS.convert(delay),
+                Texts.abbreviate(lastError, Payment.MAX_LAST_ERROR)) == 1;
     }
 }

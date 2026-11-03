@@ -9,7 +9,6 @@ import com.example.ticketing.common.metrics.Metrics.ReflectOp;
 import com.example.ticketing.common.metrics.Metrics.Tag;
 import com.example.ticketing.common.redis.RedisFailures;
 import com.example.ticketing.common.redis.RedisUnavailableException;
-import com.example.ticketing.common.time.DbClock;
 import com.example.ticketing.queue.domain.QueueEntry;
 import com.example.ticketing.queue.domain.QueuePlacement;
 import com.example.ticketing.queue.dto.QueueEnterResult;
@@ -21,6 +20,7 @@ import com.example.ticketing.seat.service.SeatMapQueryService;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Clock;
+import java.time.LocalDateTime;
 import java.util.Map;
 import java.util.UUID;
 import java.util.function.LongSupplier;
@@ -38,7 +38,6 @@ public class QueueService {
     private final QueueRedisStore store;
     private final SeatCatalog seatCatalog;
     private final SeatMapQueryService seatMap;
-    private final DbClock dbClock;
     private final Clock clock;
     private final int capacity;
     private final long idleTimeoutMs;
@@ -51,13 +50,11 @@ public class QueueService {
     private final ThrottledWarn unavailableWarn;
     private final ThrottledWarn consumeWarn;
 
-    public QueueService(QueueRedisStore store, SeatCatalog seatCatalog, SeatMapQueryService seatMap, DbClock dbClock,
-                        Clock clock, LongSupplier nanoClock, TicketingProperties properties,
-                        MeterRegistry meterRegistry) {
+    public QueueService(QueueRedisStore store, SeatCatalog seatCatalog, SeatMapQueryService seatMap, Clock clock,
+                        LongSupplier nanoClock, TicketingProperties properties, MeterRegistry meterRegistry) {
         this.store = store;
         this.seatCatalog = seatCatalog;
         this.seatMap = seatMap;
-        this.dbClock = dbClock;
         this.clock = clock;
         this.unavailableWarn = new ThrottledWarn(log, nanoClock);
         this.consumeWarn = new ThrottledWarn(log, nanoClock);
@@ -71,9 +68,9 @@ public class QueueService {
         this.consumeFailure = meterRegistry.counter(Metrics.REDIS_REFLECT_FAILURE, Tag.OP, ReflectOp.QUEUE_CONSUME);
     }
 
-    // 상세 화면이 DB 시각으로 「예매하기」를 띄우므로 같은 기준으로 본다. 진입마다 DB를 치지 않게 추정 시각을 쓴다
+    // 진입마다 DB를 치지 않게 서버 시계로 거른다. 열림 경계는 선점 트랜잭션이 DB 시각으로 다시 본다
     public QueueEnterResult enter(long userId, long performanceId) {
-        seatCatalog.requireOpen(performanceId, dbClock.estimatedNow());
+        seatCatalog.requireOpen(performanceId, LocalDateTime.now(clock));
         String queueToken = userId + "." + UUID.randomUUID();
         long now = clock.millis();
         try {

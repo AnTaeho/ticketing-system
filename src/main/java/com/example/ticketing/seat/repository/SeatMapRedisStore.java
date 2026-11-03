@@ -3,7 +3,6 @@ package com.example.ticketing.seat.repository;
 import com.example.ticketing.common.redis.RedisFailures;
 import com.example.ticketing.common.redis.RedisKeys;
 import com.example.ticketing.common.redis.RedisScripts;
-import com.example.ticketing.common.redis.TicketingRedis;
 import java.time.Duration;
 import java.util.List;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -18,8 +17,8 @@ public class SeatMapRedisStore {
 
     private final StringRedisTemplate redis;
 
-    public SeatMapRedisStore(TicketingRedis ticketingRedis) {
-        this.redis = ticketingRedis.template();
+    public SeatMapRedisStore(StringRedisTemplate redis) {
+        this.redis = redis;
     }
 
     public String get(long performanceId) {

@@ -7,7 +7,6 @@ import com.example.ticketing.common.config.TicketingProperties;
 import com.example.ticketing.common.error.ApiException;
 import com.example.ticketing.common.error.ErrorCode;
 import com.example.ticketing.common.redis.RedisKeys;
-import com.example.ticketing.common.time.TestDbClock;
 import com.example.ticketing.queue.domain.QueueTokenStatus;
 import com.example.ticketing.queue.dto.QueueEnterResult;
 import com.example.ticketing.queue.dto.QueueHeartbeatResult;
@@ -35,7 +34,6 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.jdbc.core.JdbcTemplate;
 
 @IntegrationTest
 class QueueServiceTest {
@@ -49,8 +47,6 @@ class QueueServiceTest {
     private QueueRedisStore queueRedisStore;
     @Autowired
     private SeatMapRedisStore seatMapRedisStore;
-    @Autowired
-    private JdbcTemplate jdbcTemplate;
     @Autowired
     private TicketingProperties properties;
     @Autowired
@@ -193,28 +189,6 @@ class QueueServiceTest {
                     .isEqualTo(ErrorCode.NOT_OPEN);
             assertThat(testRedis.keys(pid)).isEmpty();
         }
-    }
-
-    @Test
-    @DisplayName("예매가 열렸는지는 DB 시각으로 판정한다")
-    void openCheckUsesDbTime() {
-        LocalDateTime now = fixtures.dbNow();
-        long show = fixtures.newShow();
-        long opensInAnHour = fixtures.newPerformance(show, now.plusHours(1), now.plusDays(1), 1, 1, 1);
-        long openedAnHourAgo = fixtures.newPerformance(show, now.minusHours(1), now.plusDays(1), 1, 1, 1);
-        QueueService dbAhead = services.queueService()
-                .dbClock(TestDbClock.withDbShift(jdbcTemplate, Duration.ofHours(2)))
-                .build();
-        QueueService dbBehind = services.queueService()
-                .dbClock(TestDbClock.withDbShift(jdbcTemplate, Duration.ofHours(-2)))
-                .build();
-
-        assertThat(dbAhead.enter(USER_BASE + 1, opensInAnHour).status()).isEqualTo(QueueTokenStatus.PROCESSING);
-        assertThatThrownBy(() -> dbBehind.enter(USER_BASE + 2, openedAnHourAgo))
-                .isInstanceOf(ApiException.class)
-                .extracting(e -> ((ApiException) e).getCode())
-                .isEqualTo(ErrorCode.NOT_OPEN);
-        assertThat(testRedis.keys(openedAnHourAgo)).isEmpty();
     }
 
     @Test

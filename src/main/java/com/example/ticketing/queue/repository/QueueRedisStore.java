@@ -3,7 +3,6 @@ package com.example.ticketing.queue.repository;
 import com.example.ticketing.common.redis.RedisFailures;
 import com.example.ticketing.common.redis.RedisKeys;
 import com.example.ticketing.common.redis.RedisScripts;
-import com.example.ticketing.common.redis.TicketingRedis;
 import com.example.ticketing.queue.domain.QueueEntry;
 import com.example.ticketing.queue.domain.QueuePlacement;
 import com.example.ticketing.queue.domain.QueueTokenStatus;
@@ -19,8 +18,8 @@ public class QueueRedisStore {
 
     private final StringRedisTemplate redis;
 
-    public QueueRedisStore(TicketingRedis ticketingRedis) {
-        this.redis = ticketingRedis.template();
+    public QueueRedisStore(StringRedisTemplate redis) {
+        this.redis = redis;
     }
 
     public QueuePlacement enter(QueueEntry entry) {

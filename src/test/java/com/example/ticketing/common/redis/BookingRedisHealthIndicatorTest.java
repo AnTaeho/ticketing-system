@@ -20,10 +20,10 @@ import org.springframework.boot.health.contributor.Status;
 import org.springframework.test.web.servlet.MockMvc;
 
 @IntegrationTest
-class TicketingRedisHealthIndicatorTest {
+class BookingRedisHealthIndicatorTest {
 
     @Autowired
-    private TicketingRedisHealthIndicator ticketingRedisHealthIndicator;
+    private BookingRedisHealthIndicator bookingRedisHealthIndicator;
     @Autowired
     private HealthEndpoint healthEndpoint;
     @Autowired
@@ -36,15 +36,15 @@ class TicketingRedisHealthIndicatorTest {
     private TestMvc testMvc;
 
     @Test
-    @DisplayName("예매 Redis가 PING에 답하면 UP이다")
+    @DisplayName("Redis가 PING에 답하면 UP이다")
     void upWhenRedisAnswers() {
-        assertThat(ticketingRedisHealthIndicator.health().getStatus()).isEqualTo(Status.UP);
+        assertThat(bookingRedisHealthIndicator.health().getStatus()).isEqualTo(Status.UP);
     }
 
     @Test
     @DisplayName("닫힌 포트면 1초 안에 DEGRADED와 원인을 돌려준다")
     void degradedFastWhenRedisDown() {
-        TicketingRedisHealthIndicator indicator = new TicketingRedisHealthIndicator(testRedis.dead());
+        BookingRedisHealthIndicator indicator = new BookingRedisHealthIndicator(testRedis.dead());
 
         long started = System.nanoTime();
         Health health = indicator.health();

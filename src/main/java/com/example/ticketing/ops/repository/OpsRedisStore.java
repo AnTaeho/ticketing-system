@@ -2,7 +2,6 @@ package com.example.ticketing.ops.repository;
 
 import com.example.ticketing.common.redis.RedisFailures;
 import com.example.ticketing.common.redis.RedisKeys;
-import com.example.ticketing.common.redis.TicketingRedis;
 import org.springframework.data.redis.core.Cursor;
 import org.springframework.data.redis.core.ScanOptions;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -16,8 +15,8 @@ public class OpsRedisStore {
 
     private final StringRedisTemplate redis;
 
-    public OpsRedisStore(TicketingRedis ticketingRedis) {
-        this.redis = ticketingRedis.template();
+    public OpsRedisStore(StringRedisTemplate redis) {
+        this.redis = redis;
     }
 
     public long waitingCount(long performanceId) {

@@ -28,25 +28,6 @@
     return e.code === 'NETWORK' || e.code === 'TIMEOUT';
   }
 
-  var clock = { offsetMs: 0, bestRttMs: Infinity };
-
-  // 응답 Date 헤더로 내 시계와 서버 시계의 차이를 잰다. 왕복이 가장 짧았던 측정을 쓴다
-  function noteServerTime(res, sentAt) {
-    var header = res.headers.get('Date');
-    if (!header) return;
-    var receivedAt = Date.now();
-    var rtt = receivedAt - sentAt;
-    var server = Date.parse(header);
-    if (isNaN(server) || rtt > clock.bestRttMs) return;
-    clock.bestRttMs = rtt;
-    // Date 헤더는 초 단위로 잘리므로 반 초를 더해 가운데로 맞춘다
-    clock.offsetMs = server + 500 - (sentAt + rtt / 2);
-  }
-
-  function serverNow() {
-    return Date.now() + clock.offsetMs;
-  }
-
   function readJson(res) {
     return res.text().then(function (text) {
       if (!text) return null;
@@ -74,9 +55,7 @@
       init.signal = controller.signal;
       timer = setTimeout(function () { timedOut = true; controller.abort(); }, opts.timeoutMs);
     }
-    var sentAt = Date.now();
     return fetch(path, init).then(function (res) {
-      noteServerTime(res, sentAt);
       return readJson(res).then(function (data) {
         clearTimeout(timer);
         if (res.ok) return data;
@@ -347,7 +326,6 @@
     post: function (path, body, options) { return request('POST', path, body, options); },
     del: function (path) { return request('DELETE', path); },
     poller: poller,
-    serverNow: serverNow,
     dateTime: dateTime,
     shortDateTime: shortDateTime,
     epochOf: epochOf,

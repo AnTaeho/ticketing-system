@@ -83,15 +83,15 @@ com.example.ticketing
 
 - 좌석 배정의 최종 판정은 DB 조건부 UPDATE의 영향 행 수다. Redis는 DB 앞의 게이트다.
 - 상태 전이는 `repository`의 native 조건부 UPDATE로만 한다. 엔티티 변경 감지로 상태를 바꾸지 않는다. 그래서 엔티티에는 setter와 상태 변경 메서드가 없다. 상태에 대한 판정(예: "결제가 아직 열려 있나")은 상태 enum에 둔다.
-- 영향 행 수는 `RowCounts`로 확인한다. 기대와 다르면 업무 실패는 `ApiException`, 불변식 위반은 `IllegalStateException`이다.
+- 영향 행 수는 그대로 비교한다(`updated == 1`). 기대와 다르면 업무 실패는 `ApiException`, 락 아래라 어긋날 수 없는 불변식 위반은 `RowCounts.requireExactly`의 `IllegalStateException`이다.
 - 상태를 바꾸는 트랜잭션은 `READ_COMMITTED`다. 락 순서는 부모 행(app_user → seat_hold/booking) → 좌석(id 오름차순)이다.
 - `SKIP LOCKED` 집기는 상태 변경과 같은 트랜잭션에서 한다.
 - 트랜잭션은 `*Transaction`의 선언형 `@Transactional`로만 연다. `TransactionTemplate`은 쓰지 않는다.
 
 ## 5. 시간
 
-- 만료·마감 판정은 DB 시각이다. native는 `NOW(6)`, JPQL은 `current_timestamp`(MySQL에서 `current_timestamp(6)`)로 비교한다. "지금 + 기간"은 SQL에서 바인드한 기간으로 계산한다. 마이크로초 기간 값은 `SqlIntervals.micros`로 만든다.
-- 자바에서 업무 시각이 필요하면 `DbClock`에서 받는다. 경과 시간(캐시 신선도, 간격)은 주입한 `LongSupplier` 나노 시계로 잰다. `System.currentTimeMillis()`·`nanoTime()`을 직접 부르지 않는다.
+- 만료·마감 판정은 DB 시각이다. native는 `NOW(6)`, JPQL은 `current_timestamp`(MySQL에서 `current_timestamp(6)`)로 비교한다. "지금 + 기간"은 SQL에서 바인드한 기간으로 계산한다. 마이크로초 기간 값은 `TimeUnit.MICROSECONDS.convert(duration)`으로 만든다.
+- 자바에서 판정 시각이 필요하면 `DbClock`에서 받는다. 요청마다 DB를 치지 않으려는 사전 확인(대기열 진입, 선점 전 오픈 확인)만 주입한 `Clock`으로 거르고, 경계는 트랜잭션 안의 DB 시각이 다시 판정한다. 경과 시간(캐시 신선도, 간격)은 주입한 `LongSupplier` 나노 시계로 잰다. `System.currentTimeMillis()`·`nanoTime()`을 직접 부르지 않는다.
 
 ## 6. Redis
 
@@ -117,7 +117,7 @@ com.example.ticketing
 ## 9. 메트릭과 로그
 
 - 메트릭 이름과 태그는 `common.metrics.Metrics`의 상수로만 쓴다. 이름은 `ticketing.<영역>.<사건>`, 태그 키는 결과를 나타낼 때 `result`를 쓴다.
-- 카운터는 생성자에서 미리 등록한다.
+- 카운터는 생성자에서 미리 등록한다. 태그 값이 여럿이면 `Metrics.counters`로 한 번에 등록해 태그 값으로 꺼낸다.
 - 로그는 `[영역] 문장 key=value` 형식이다. 반복될 수 있는 실패(장애 중 매 요청·매 주기)는 `ThrottledWarn`으로 남긴다. 예상하지 못한 예외는 스택과 함께 남긴다.
 
 ## 10. 주석

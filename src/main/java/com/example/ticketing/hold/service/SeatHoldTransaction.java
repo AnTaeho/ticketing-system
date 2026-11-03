@@ -3,7 +3,6 @@ package com.example.ticketing.hold.service;
 import com.example.ticketing.common.config.TicketingProperties;
 import com.example.ticketing.common.error.ApiException;
 import com.example.ticketing.common.error.ErrorCode;
-import com.example.ticketing.common.jdbc.RowCounts;
 import com.example.ticketing.common.time.DbClock;
 import com.example.ticketing.hold.domain.GateHold;
 import com.example.ticketing.hold.domain.SeatHold;
@@ -62,7 +61,7 @@ public class SeatHoldTransaction {
                 selection.seatIds().size(), selection.totalAmount(), expiresAt));
         int updated = seatRepository.availableOrExpiredToHeld(performanceId, selection.seatIds(), hold.getId(),
                 expiresAt);
-        if (!RowCounts.changedExactly(updated, selection.seatIds().size())) {
+        if (updated != selection.seatIds().size()) {
             throw new ApiException(ErrorCode.SEAT_STATE_CHANGED, Map.of("seatIds", selection.seatIds()));
         }
         return new HoldPlacement(hold.getId(), expiresAt);
@@ -73,7 +72,7 @@ public class SeatHoldTransaction {
     public GateHold heldToReleased(long userId, long holdId) {
         SeatHold hold = seatHoldRepository.lockByIdAndUserId(holdId, userId)
                 .orElseThrow(() -> new ApiException(ErrorCode.HOLD_NOT_FOUND, Map.of("holdId", holdId)));
-        if (!RowCounts.changedOne(seatHoldRepository.heldToReleased(holdId))) {
+        if (seatHoldRepository.heldToReleased(holdId) != 1) {
             throw new ApiException(ErrorCode.HOLD_NOT_CANCELLABLE,
                     Map.of("holdId", holdId, "status", hold.getStatus().name()));
         }

@@ -6,7 +6,6 @@ import com.example.ticketing.booking.service.BookingTransaction;
 import com.example.ticketing.common.config.TicketingProperties;
 import com.example.ticketing.common.redis.InstanceId;
 import com.example.ticketing.common.redis.SchedulerLease;
-import com.example.ticketing.common.redis.TicketingRedis;
 import com.example.ticketing.common.time.DbClock;
 import com.example.ticketing.hold.repository.SeatGateRedisStore;
 import com.example.ticketing.hold.repository.SeatHoldRepository;
@@ -45,6 +44,7 @@ import java.util.Optional;
 import org.springframework.boot.test.context.TestComponent;
 import org.springframework.context.ApplicationContext;
 import org.springframework.core.env.Environment;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import tools.jackson.databind.json.JsonMapper;
 
 // 테스트가 운영 서비스를 new로 조립하는 곳. 컨텍스트 빈을 기본으로 쓰고 바꿀 것만 끼운다. 생성자가 바뀌면 여기만 고친다
@@ -79,15 +79,15 @@ public class TestServices {
         return gateReflector(store, properties, meterRegistry());
     }
 
-    public static SeatGateRedisStore gateStore(TicketingRedis redis) {
+    public static SeatGateRedisStore gateStore(StringRedisTemplate redis) {
         return new SeatGateRedisStore(redis);
     }
 
-    public static QueueRedisStore queueStore(TicketingRedis redis) {
+    public static QueueRedisStore queueStore(StringRedisTemplate redis) {
         return new QueueRedisStore(redis);
     }
 
-    public static SeatMapRedisStore seatMapStore(TicketingRedis redis) {
+    public static SeatMapRedisStore seatMapStore(StringRedisTemplate redis) {
         return new SeatMapRedisStore(redis);
     }
 
@@ -129,12 +129,12 @@ public class TestServices {
         };
     }
 
-    public SchedulerLease lease(TicketingRedis redis) {
+    public SchedulerLease lease(StringRedisTemplate redis) {
         return new SchedulerLease(redis, new InstanceId());
     }
 
     public SchedulerLease newLease() {
-        return lease(bean(TicketingRedis.class));
+        return lease(bean(StringRedisTemplate.class));
     }
 
     public GateKeyReconcileSchedulerBuilder gateKeyReconcileScheduler() {
@@ -228,7 +228,6 @@ public class TestServices {
         private SeatGateRedisStore gateStore;
         private SeatHoldTransaction transaction;
         private QueueService queueService;
-        private DbClock dbClock;
 
         public SeatHoldServiceBuilder properties(TicketingProperties properties) {
             this.properties = properties;
@@ -250,11 +249,6 @@ public class TestServices {
             return this;
         }
 
-        public SeatHoldServiceBuilder dbClock(DbClock dbClock) {
-            this.dbClock = dbClock;
-            return this;
-        }
-
         // 반영 빈은 넘긴 게이트 저장소와 설정으로 새로 만든다
         public SeatHoldService build() {
             TicketingProperties resolved = properties != null ? properties : contextProperties();
@@ -262,7 +256,7 @@ public class TestServices {
             return new SeatHoldService(bean(SeatCatalog.class),
                     transaction != null ? transaction : bean(SeatHoldTransaction.class),
                     bean(SeatHoldRepository.class),
-                    dbClock != null ? dbClock : bean(DbClock.class), gate, gateReflector(gate, resolved),
+                    bean(DbClock.class), Clock.systemDefaultZone(), gate, gateReflector(gate, resolved),
                     queueService != null ? queueService : bean(QueueService.class),
                     new HoldMetrics(meterRegistry()), System::nanoTime, resolved);
         }
@@ -273,7 +267,6 @@ public class TestServices {
         private TicketingProperties properties;
         private QueueRedisStore store;
         private SeatMapQueryService seatMap;
-        private DbClock dbClock;
 
         public QueueServiceBuilder properties(TicketingProperties properties) {
             this.properties = properties;
@@ -290,15 +283,10 @@ public class TestServices {
             return this;
         }
 
-        public QueueServiceBuilder dbClock(DbClock dbClock) {
-            this.dbClock = dbClock;
-            return this;
-        }
-
         public QueueService build() {
             return new QueueService(store != null ? store : bean(QueueRedisStore.class), bean(SeatCatalog.class),
                     seatMap != null ? seatMap : bean(SeatMapQueryService.class),
-                    dbClock != null ? dbClock : bean(DbClock.class), Clock.systemDefaultZone(), System::nanoTime,
+                    Clock.systemDefaultZone(), System::nanoTime,
                     properties != null ? properties : contextProperties(), meterRegistry());
         }
     }

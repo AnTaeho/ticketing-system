@@ -1,7 +1,6 @@
 package com.example.ticketing.outbox.service;
 
 import com.example.ticketing.common.config.TicketingProperties;
-import com.example.ticketing.common.jdbc.RowCounts;
 import com.example.ticketing.common.text.Texts;
 import com.example.ticketing.common.time.DbClock;
 import com.example.ticketing.outbox.domain.DueOutboxTask;
@@ -73,14 +72,14 @@ public class OutboxTaskTransaction {
     // false면 그 사이 잠금이 지나 다른 워커가 다시 집었다. 결과는 그쪽이 쓴다
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public boolean processingToDone(ClaimedOutboxTask task) {
-        return RowCounts.changedOne(repository.processingToDone(task.id(), task.lockedUntil()));
+        return repository.processingToDone(task.id(), task.lockedUntil()) == 1;
     }
 
     // 다시 해 볼 횟수가 남았으면 PENDING(2^attempt초 뒤, 최대 max-backoff), 다 썼으면 FAILED. 다른 워커가 다시 집었으면 empty
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public Optional<OutboxTaskStatus> markFailedAttempt(ClaimedOutboxTask task, String error) {
         FailedAttempt failure = failedAttempt(task.attempt(), error);
-        return RowCounts.changedOne(repository.markFailedAttempt(task.id(), task.lockedUntil(), failure))
+        return repository.markFailedAttempt(task.id(), task.lockedUntil(), failure) == 1
                 ? Optional.of(failure.status())
                 : Optional.empty();
     }

@@ -1,8 +1,6 @@
 package com.example.ticketing.fakepg.service;
 
 import com.example.ticketing.common.config.TicketingProperties;
-import com.example.ticketing.common.jdbc.RowCounts;
-import com.example.ticketing.common.jdbc.SqlIntervals;
 import com.example.ticketing.fakepg.domain.FakePgDecider;
 import com.example.ticketing.fakepg.domain.FakePgOrder;
 import com.example.ticketing.fakepg.domain.FakePgScenario;
@@ -10,6 +8,7 @@ import com.example.ticketing.fakepg.domain.FakePgStatus;
 import com.example.ticketing.fakepg.dto.FakePgReply;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 
@@ -34,7 +33,7 @@ public class FakePgService {
         this.decider = decider;
         this.sleeper = sleeper;
         TicketingProperties.FakePg fakePg = properties.fakePg();
-        this.staleMicros = SqlIntervals.micros(fakePg.slowDelay().plus(fakePg.staleMargin()));
+        this.staleMicros = TimeUnit.MICROSECONDS.convert(fakePg.slowDelay().plus(fakePg.staleMargin()));
     }
 
     public FakePgReply approve(String orderId, int amount, FakePgScenario scenario) {
@@ -50,7 +49,7 @@ public class FakePgService {
         int updated = plan.approve()
                 ? transaction.processingToApproved(orderId, pgTxId)
                 : transaction.processingToDeclined(orderId);
-        if (RowCounts.changedOne(updated)) {
+        if (updated == 1) {
             return FakePgReply.of(orderId, plan.approve() ? FakePgStatus.APPROVED : FakePgStatus.DECLINED, pgTxId);
         }
         // 지연 중에 행이 바뀌었으면 지금 행을 그대로 알린다
@@ -80,7 +79,7 @@ public class FakePgService {
                 return FakePgReply.of(tx);
             }
             int updated = transaction.approvedToCancelled(orderId);
-            if (RowCounts.changedOne(updated)) {
+            if (updated == 1) {
                 return FakePgReply.of(orderId, FakePgStatus.CANCELLED, tx.getPgTxId());
             }
         }
@@ -94,7 +93,7 @@ public class FakePgService {
             return row;
         }
         int updated = transaction.staleProcessingToDeclined(orderId, staleMicros);
-        return RowCounts.changedOne(updated) ? reader.find(orderId) : row;
+        return updated == 1 ? reader.find(orderId) : row;
     }
 
     // 끊겨도 PROCESSING에 묶이지 않게 결과는 쓰고 끊김 표시만 되살린다

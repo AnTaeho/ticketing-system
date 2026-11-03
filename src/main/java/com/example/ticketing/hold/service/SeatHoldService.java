@@ -20,7 +20,9 @@ import com.example.ticketing.hold.repository.SeatHoldRepository;
 import com.example.ticketing.queue.service.QueueService;
 import com.example.ticketing.seat.dto.SeatSelection;
 import com.example.ticketing.seat.service.SeatCatalog;
+import java.time.Clock;
 import java.time.Duration;
+import java.time.LocalDateTime;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.Semaphore;
@@ -37,6 +39,7 @@ public class SeatHoldService {
     private final SeatHoldTransaction seatHoldTransaction;
     private final SeatHoldRepository seatHoldRepository;
     private final DbClock dbClock;
+    private final Clock clock;
     private final SeatGateRedisStore gateStore;
     private final SeatGateReflector gateReflector;
     private final QueueService queueService;
@@ -46,7 +49,7 @@ public class SeatHoldService {
     private final ThrottledWarn redisWarn;
 
     public SeatHoldService(SeatCatalog seatCatalog, SeatHoldTransaction seatHoldTransaction,
-                           SeatHoldRepository seatHoldRepository, DbClock dbClock,
+                           SeatHoldRepository seatHoldRepository, DbClock dbClock, Clock clock,
                            SeatGateRedisStore gateStore, SeatGateReflector gateReflector,
                            QueueService queueService, HoldMetrics metrics, LongSupplier nanoClock,
                            TicketingProperties properties) {
@@ -54,6 +57,7 @@ public class SeatHoldService {
         this.seatHoldTransaction = seatHoldTransaction;
         this.seatHoldRepository = seatHoldRepository;
         this.dbClock = dbClock;
+        this.clock = clock;
         this.gateStore = gateStore;
         this.gateReflector = gateReflector;
         this.queueService = queueService;
@@ -65,8 +69,8 @@ public class SeatHoldService {
 
     // 토큰은 커밋까지 성공했을 때만 소모한다. 게이트·DB에서 진 사용자는 같은 토큰으로 다른 좌석을 고른다
     public CreateHoldResult hold(CreateHoldCommand command) {
-        // 대기열과 같은 DB 추정 시각으로 거르는 사전 확인이다. 경계 판정은 트랜잭션 안에서 DB 시각으로 다시 한다
-        seatCatalog.requireOpen(command.performanceId(), dbClock.estimatedNow());
+        // 게이트를 부르기 전 서버 시계로 거르는 사전 확인이다. 경계 판정은 트랜잭션 안에서 DB 시각으로 다시 한다
+        seatCatalog.requireOpen(command.performanceId(), LocalDateTime.now(clock));
         SeatSelection selection = seatCatalog.validateSeats(command.performanceId(), command.seatIds());
         GateHold gateHold = new GateHold(command.userId(), command.performanceId(), UUID.randomUUID().toString(),
                 selection.seatIds());

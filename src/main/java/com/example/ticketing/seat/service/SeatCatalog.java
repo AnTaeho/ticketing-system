@@ -54,7 +54,7 @@ public class SeatCatalog {
         return previous != null ? previous : loaded;
     }
 
-    // 회차가 열려 있지 않으면 409 NOT_OPEN. now는 DB 시각이나 DB 시각 추정값을 넘긴다
+    // 회차가 열려 있지 않으면 409 NOT_OPEN. 판정에는 DB 시각을, 사전 확인에는 서버 시각을 넘긴다
     public void requireOpen(long performanceId, LocalDateTime now) {
         if (performance(performanceId).stateAt(now) != PerformanceState.OPEN) {
             throw new ApiException(ErrorCode.NOT_OPEN, Map.of("performanceId", performanceId));
