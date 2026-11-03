@@ -1,8 +1,9 @@
 package com.example.ticketing.outbox.service;
 
+import com.example.ticketing.outbox.domain.OutboxTask;
 import com.example.ticketing.outbox.domain.OutboxTaskType;
 import com.example.ticketing.outbox.dto.OutboxPayload;
-import com.example.ticketing.outbox.repository.OutboxTaskJdbcRepository;
+import com.example.ticketing.outbox.repository.OutboxTaskRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Propagation;
@@ -14,11 +15,11 @@ import tools.jackson.databind.json.JsonMapper;
 @RequiredArgsConstructor
 public class OutboxWriter {
 
-    private final OutboxTaskJdbcRepository repository;
+    private final OutboxTaskRepository repository;
     private final JsonMapper jsonMapper;
 
     @Transactional(propagation = Propagation.MANDATORY)
     public void write(OutboxTaskType type, long aggregateId, OutboxPayload payload) {
-        repository.insert(type, aggregateId, jsonMapper.writeValueAsString(payload));
+        repository.save(OutboxTask.pending(type, aggregateId, jsonMapper.writeValueAsString(payload)));
     }
 }
