@@ -1,66 +1,75 @@
 package com.example.ticketing.common.config;
 
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.DecimalMax;
+import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Positive;
 import java.time.Duration;
+import org.hibernate.validator.constraints.time.DurationMin;
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.validation.annotation.Validated;
 
 // *Enabled는 @ConditionalOnProperty가 같은 키를 읽는다. 키를 한곳에서 보이려고 접근자를 안 불러도 여기에 둔다
+// 값이 빠지거나 범위를 벗어나면 기동에서 막는다
+@Validated
 @ConfigurationProperties("ticketing")
 public record TicketingProperties(
-        Seed seed,
-        Hold hold,
-        Payment payment,
-        Gate gate,
-        Queue queue,
-        Seatmap seatmap,
-        Outbox outbox,
-        Pg pg,
-        FakePg fakePg
+        @NotNull @Valid Seed seed,
+        @NotNull @Valid Hold hold,
+        @NotNull @Valid Payment payment,
+        @NotNull @Valid Gate gate,
+        @NotNull @Valid Queue queue,
+        @NotNull @Valid Seatmap seatmap,
+        @NotNull @Valid Outbox outbox,
+        @NotNull @Valid Pg pg,
+        @NotNull @Valid FakePg fakePg
 ) {
 
     public record Seed(boolean enabled) {
     }
 
     public record Hold(
-            Duration ttl,
-            int maxSeats,
+            @NotNull @DurationMin(millis = 1) Duration ttl,
+            @Positive int maxSeats,
             boolean expiryEnabled,
-            long expiryScanMs, // @Scheduled 전용
-            int expiryBatchSize,
-            Duration reholdCooldown
+            @Positive long expiryScanMs, // @Scheduled 전용
+            @Positive int expiryBatchSize,
+            @NotNull @DurationMin Duration reholdCooldown
     ) {
     }
 
     public record Payment(
-            Duration payDeadline,
-            Duration gateKeyMargin,
-            Duration requestedRecheckAfter,
-            Duration processingRecheckAfter,
-            Duration unknownRecheckAfter,
-            Duration notFoundCancelAfter,
+            @NotNull @DurationMin(millis = 1) Duration payDeadline,
+            @NotNull @DurationMin Duration gateKeyMargin,
+            @NotNull @DurationMin Duration requestedRecheckAfter,
+            @NotNull @DurationMin Duration processingRecheckAfter,
+            @NotNull @DurationMin Duration unknownRecheckAfter,
+            @NotNull @DurationMin Duration notFoundCancelAfter,
             boolean reconcileEnabled,
-            long reconcileScanMs, // @Scheduled 전용
-            int reconcileBatchSize,
-            Duration reconcileClaimLease
+            @Positive long reconcileScanMs, // @Scheduled 전용
+            @Positive int reconcileBatchSize,
+            @NotNull @DurationMin(millis = 1) Duration reconcileClaimLease
     ) {
     }
 
     public record Gate(
             boolean enabled,
-            int fallbackMaxConcurrency,
+            @Positive int fallbackMaxConcurrency,
             boolean reconcileEnabled,
-            long reconcileScanMs // @Scheduled 전용
+            @Positive long reconcileScanMs // @Scheduled 전용
     ) {
     }
 
     public record Queue(
-            int capacity,
-            Duration processingMaxSession,
-            Duration processingIdleTimeout,
-            Duration processingLeaveGrace,
-            Duration waitingLeaveGrace,
-            Duration waitingTokenTtl,
+            @Positive int capacity,
+            @NotNull @DurationMin(millis = 1) Duration processingMaxSession,
+            @NotNull @DurationMin(millis = 1) Duration processingIdleTimeout,
+            @NotNull @DurationMin Duration processingLeaveGrace,
+            @NotNull @DurationMin Duration waitingLeaveGrace,
+            @NotNull @DurationMin(millis = 1) Duration waitingTokenTtl,
             boolean promoteEnabled,
-            long promoteIntervalMs
+            @Positive long promoteIntervalMs
     ) {
 
         // 입장 직후 처리열 자리가 남는 시간. 생존 신호가 오기 전까지다
@@ -73,29 +82,33 @@ public record TicketingProperties(
     // 로컬 캐시와 스케줄러 리스 길이는 주기에서 정한다
     public record Seatmap(
             boolean snapshotEnabled,
-            long snapshotIntervalMs
+            @Positive long snapshotIntervalMs
     ) {
     }
 
     public record Outbox(
             boolean workerEnabled,
-            long pollIntervalMs, // @Scheduled 전용
-            int batchSize,
-            Duration lockDuration,
-            int maxAttempts,
-            Duration maxBackoff
+            @Positive long pollIntervalMs, // @Scheduled 전용
+            @Positive int batchSize,
+            @NotNull @DurationMin(millis = 1) Duration lockDuration,
+            @Positive int maxAttempts,
+            @NotNull @DurationMin(seconds = 1) Duration maxBackoff
     ) {
     }
 
-    public record Pg(String baseUrl, Duration connectTimeout, Duration readTimeout) {
+    public record Pg(
+            @NotNull String baseUrl,
+            @NotNull @DurationMin(millis = 1) Duration connectTimeout,
+            @NotNull @DurationMin(millis = 1) Duration readTimeout
+    ) {
     }
 
     public record FakePg(
-            Duration delayMin,
-            Duration delayMax,
-            double declineRate,
-            double slowRate,
-            Duration slowDelay
+            @NotNull @DurationMin Duration delayMin,
+            @NotNull @DurationMin Duration delayMax,
+            @DecimalMin("0") @DecimalMax("1") double declineRate,
+            @DecimalMin("0") @DecimalMax("1") double slowRate,
+            @NotNull @DurationMin Duration slowDelay
     ) {
     }
 }

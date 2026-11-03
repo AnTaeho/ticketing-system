@@ -15,6 +15,10 @@ import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.boot.context.properties.bind.validation.BindValidationException;
+import org.springframework.boot.test.context.ConfigDataApplicationContextInitializer;
+import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.ApplicationContext;
 
 @IntegrationTest
@@ -62,5 +66,24 @@ class TicketingPropertiesTest {
                 .forEach(type -> assertThat(context.getBeanProvider(type).getIfAvailable()).as(type.getSimpleName())
                         .isNull());
         assertThat(context.getBeanProvider(HoldExpiryTransaction.class).getIfAvailable()).isNotNull();
+    }
+
+    @Test
+    @DisplayName("설정 값이 범위를 벗어나면(배치 0, 음수 기간, 1을 넘는 비율) 기동이 실패한다")
+    void invalidValuesFailStartup() {
+        ApplicationContextRunner runner = new ApplicationContextRunner()
+                .withInitializer(new ConfigDataApplicationContextInitializer())
+                .withUserConfiguration(PropertiesOnly.class);
+
+        runner.run(context -> assertThat(context).hasNotFailed().hasSingleBean(TicketingProperties.class));
+        List.of("ticketing.outbox.batch-size=0", "ticketing.hold.ttl=-1s", "ticketing.fake-pg.decline-rate=1.5")
+                .forEach(invalid -> runner.withPropertyValues(invalid)
+                        .run(context -> assertThat(context.getStartupFailure()).as(invalid)
+                                .hasRootCauseInstanceOf(BindValidationException.class)));
+    }
+
+    // @Configuration을 달면 이 테스트 클래스의 컨텍스트 설정으로 잡히므로 달지 않는다
+    @EnableConfigurationProperties(TicketingProperties.class)
+    static class PropertiesOnly {
     }
 }
