@@ -3,11 +3,13 @@ package com.example.ticketing.hold.repository;
 import com.example.ticketing.hold.domain.LiveGateSeat;
 import com.example.ticketing.hold.domain.SeatHold;
 import com.example.ticketing.hold.dto.ActiveHoldResult;
+import jakarta.persistence.LockModeType;
 import java.time.LocalDateTime;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -52,10 +54,12 @@ public interface SeatHoldRepository extends JpaRepository<SeatHold, Long> {
     List<String> findLiveUserHoldTokens(@Param("performanceId") long performanceId,
                                         @Param("tokens") Collection<String> tokens);
 
-    @Query(value = "SELECT * FROM seat_hold WHERE hold_id = :id AND user_id = :userId FOR UPDATE", nativeQuery = true)
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select h from SeatHold h where h.id = :id and h.userId = :userId")
     Optional<SeatHold> lockByIdAndUserId(@Param("id") long id, @Param("userId") long userId);
 
-    @Query(value = "SELECT * FROM seat_hold WHERE hold_id = :id FOR UPDATE", nativeQuery = true)
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select h from SeatHold h where h.id = :id")
     Optional<SeatHold> lockById(@Param("id") long id);
 
     @Modifying(clearAutomatically = true, flushAutomatically = true)

@@ -215,8 +215,8 @@ class PaymentConcurrencyTest {
             int waiting = 0;
             for (long holdId : holdIds) {
                 Long count = jdbcTemplate.queryForObject(
-                        "SELECT COUNT(*) FROM information_schema.PROCESSLIST WHERE info LIKE ?", Long.class,
-                        "SELECT * FROM seat_hold WHERE hold_id = " + holdId + " AND user_id = % FOR UPDATE");
+                        "SELECT COUNT(*) FROM information_schema.PROCESSLIST WHERE id <> CONNECTION_ID() AND info LIKE ?",
+                        Long.class, "select % from seat_hold % where %hold_id=" + holdId + " and %user_id=% for update%");
                 waiting += count == null ? 0 : count.intValue();
             }
             return waiting >= holdIds.length;

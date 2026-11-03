@@ -5,11 +5,13 @@ import com.example.ticketing.seat.domain.PerformanceInfo;
 import com.example.ticketing.seat.domain.Seat;
 import com.example.ticketing.seat.domain.SeatInfo;
 import com.example.ticketing.seat.domain.SeatMapSeat;
+import jakarta.persistence.LockModeType;
 import java.time.LocalDateTime;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -72,8 +74,8 @@ public interface SeatRepository extends JpaRepository<Seat, Long> {
             + "where s.holdId in :holdIds and s.status = HELD order by s.id")
     List<HeldSeat> findHeldSeats(@Param("holdIds") Collection<Long> holdIds);
 
-    @Query(value = "SELECT seat_id FROM seat WHERE hold_id = :holdId AND status = 'HELD' ORDER BY seat_id FOR UPDATE",
-            nativeQuery = true)
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select s.id from Seat s where s.holdId = :holdId and s.status = HELD order by s.id")
     List<Long> lockHeldSeatIds(@Param("holdId") long holdId);
 
     // 결제 중 좌석을 남이 가져가지 못하게 held_until을 결제 마감까지 늘린다
@@ -102,8 +104,8 @@ public interface SeatRepository extends JpaRepository<Seat, Long> {
              WHERE hold_id IN (:holdIds) AND status = 'HELD'""", nativeQuery = true)
     int heldToAvailableOfHolds(@Param("holdIds") Collection<Long> holdIds);
 
-    @Query(value = "SELECT seat_id FROM seat WHERE hold_id = :holdId AND status = 'SOLD' ORDER BY seat_id FOR UPDATE",
-            nativeQuery = true)
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select s.id from Seat s where s.holdId = :holdId and s.status = SOLD order by s.id")
     List<Long> lockSoldSeatIds(@Param("holdId") long holdId);
 
     // 예매 취소 때만 부른다. hold_id를 비워 다른 사용자가 다시 잡을 수 있게 한다

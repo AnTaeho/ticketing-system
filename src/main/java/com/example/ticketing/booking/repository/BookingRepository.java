@@ -2,9 +2,11 @@ package com.example.ticketing.booking.repository;
 
 import com.example.ticketing.booking.domain.Booking;
 import com.example.ticketing.booking.dto.BookingResult;
+import jakarta.persistence.LockModeType;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -42,7 +44,8 @@ public interface BookingRepository extends JpaRepository<Booking, Long> {
     @Query("select case when pay.status = CANCELLED then true else false end from Payment pay where pay.id = :paymentId")
     Optional<Boolean> findPaymentRefunded(@Param("paymentId") long paymentId);
 
-    @Query(value = "SELECT * FROM booking WHERE booking_id = :id AND user_id = :userId FOR UPDATE", nativeQuery = true)
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select b from Booking b where b.id = :id and b.userId = :userId")
     Optional<Booking> lockByIdAndUserId(@Param("id") long id, @Param("userId") long userId);
 
     @Modifying(clearAutomatically = true, flushAutomatically = true)
