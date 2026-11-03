@@ -7,7 +7,6 @@ import com.example.ticketing.payment.dto.ClaimedPayment;
 import com.example.ticketing.payment.repository.PaymentRepository;
 import java.time.Duration;
 import java.util.List;
-import java.util.concurrent.TimeUnit;
 import org.springframework.data.domain.Limit;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Isolation;
@@ -40,7 +39,7 @@ public class PaymentReconcileTransaction {
     // 끝난 결제는 건드리지 않는다. 바꿨으면 true
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public boolean reschedule(long paymentId, Duration delay, String lastError) {
-        return paymentRepository.reschedule(paymentId, TimeUnit.MICROSECONDS.convert(delay),
+        return paymentRepository.reschedule(paymentId, delay.toNanos(),
                 Texts.abbreviate(lastError, Payment.MAX_LAST_ERROR)) == 1;
     }
 }

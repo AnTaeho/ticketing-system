@@ -19,7 +19,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 public interface PaymentRepository extends JpaRepository<Payment, Long> {
 
-    // 조건부 UPDATE는 모두 flush·clear한다. 같은 트랜잭션에서 뒤이어 읽는 엔티티가 바뀌기 전 값으로 남지 않게
+    // bulk UPDATE는 모두 flush·clear한다. 같은 트랜잭션에서 뒤이어 읽는 엔티티가 바뀌기 전 값으로 남지 않게
 
     Optional<Payment> findByUserIdAndIdempotencyKey(Long userId, String idempotencyKey);
 
@@ -56,23 +56,23 @@ public interface PaymentRepository extends JpaRepository<Payment, Long> {
              where p.id in :ids""")
     int lease(@Param("ids") Collection<Long> ids, @Param("leaseNanos") long leaseNanos);
 
-    // 대사가 다음 확인 시각을 정한다. 넘긴 오류가 없으면 이전 last_error를 둔다
+    // 대사가 다음 확인 시각을 정한다. 결제를 잠그지 않아 확정과 겹칠 수 있어 열린 결제만 바꾼다. 넘긴 오류가 없으면 이전 last_error를 둔다
     @Modifying(clearAutomatically = true, flushAutomatically = true)
-    @Query(value = """
-            UPDATE booking_payment
-               SET next_check_at = DATE_ADD(NOW(6), INTERVAL :delayMicros MICROSECOND),
-                   last_error = COALESCE(:lastError, last_error), updated_at = NOW(6)
-             WHERE payment_id = :id AND status IN ('REQUESTED', 'UNKNOWN')""", nativeQuery = true)
-    int reschedule(@Param("id") long id, @Param("delayMicros") long delayMicros,
+    @Query("""
+            update Payment p
+               set p.nextCheckAt = current_timestamp + (:delayNanos) nanosecond,
+                   p.lastError = coalesce(:lastError, p.lastError), p.updatedAt = current_timestamp
+             where p.id = :id and p.status in (REQUESTED, UNKNOWN)""")
+    int reschedule(@Param("id") long id, @Param("delayNanos") long delayNanos,
                    @Param("lastError") String lastError);
 
-    // 이미 확정된 결제는 건드리지 않는다
+    // hold를 잠그지 않아 대사의 확정과 겹칠 수 있다. 이미 확정된 결제는 건드리지 않는다
     @Modifying(clearAutomatically = true, flushAutomatically = true)
-    @Query(value = """
-            UPDATE booking_payment
-               SET status = 'UNKNOWN', last_error = :lastError,
-                   next_check_at = DATE_ADD(NOW(6), INTERVAL :recheckMicros MICROSECOND), updated_at = NOW(6)
-             WHERE payment_id = :id AND status = 'REQUESTED'""", nativeQuery = true)
+    @Query("""
+            update Payment p
+               set p.status = UNKNOWN, p.lastError = :lastError,
+                   p.nextCheckAt = current_timestamp + (:recheckNanos) nanosecond, p.updatedAt = current_timestamp
+             where p.id = :id and p.status = REQUESTED""")
     int requestedToUnknown(@Param("id") long id, @Param("lastError") String lastError,
-                           @Param("recheckMicros") long recheckMicros);
+                           @Param("recheckNanos") long recheckNanos);
 }

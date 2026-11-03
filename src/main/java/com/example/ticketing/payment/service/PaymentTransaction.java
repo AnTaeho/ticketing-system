@@ -35,7 +35,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
-import java.util.concurrent.TimeUnit;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
@@ -55,7 +54,7 @@ public class PaymentTransaction {
     private final Clock clock;
     private final Duration payDeadline;
     private final Duration requestedRecheckAfter;
-    private final long unknownRecheckMicros;
+    private final long unknownRecheckNanos;
 
     public PaymentTransaction(PaymentRepository paymentRepository, PaymentReader paymentReader,
                               SeatHoldRepository seatHoldRepository, SeatRepository seatRepository,
@@ -72,7 +71,7 @@ public class PaymentTransaction {
         this.clock = clock;
         this.payDeadline = properties.payment().payDeadline();
         this.requestedRecheckAfter = properties.payment().requestedRecheckAfter();
-        this.unknownRecheckMicros = TimeUnit.MICROSECONDS.convert(properties.payment().unknownRecheckAfter());
+        this.unknownRecheckNanos = properties.payment().unknownRecheckAfter().toNanos();
     }
 
     // hold 행 락이 같은 hold의 결제 시작을 줄 세운다. READ_COMMITTED라 기다린 동안 커밋된 결제가 락 뒤의 findByHoldId에서 보인다
@@ -148,7 +147,7 @@ public class PaymentTransaction {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public PaymentSettlement requestedToUnknown(long paymentId, String detail) {
         paymentRepository.requestedToUnknown(paymentId, Texts.abbreviate(detail, Payment.MAX_LAST_ERROR),
-                unknownRecheckMicros);
+                unknownRecheckNanos);
         Payment payment = paymentRepository.findById(paymentId).orElseThrow(() -> paymentNotFound(paymentId));
         return PaymentSettlement.seatsUnchanged(paymentReader.resultOf(payment));
     }

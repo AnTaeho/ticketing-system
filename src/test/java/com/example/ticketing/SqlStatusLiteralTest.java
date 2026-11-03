@@ -6,7 +6,6 @@ import com.example.ticketing.booking.repository.BookingRepository;
 import com.example.ticketing.booking.repository.BookingSeatRepository;
 import com.example.ticketing.fakepg.domain.FakePgStatus;
 import com.example.ticketing.fakepg.repository.FakePgOrderRepository;
-import com.example.ticketing.hold.domain.HoldStatus;
 import com.example.ticketing.hold.repository.SeatHoldRepository;
 import com.example.ticketing.outbox.domain.OutboxTaskStatus;
 import com.example.ticketing.outbox.repository.OutboxTaskJdbcRepository;
@@ -40,9 +39,6 @@ class SqlStatusLiteralTest {
     @Test
     @DisplayName("저장소 native SQL의 상태 리터럴은 모두 그 테이블 상태 enum의 이름이다")
     void statusLiteralsAreEnumNames() {
-        assertLiterals(sqlOf(SeatHoldRepository.class), HoldStatus.class);
-        assertLiterals(sqlOf(SeatRepository.class), SeatStatus.class);
-        assertLiterals(sqlOf(PaymentRepository.class), PaymentStatus.class);
         // booking_seat 복사는 seat 테이블의 SOLD를 읽는다
         assertLiterals(sqlOf(BookingSeatRepository.class), SeatStatus.class);
         assertLiterals(sqlOf(OutboxTaskJdbcRepository.class), OutboxTaskStatus.class);

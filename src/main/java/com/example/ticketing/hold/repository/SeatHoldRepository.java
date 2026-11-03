@@ -21,7 +21,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 public interface SeatHoldRepository extends JpaRepository<SeatHold, Long> {
 
-    // 조건부 UPDATE는 모두 flush·clear한다. 같은 트랜잭션에서 뒤이어 읽는 엔티티가 바뀌기 전 값으로 남지 않게
+    // bulk UPDATE는 모두 flush·clear한다. 같은 트랜잭션에서 뒤이어 읽는 엔티티가 바뀌기 전 값으로 남지 않게
 
     Optional<SeatHold> findByIdAndUserId(Long id, Long userId);
 
@@ -78,10 +78,10 @@ public interface SeatHoldRepository extends JpaRepository<SeatHold, Long> {
              order by h.id""")
     List<ClaimedHold> claimExpired(Limit limit);
 
-    // 결제 중(PAYING)은 대상이 아니다. 결제 대사가 결론을 낸다
+    // claimExpired로 잠근 hold를 한 문장으로 만료한다. 결제 중(PAYING)은 대상이 아니다. 결제 대사가 결론을 낸다
     @Modifying(clearAutomatically = true, flushAutomatically = true)
-    @Query(value = """
-            UPDATE seat_hold SET status = 'EXPIRED', updated_at = NOW(6)
-             WHERE hold_id IN (:ids) AND status = 'HELD'""", nativeQuery = true)
+    @Query("""
+            update SeatHold h set h.status = EXPIRED, h.updatedAt = current_timestamp
+             where h.id in :ids and h.status = HELD""")
     int heldToExpired(@Param("ids") Collection<Long> ids);
 }

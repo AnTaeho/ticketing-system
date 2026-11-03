@@ -1,5 +1,6 @@
 package com.example.ticketing.hold.service;
 
+import com.example.ticketing.common.jdbc.RowCounts;
 import com.example.ticketing.hold.domain.ClaimedHold;
 import com.example.ticketing.hold.dto.HoldExpiry;
 import com.example.ticketing.hold.repository.SeatHoldRepository;
@@ -33,7 +34,8 @@ public class HoldExpiryTransaction {
                 .collect(Collectors.groupingBy(HeldSeat::holdId,
                         Collectors.mapping(HeldSeat::seatId, Collectors.toList())));
 
-        seatHoldRepository.heldToExpired(ids);
+        RowCounts.requireExactly(seatHoldRepository.heldToExpired(ids), ids.size(), "hold EXPIRED");
+        // 좌석은 잠그지 않아 기한이 지난 좌석을 남이 이미 잡았을 수 있으므로 hold_id 조건부 UPDATE로 푼다
         seatRepository.heldToAvailableOfHolds(ids);
 
         return claimed.stream()
