@@ -3,7 +3,6 @@ package com.example.ticketing.outbox.service;
 import com.example.ticketing.outbox.domain.OutboxTaskType;
 import com.example.ticketing.outbox.dto.OutboxPayload;
 import com.example.ticketing.outbox.repository.OutboxTaskJdbcRepository;
-import java.util.Objects;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Propagation;
@@ -19,9 +18,7 @@ public class OutboxWriter {
     private final JsonMapper jsonMapper;
 
     @Transactional(propagation = Propagation.MANDATORY)
-    public long write(OutboxTaskType type, long aggregateId, OutboxPayload payload) {
-        Objects.requireNonNull(type, "type");
-        Objects.requireNonNull(payload, "payload");
-        return repository.insert(type, aggregateId, jsonMapper.writeValueAsString(payload));
+    public void write(OutboxTaskType type, long aggregateId, OutboxPayload payload) {
+        repository.insert(type, aggregateId, jsonMapper.writeValueAsString(payload));
     }
 }

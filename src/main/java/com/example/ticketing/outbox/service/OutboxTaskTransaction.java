@@ -4,24 +4,19 @@ import com.example.ticketing.common.config.TicketingProperties;
 import com.example.ticketing.common.text.Texts;
 import com.example.ticketing.common.time.DbClock;
 import com.example.ticketing.outbox.domain.DueOutboxTask;
-import com.example.ticketing.outbox.domain.FailedAttempt;
 import com.example.ticketing.outbox.domain.OutboxTask;
 import com.example.ticketing.outbox.domain.OutboxTaskStatus;
-import com.example.ticketing.outbox.domain.OutboxTaskType;
 import com.example.ticketing.outbox.dto.ClaimedOutboxTask;
 import com.example.ticketing.outbox.repository.OutboxTaskJdbcRepository;
 import java.time.Duration;
 import java.time.LocalDateTime;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 // 집기와 PROCESSING 표시를 한 트랜잭션에서 하고, 처리 결과(완료·실패)는 집은 그 작업(id + locked_until)일 때만 쓴다
-@Slf4j
 @Component
 public class OutboxTaskTransaction {
 
@@ -43,29 +38,17 @@ public class OutboxTaskTransaction {
         this.maxBackoffSeconds = properties.outbox().maxBackoff().toSeconds();
     }
 
-    // 모르는 종류(옛 버전이나 잘못 들어간 행)는 집지 않고 실패로 기록한다
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public List<ClaimedOutboxTask> claim(int batch) {
-        List<KnownTask> known = new ArrayList<>();
-        for (DueOutboxTask task : repository.claimDue(batch)) {
-            Optional<OutboxTaskType> type = OutboxTaskType.parse(task.taskType());
-            if (type.isPresent()) {
-                known.add(new KnownTask(task, type.get()));
-            } else {
-                FailedAttempt failure = failedAttempt(task.attempt(), "핸들러 없음: " + task.taskType());
-                repository.markFailedAttemptUnclaimed(task.id(), failure);
-                log.warn("[outbox] 모르는 작업 종류라 실패로 기록했다 taskId={} type={} status={}", task.id(),
-                        task.taskType(), failure.status());
-            }
-        }
-        if (known.isEmpty()) {
+        List<DueOutboxTask> due = repository.claimDue(batch);
+        if (due.isEmpty()) {
             return List.of();
         }
         LocalDateTime lockedUntil = dbClock.now().plus(lockDuration);
-        repository.lock(known.stream().map(k -> k.row().id()).toList(), lockedUntil);
-        return known.stream()
-                .map(k -> new ClaimedOutboxTask(k.row().id(), k.type(), k.row().aggregateId(), k.row().payload(),
-                        k.row().attempt(), lockedUntil))
+        repository.lock(due.stream().map(DueOutboxTask::id).toList(), lockedUntil);
+        return due.stream()
+                .map(t -> new ClaimedOutboxTask(t.id(), t.taskType(), t.aggregateId(), t.payload(), t.attempt(),
+                        lockedUntil))
                 .toList();
     }
 
@@ -78,23 +61,14 @@ public class OutboxTaskTransaction {
     // 다시 해 볼 횟수가 남았으면 PENDING(2^attempt초 뒤, 최대 max-backoff), 다 썼으면 FAILED. 다른 워커가 다시 집었으면 empty
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public Optional<OutboxTaskStatus> markFailedAttempt(ClaimedOutboxTask task, String error) {
-        FailedAttempt failure = failedAttempt(task.attempt(), error);
-        return repository.markFailedAttempt(task.id(), task.lockedUntil(), failure) == 1
-                ? Optional.of(failure.status())
-                : Optional.empty();
-    }
-
-    private FailedAttempt failedAttempt(int previousAttempts, String error) {
-        int attempt = previousAttempts + 1;
+        int attempt = task.attempt() + 1;
         OutboxTaskStatus status = attempt >= maxAttempts ? OutboxTaskStatus.FAILED : OutboxTaskStatus.PENDING;
-        return new FailedAttempt(status, attempt, backoffSeconds(attempt, maxBackoffSeconds),
-                Texts.abbreviate(error, OutboxTask.MAX_LAST_ERROR));
+        int updated = repository.markFailedAttempt(task.id(), task.lockedUntil(), status, attempt,
+                backoffSeconds(attempt, maxBackoffSeconds), Texts.abbreviate(error, OutboxTask.MAX_LAST_ERROR));
+        return updated == 1 ? Optional.of(status) : Optional.empty();
     }
 
     static long backoffSeconds(int attempt, long maxSeconds) {
         return Math.min(1L << Math.min(attempt, MAX_BACKOFF_EXPONENT), maxSeconds);
-    }
-
-    private record KnownTask(DueOutboxTask row, OutboxTaskType type) {
     }
 }
