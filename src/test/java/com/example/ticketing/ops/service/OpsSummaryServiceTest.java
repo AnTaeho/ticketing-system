@@ -9,11 +9,9 @@ import com.example.ticketing.common.metrics.Metrics;
 import com.example.ticketing.common.metrics.Metrics.OutboxResult;
 import com.example.ticketing.common.metrics.Metrics.Tag;
 import com.example.ticketing.common.redis.RedisKeys;
-import com.example.ticketing.common.time.DbClock;
 import com.example.ticketing.ops.domain.FailedTask;
 import com.example.ticketing.ops.domain.StalePayment;
 import com.example.ticketing.ops.dto.OpsSummary;
-import com.example.ticketing.ops.repository.OpsRepository;
 import com.example.ticketing.ops.repository.OpsRedisStore;
 import com.example.ticketing.outbox.domain.OutboxTaskType;
 import com.example.ticketing.payment.domain.PaymentStatus;
@@ -52,9 +50,7 @@ class OpsSummaryServiceTest {
     @Autowired
     private JdbcTemplate jdbcTemplate;
     @Autowired
-    private OpsRepository opsRepository;
-    @Autowired
-    private DbClock dbClock;
+    private OpsSummaryReader summaryReader;
 
     private final List<Long> holds = new ArrayList<>();
     private final List<Long> payments = new ArrayList<>();
@@ -145,8 +141,8 @@ class OpsSummaryServiceTest {
         meters.counter(Metrics.HOLD_GATE, Tag.RESULT, "seat_taken").increment();
         meters.counter(Metrics.HOLD_EXPIRED).increment(2);
         meters.counter(Metrics.OUTBOX_TASK, Tag.TYPE, "TICKET_ISSUED", Tag.RESULT, OutboxResult.DONE).increment(4);
-        OpsSummaryService broken = new OpsSummaryService(opsRepository, new OpsRedisStore(testRedis.dead()),
-                new OpsMetricsReader(meters), dbClock, System::nanoTime);
+        OpsSummaryService broken = new OpsSummaryService(summaryReader, new OpsRedisStore(testRedis.dead()),
+                new OpsMetricsReader(meters), System::nanoTime);
 
         OpsSummary summary = broken.summarize(s.pid);
 

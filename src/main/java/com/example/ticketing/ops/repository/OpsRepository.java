@@ -12,6 +12,7 @@ import java.time.LocalDateTime;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
+import org.springframework.data.domain.Limit;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.Repository;
 import org.springframework.data.repository.query.Param;
@@ -65,17 +66,16 @@ public interface OpsRepository extends Repository<Performance, Long> {
     @Query("select new com.example.ticketing.ops.domain.FailedTask("
             + "o.id, o.taskType, o.aggregateId, o.attempt, o.lastError, o.updatedAt) "
             + "from OutboxTask o where o.status = FAILED and " + OUTBOX_OF_PERFORMANCE
-            + " order by o.id desc limit :limit")
-    List<FailedTask> findFailedTasks(@Param("performanceId") long performanceId, @Param("limit") int limit);
+            + " order by o.id desc")
+    List<FailedTask> findFailedTasks(@Param("performanceId") long performanceId, Limit limit);
 
     @Query("""
             select new com.example.ticketing.ops.domain.RefundingHold(
                    h.id, h.userId, h.seatCount, h.totalAmount, h.updatedAt)
               from SeatHold h
              where h.performanceId = :performanceId and h.status = REFUNDING
-             order by h.id desc
-             limit :limit""")
-    List<RefundingHold> findRefundingHolds(@Param("performanceId") long performanceId, @Param("limit") int limit);
+             order by h.id desc""")
+    List<RefundingHold> findRefundingHolds(@Param("performanceId") long performanceId, Limit limit);
 
     // 결제가 아직 열린 상태로 staleBefore보다 먼저 만들어진 것
     @Query("""
@@ -85,9 +85,8 @@ public interface OpsRepository extends Repository<Performance, Long> {
              where h.performanceId = :performanceId
                and bp.status in :openStatuses
                and bp.createdAt < :staleBefore
-             order by bp.id desc
-             limit :limit""")
+             order by bp.id desc""")
     List<StalePayment> findStalePayments(@Param("performanceId") long performanceId,
                                          @Param("openStatuses") Collection<PaymentStatus> openStatuses,
-                                         @Param("staleBefore") LocalDateTime staleBefore, @Param("limit") int limit);
+                                         @Param("staleBefore") LocalDateTime staleBefore, Limit limit);
 }
