@@ -57,8 +57,7 @@
   function syncBar(bar) {
     function sync() { document.body.style.setProperty('--bar-h', bar.offsetHeight + 'px'); }
     sync();
-    if ('ResizeObserver' in window) new ResizeObserver(sync).observe(bar);
-    else window.addEventListener('resize', sync);
+    new ResizeObserver(sync).observe(bar);
   }
 
   // 더 할 수 없을 때 보이는 상자. 마크업 id는 <id>, <id>-title, <id>-text, <id>-action

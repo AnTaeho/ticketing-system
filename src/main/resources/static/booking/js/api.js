@@ -47,17 +47,10 @@
       init.headers['Content-Type'] = 'application/json';
       init.body = JSON.stringify(body);
     }
-    Object.keys(opts.headers || {}).forEach(function (name) { init.headers[name] = opts.headers[name]; });
-    var timer = null;
-    var timedOut = false;
-    if (opts.timeoutMs && typeof AbortController === 'function') {
-      var controller = new AbortController();
-      init.signal = controller.signal;
-      timer = setTimeout(function () { timedOut = true; controller.abort(); }, opts.timeoutMs);
-    }
+    Object.assign(init.headers, opts.headers);
+    if (opts.timeoutMs) init.signal = AbortSignal.timeout(opts.timeoutMs);
     return fetch(path, init).then(function (res) {
       return readJson(res).then(function (data) {
-        clearTimeout(timer);
         if (res.ok) return data;
         var code = (data && data.code) || ('HTTP_' + res.status);
         if (res.status === 401 && code === 'LOGIN_REQUIRED') {
@@ -67,9 +60,8 @@
         }
         throw new ApiError(res.status, code, (data && data.message) || FALLBACK_MESSAGE, data && data.detail);
       });
-    }, function () {
-      clearTimeout(timer);
-      throw new ApiError(0, timedOut ? 'TIMEOUT' : 'NETWORK', NETWORK_MESSAGE, {});
+    }, function (e) {
+      throw new ApiError(0, e.name === 'TimeoutError' ? 'TIMEOUT' : 'NETWORK', NETWORK_MESSAGE, {});
     });
   }
 
@@ -285,16 +277,15 @@
   };
 
   function query(name) {
-    try { return new URLSearchParams(location.search).get(name); } catch (e) { return null; }
+    return new URLSearchParams(location.search).get(name);
   }
 
-  // 같은 사이트 안의 경로만 돌려준다. 아니면 null
+  // 같은 사이트 안의 경로만 돌려준다. 아니면 null. //나 /\로 시작하는 주소는 URL이 다른 사이트로 읽는다
   function safePath(raw) {
-    if (!raw || raw.charAt(0) !== '/' || raw.charAt(1) === '/' || raw.charAt(1) === '\\') return null;
+    if (!raw || raw.charAt(0) !== '/') return null;
     try {
       var url = new URL(raw, location.origin);
-      if (url.origin !== location.origin) return null;
-      return url.pathname + url.search + url.hash;
+      return url.origin === location.origin ? url.pathname + url.search + url.hash : null;
     } catch (e) {
       return null;
     }
@@ -318,7 +309,6 @@
   }
 
   window.bk = {
-    ApiError: ApiError,
     WORDS: WORDS,
     NETWORK_MESSAGE: NETWORK_MESSAGE,
     isNetworkError: isNetworkError,
