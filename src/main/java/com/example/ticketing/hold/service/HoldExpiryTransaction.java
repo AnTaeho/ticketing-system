@@ -2,7 +2,6 @@ package com.example.ticketing.hold.service;
 
 import com.example.ticketing.hold.domain.ClaimedHold;
 import com.example.ticketing.hold.dto.HoldExpiry;
-import com.example.ticketing.hold.repository.SeatHoldJdbcRepository;
 import com.example.ticketing.hold.repository.SeatHoldRepository;
 import com.example.ticketing.seat.repository.SeatRepository;
 import com.example.ticketing.seat.domain.HeldSeat;
@@ -10,6 +9,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Limit;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
@@ -19,13 +19,12 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 public class HoldExpiryTransaction {
 
-    private final SeatHoldJdbcRepository seatHoldJdbcRepository;
     private final SeatHoldRepository seatHoldRepository;
     private final SeatRepository seatRepository;
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public List<HoldExpiry> claimAndExpire(int batch) {
-        List<ClaimedHold> claimed = seatHoldJdbcRepository.claimExpired(batch);
+        List<ClaimedHold> claimed = seatHoldRepository.claimExpired(Limit.of(batch));
         if (claimed.isEmpty()) {
             return List.of();
         }

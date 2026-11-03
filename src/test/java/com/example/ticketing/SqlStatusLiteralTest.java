@@ -8,12 +8,10 @@ import com.example.ticketing.booking.repository.BookingSeatRepository;
 import com.example.ticketing.fakepg.domain.FakePgStatus;
 import com.example.ticketing.fakepg.repository.FakePgOrderRepository;
 import com.example.ticketing.hold.domain.HoldStatus;
-import com.example.ticketing.hold.repository.SeatHoldJdbcRepository;
 import com.example.ticketing.hold.repository.SeatHoldRepository;
 import com.example.ticketing.outbox.domain.OutboxTaskStatus;
 import com.example.ticketing.outbox.repository.OutboxTaskJdbcRepository;
 import com.example.ticketing.payment.domain.PaymentStatus;
-import com.example.ticketing.payment.repository.PaymentJdbcRepository;
 import com.example.ticketing.payment.repository.PaymentRepository;
 import com.example.ticketing.seat.domain.SeatStatus;
 import com.example.ticketing.seat.repository.SeatRepository;
@@ -35,17 +33,17 @@ class SqlStatusLiteralTest {
 
     private static final String STATUS_LIST = "\\s*(?:=|IN)\\s*\\(?\\s*('[A-Z_]+'(?:\\s*,\\s*'[A-Z_]+')*)";
     private static final Pattern STATUS_CLAUSE = Pattern.compile("status" + STATUS_LIST);
-    private static final Pattern IN_LIST = Pattern.compile("status\\s+IN\\s*\\(\\s*('[A-Z_]+'(?:\\s*,\\s*'[A-Z_]+')*)");
+    // native는 따옴표 리터럴('UNKNOWN'), JPQL은 enum 이름(UNKNOWN)을 IN 목록에 쓴다
+    private static final Pattern IN_LIST = Pattern.compile("status\\s+(?i:in)\\s*\\(([^)]*)\\)");
+    private static final Pattern ENUM_NAME = Pattern.compile("[A-Z][A-Z_]+");
     private static final Pattern LITERAL = Pattern.compile("'([A-Z_]+)'");
 
     @Test
     @DisplayName("저장소 native SQL의 상태 리터럴은 모두 그 테이블 상태 enum의 이름이다")
     void statusLiteralsAreEnumNames() {
         assertLiterals(sqlOf(SeatHoldRepository.class), HoldStatus.class);
-        assertLiterals(sqlOf(SeatHoldJdbcRepository.class), HoldStatus.class);
         assertLiterals(sqlOf(SeatRepository.class), SeatStatus.class);
         assertLiterals(sqlOf(PaymentRepository.class), PaymentStatus.class);
-        assertLiterals(sqlOf(PaymentJdbcRepository.class), PaymentStatus.class);
         assertLiterals(sqlOf(BookingRepository.class), BookingStatus.class);
         // booking_seat 복사는 seat 테이블의 SOLD를 읽는다
         assertLiterals(sqlOf(BookingSeatRepository.class), SeatStatus.class);
@@ -58,13 +56,16 @@ class SqlStatusLiteralTest {
     void openPaymentStatusListsMatchEnum() {
         List<String> open = Arrays.stream(PaymentStatus.values()).filter(PaymentStatus::isOpen).map(Enum::name)
                 .toList();
-        List<String> sqls = new ArrayList<>(sqlOf(PaymentRepository.class));
-        sqls.addAll(sqlOf(PaymentJdbcRepository.class));
         List<List<String>> inLists = new ArrayList<>();
-        for (String sql : sqls) {
+        for (String sql : sqlOf(PaymentRepository.class)) {
             Matcher clause = IN_LIST.matcher(sql);
             while (clause.find()) {
-                inLists.add(literals(List.of(clause.group()), IN_LIST));
+                List<String> names = new ArrayList<>();
+                Matcher name = ENUM_NAME.matcher(clause.group(1));
+                while (name.find()) {
+                    names.add(name.group());
+                }
+                inLists.add(names);
             }
         }
 
