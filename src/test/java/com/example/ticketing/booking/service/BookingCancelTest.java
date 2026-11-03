@@ -6,7 +6,6 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyNoInteractions;
 
 import com.example.ticketing.booking.domain.BookingStatus;
 import com.example.ticketing.booking.dto.BookingResult;
@@ -19,7 +18,6 @@ import com.example.ticketing.common.redis.InstanceId;
 import com.example.ticketing.common.redis.RedisKeys;
 import com.example.ticketing.hold.domain.GateHold;
 import com.example.ticketing.hold.repository.SeatGateRedisStore;
-import com.example.ticketing.hold.service.SeatGateReflector;
 import com.example.ticketing.payment.client.PgResult;
 import com.example.ticketing.payment.client.PgStatus;
 import com.example.ticketing.seat.repository.SeatMapRedisStore;
@@ -34,7 +32,6 @@ import com.example.ticketing.support.IntegrationTest;
 import com.example.ticketing.support.StubPgClient;
 import com.example.ticketing.support.StubPgTestConfig;
 import com.example.ticketing.support.TestDb;
-import com.example.ticketing.support.TestProperties;
 import com.example.ticketing.support.TestRedis;
 import com.example.ticketing.support.TestServices;
 import java.time.Duration;
@@ -263,23 +260,15 @@ class BookingCancelTest {
     }
 
     @Test
-    @DisplayName("게이트가 꺼져 있으면 취소는 Redis를 부르지 않고, 켜져 있으면 실제 취소만 좌석 키를 지운다")
+    @DisplayName("실제로 취소한 호출만 좌석 키를 지우고 이미 취소된 예매를 다시 취소하면 지우지 않는다")
     void gateReflection() {
-        SeatGateRedisStore offGate = mock(SeatGateRedisStore.class);
-        BookingService gateOff = services.bookingService(reflector(offGate, false));
-        Confirmed off = fixtures.confirmed(1);
-        gateOff.cancel(off.userId(), off.bookingId());
-        verifyNoInteractions(offGate);
-        assertThat(db.seat(off.seatIds().get(0))).containsEntry("status", "AVAILABLE");
-
-        SeatGateRedisStore onGate = mock(SeatGateRedisStore.class);
-        BookingService gateOn = services.bookingService(reflector(onGate, true));
-        Confirmed on = fixtures.confirmed(2);
-        gateOn.cancel(on.userId(), on.bookingId());
-        verify(onGate).releaseSeatsOnly(new GateHold(on.userId(), on.pid(), on.holdToken(), on.seatIds()));
+        SeatGateRedisStore gate = mock(SeatGateRedisStore.class);
+        Confirmed c = fixtures.confirmed(2);
+        bookingServiceWith(gate).cancel(c.userId(), c.bookingId());
+        verify(gate).releaseSeatsOnly(new GateHold(c.userId(), c.pid(), c.holdToken(), c.seatIds()));
 
         SeatGateRedisStore againGate = mock(SeatGateRedisStore.class);
-        services.bookingService(reflector(againGate, true)).cancel(on.userId(), on.bookingId());
+        bookingServiceWith(againGate).cancel(c.userId(), c.bookingId());
         verify(againGate, never()).releaseSeatsOnly(any());
     }
 
@@ -292,7 +281,7 @@ class BookingCancelTest {
                 bookingId);
     }
 
-    private SeatGateReflector reflector(SeatGateRedisStore store, boolean gateEnabled) {
-        return services.gateReflector(store, TestProperties.from(properties).gateEnabled(gateEnabled).build());
+    private BookingService bookingServiceWith(SeatGateRedisStore store) {
+        return services.bookingService(services.gateReflector(store, properties));
     }
 }

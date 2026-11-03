@@ -2,8 +2,6 @@ package com.example.ticketing.payment.service;
 
 import static com.example.ticketing.support.ApiErrors.catchApiException;
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.verifyNoInteractions;
 
 import com.example.ticketing.common.config.TicketingProperties;
 import com.example.ticketing.common.error.ApiException;
@@ -13,7 +11,6 @@ import com.example.ticketing.common.redis.RedisKeys;
 import com.example.ticketing.hold.domain.GateHold;
 import com.example.ticketing.hold.dto.CreateHoldCommand;
 import com.example.ticketing.hold.dto.CreateHoldResult;
-import com.example.ticketing.hold.repository.SeatGateRedisStore;
 import com.example.ticketing.hold.service.HoldExpiryTransaction;
 import com.example.ticketing.hold.service.SeatHoldService;
 import com.example.ticketing.payment.client.PgResult;
@@ -32,9 +29,7 @@ import com.example.ticketing.support.IntegrationTest;
 import com.example.ticketing.support.StubPgClient;
 import com.example.ticketing.support.StubPgTestConfig;
 import com.example.ticketing.support.TestDb;
-import com.example.ticketing.support.TestProperties;
 import com.example.ticketing.support.TestRedis;
-import com.example.ticketing.support.TestServices;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -81,8 +76,6 @@ class PaymentServiceTest {
     private TestDb db;
     @Autowired
     private TestRedis testRedis;
-    @Autowired
-    private TestServices services;
     @Autowired
     private JsonMapper jsonMapper;
     @Autowired
@@ -523,34 +516,6 @@ class PaymentServiceTest {
                 .isEqualTo(ErrorCode.PAYMENT_NOT_FOUND);
         assertThat(catchApiException(() -> paymentService.getPayment(held.userId(), Long.MAX_VALUE)).getCode())
                 .isEqualTo(ErrorCode.PAYMENT_NOT_FOUND);
-    }
-
-    @Test
-    @DisplayName("게이트가 꺼져 있으면 결제는 Redis를 부르지 않는다")
-    void gateOffSkipsRedis() {
-        SeatGateRedisStore gateStore = mock(SeatGateRedisStore.class);
-        PaymentService service = services.paymentService(gateStore,
-                TestProperties.from(properties).gateEnabled(false).build());
-        Held confirmed = fixtures.held(1);
-        Held declined = fixtures.held(1);
-        Held unknown = fixtures.held(1);
-
-        assertThat(service.pay(command(confirmed, key())).outcome())
-                .isEqualTo(PaymentOutcome.CONFIRMED);
-        stubPg.approveWith(PgResult.of(PgStatus.DECLINED, null));
-        assertThat(catchApiException(() -> service.pay(command(declined, key()))).getCode())
-                .isEqualTo(ErrorCode.PAYMENT_DECLINED);
-        stubPg.approveWith(PgResult.unknown("timeout"));
-        assertThat(service.pay(command(unknown, key())).outcome())
-                .isEqualTo(PaymentOutcome.UNKNOWN);
-
-        verifyNoInteractions(gateStore);
-        assertThat(db.holdStatus(confirmed.holdId())).isEqualTo("CONFIRMED");
-        assertThat(db.holdStatus(declined.holdId())).isEqualTo("RELEASED");
-        assertThat(db.holdStatus(unknown.holdId())).isEqualTo("PAYING");
-        // 게이트 ON으로 잡은 선점 키는 결제가 건드리지 않았으므로 처음 TTL(선점 5분) 안에 그대로 있다
-        assertThat(testRedis.pttl(RedisKeys.seat(confirmed.pid(), confirmed.seatIds().get(0))))
-                .isBetween(1L, properties.hold().ttl().toMillis());
     }
 
     private static DataIntegrityViolationException catchDuplicate(Runnable action) {

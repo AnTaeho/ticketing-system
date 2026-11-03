@@ -23,10 +23,8 @@ import com.example.ticketing.outbox.service.OutboxTaskTransaction;
 import com.example.ticketing.payment.client.HttpPgClient;
 import com.example.ticketing.payment.client.PgClient;
 import com.example.ticketing.payment.service.PaymentGateReflector;
-import com.example.ticketing.payment.service.PaymentReader;
 import com.example.ticketing.payment.service.PaymentReconcileScheduler;
 import com.example.ticketing.payment.service.PaymentReconcileTransaction;
-import com.example.ticketing.payment.service.PaymentService;
 import com.example.ticketing.payment.service.PaymentTransaction;
 import com.example.ticketing.queue.repository.QueueRedisStore;
 import com.example.ticketing.queue.service.QueuePromotionScheduler;
@@ -184,12 +182,6 @@ public class TestServices {
 
     public BookingService bookingService(SeatGateReflector reflector) {
         return new BookingService(bean(BookingTransaction.class), bean(BookingReader.class), reflector);
-    }
-
-    public PaymentService paymentService(SeatGateRedisStore gateStore, TicketingProperties properties) {
-        SeatGateReflector gate = gateReflector(gateStore, properties);
-        return new PaymentService(bean(PaymentTransaction.class), bean(PaymentReader.class), bean(PgClient.class),
-                gate, new PaymentGateReflector(gate), properties);
     }
 
     public static PaymentReconcileScheduler paymentReconcileScheduler(
