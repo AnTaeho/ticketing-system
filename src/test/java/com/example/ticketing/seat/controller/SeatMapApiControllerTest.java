@@ -11,7 +11,6 @@ import com.example.ticketing.support.Fixtures;
 import com.example.ticketing.support.IntegrationTest;
 import com.example.ticketing.support.TestMvc;
 import java.nio.charset.StandardCharsets;
-import java.time.Duration;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -70,7 +69,7 @@ class SeatMapApiControllerTest {
     void writesStoredStringVerbatim() throws Exception {
         long pid = fixtures.newPerformance(1, 2, 3);
         String stored = "{\"performanceId\":" + pid + ",\"generatedAt\":42,\"sections\":[],\"note\":\"좌석\"}";
-        seatMapRedisStore.put(pid, stored, Duration.ofSeconds(30));
+        seatMapRedisStore.put(pid, stored);
 
         MvcResult result = mockMvc.perform(get(SEATS, pid))
                 .andExpect(status().isOk())

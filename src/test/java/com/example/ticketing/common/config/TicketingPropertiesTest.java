@@ -34,7 +34,7 @@ class TicketingPropertiesTest {
         assertThat(properties.payment().payDeadline()).isEqualTo(Duration.ofMinutes(10));
         assertThat(properties.queue().waitingTokenTtl()).isEqualTo(Duration.ofMinutes(60));
         assertThat(properties.queue().waitingLeaveGrace()).isEqualTo(Duration.ofSeconds(10));
-        assertThat(properties.seatmap().leaseTtl()).isEqualTo(Duration.ofSeconds(2));
+        assertThat(properties.seatmap().snapshotIntervalMs()).isEqualTo(1000);
         assertThat(properties.outbox().lockDuration()).isEqualTo(Duration.ofSeconds(60));
         assertThat(properties.gate().reconcileScanMs()).isEqualTo(30000);
         assertThat(properties.pg().baseUrl()).isEmpty();
@@ -42,13 +42,10 @@ class TicketingPropertiesTest {
         assertThat(properties.fakePg().declineRate()).isEqualTo(0.1);
         assertThat(properties.fakePg().slowDelay()).isEqualTo(Duration.ofSeconds(5));
         assertThat(properties.fakePg().delayMin()).isEqualTo(Duration.ofMillis(200));
-        assertThat(properties.fakePg().staleMargin()).isEqualTo(Duration.ofSeconds(30));
-        assertThat(properties.seatmap().localCache()).isEqualTo(Duration.ofSeconds(1));
         assertThat(properties.payment().gateKeyMargin()).isEqualTo(Duration.ofMinutes(1));
         assertThat(properties.payment().processingRecheckAfter()).isEqualTo(Duration.ofSeconds(5));
         assertThat(properties.payment().reconcileClaimLease()).isEqualTo(Duration.ofSeconds(30));
         assertThat(properties.outbox().maxBackoff()).isEqualTo(Duration.ofSeconds(60));
-        assertThat(properties.ops().stalePaymentAfter()).isEqualTo(Duration.ofSeconds(30));
         assertThat(properties.hold().expiryEnabled()).isFalse();
         assertThat(properties.payment().reconcileEnabled()).isFalse();
         assertThat(properties.outbox().workerEnabled()).isFalse();

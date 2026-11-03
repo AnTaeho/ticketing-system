@@ -33,9 +33,6 @@ public class ShowAdminService {
 
     @Transactional
     public CreateShowResult createShow(CreateShowCommand command) {
-        if (isBlank(command.title()) || isBlank(command.venueName())) {
-            throw invalid(Map.of("reason", "REQUIRED"));
-        }
         Show show = showRepository.save(
                 Show.create(command.title().trim(), command.venueName().trim(), command.description()));
         return new CreateShowResult(show.getId());
@@ -62,10 +59,6 @@ public class ShowAdminService {
     }
 
     private static void validate(CreatePerformanceCommand command) {
-        if (command.showId() == null || command.startsAt() == null || command.openAt() == null
-                || command.sections() == null || command.rows() == null || command.seatsPerRow() == null) {
-            throw invalid(Map.of("reason", "REQUIRED"));
-        }
         if (!command.openAt().isBefore(command.startsAt())) {
             throw invalid(Map.of("reason", "OPEN_NOT_BEFORE_START"));
         }
@@ -85,9 +78,5 @@ public class ShowAdminService {
 
     private static ApiException invalid(Map<String, Object> detail) {
         return new ApiException(ErrorCode.INVALID_REQUEST, detail);
-    }
-
-    private static boolean isBlank(String value) {
-        return value == null || value.isBlank();
     }
 }

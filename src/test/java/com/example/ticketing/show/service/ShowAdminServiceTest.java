@@ -145,7 +145,6 @@ class ShowAdminServiceTest {
         assertInvalid(new CreatePerformanceCommand(showId, startsAt, now, null, 4, 31, 20));
         assertInvalid(new CreatePerformanceCommand(showId, startsAt, now, null, 4, 10, 0));
         assertInvalid(new CreatePerformanceCommand(showId, startsAt, now, null, 4, 10, 51));
-        assertInvalid(new CreatePerformanceCommand(showId, startsAt, now, null, null, 10, 20));
         assertInvalid(new CreatePerformanceCommand(showId, startsAt, now, now, 4, 10, 20));
         assertThat(performanceRepository.findByShowIdOrderByStartsAtAscIdAsc(showId)).isEmpty();
     }

@@ -3,7 +3,7 @@ package com.example.ticketing.show.dto;
 import jakarta.validation.constraints.NotNull;
 import java.time.LocalDateTime;
 
-// 시각 순서와 크기 범위는 ShowAdminService가 검사한다
+// 필수 값은 여기서, 시각 순서와 크기 범위는 ShowAdminService가 검사한다
 public record CreatePerformanceRequest(
         @NotNull Long showId,
         @NotNull LocalDateTime startsAt,

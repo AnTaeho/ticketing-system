@@ -7,6 +7,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.example.ticketing.common.config.TicketingProperties;
+import com.example.ticketing.fakepg.service.FakePgService;
 import com.example.ticketing.support.IntegrationTest;
 import com.example.ticketing.support.TestMvc;
 import java.util.UUID;
@@ -40,7 +41,7 @@ class FakePgControllerTest {
     @Test
     @DisplayName("앱이 죽어 오래 남은 처리 중 주문은 조회·취소할 때 거절로 확정한다")
     void staleProcessingIsDeclined() throws Exception {
-        long staleSeconds = properties.fakePg().slowDelay().plus(properties.fakePg().staleMargin()).toSeconds() + 1;
+        long staleSeconds = properties.fakePg().slowDelay().plus(FakePgService.STALE_MARGIN).toSeconds() + 1;
         String staleForQuery = insertProcessing(staleSeconds);
         String staleForCancel = insertProcessing(staleSeconds);
         String recent = insertProcessing(0);

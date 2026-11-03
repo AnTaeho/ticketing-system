@@ -12,6 +12,9 @@ import org.springframework.stereotype.Component;
 @Component
 public class SeatMapRedisStore {
 
+    // 스케줄러가 더 만들지 않는 회차(예매가 끝난 회차)의 스냅샷과 매진 표시가 남지 않게 한다
+    public static final Duration SNAPSHOT_TTL = Duration.ofSeconds(30);
+
     private static final String SOLD_OUT = "1";
     private static final String NOT_SOLD_OUT = "0";
 
@@ -21,17 +24,18 @@ public class SeatMapRedisStore {
         this.redis = redis;
     }
 
+    // 없으면 null
     public String get(long performanceId) {
         return RedisFailures.translate(() -> redis.opsForValue().get(RedisKeys.seatMap(performanceId)));
     }
 
-    public void put(long performanceId, String json, Duration ttl) {
-        RedisFailures.translate(() -> redis.opsForValue().set(RedisKeys.seatMap(performanceId), json, ttl));
+    public void put(long performanceId, String json) {
+        RedisFailures.translate(() -> redis.opsForValue().set(RedisKeys.seatMap(performanceId), json, SNAPSHOT_TTL));
     }
 
-    public void putSoldOut(long performanceId, boolean soldOut, Duration ttl) {
+    public void putSoldOut(long performanceId, boolean soldOut) {
         RedisFailures.translate(() -> redis.opsForValue()
-                .set(RedisKeys.seatMapSoldOut(performanceId), soldOut ? SOLD_OUT : NOT_SOLD_OUT, ttl));
+                .set(RedisKeys.seatMapSoldOut(performanceId), soldOut ? SOLD_OUT : NOT_SOLD_OUT, SNAPSHOT_TTL));
     }
 
     // 표시가 없으면(스냅샷을 아직 안 만들었거나 TTL이 지났으면) 매진이 아니다
@@ -45,11 +49,5 @@ public class SeatMapRedisStore {
         Long acquired = RedisFailures.translate(() -> redis.execute(RedisScripts.SEATMAP_LEASE,
                 List.of(RedisKeys.seatMapLease(performanceId)), owner, String.valueOf(ttl.toMillis())));
         return acquired != null && acquired == 1L;
-    }
-
-    // 값이 owner일 때만 지운다. TTL이 지나 남이 잡은 리스는 건드리지 않는다
-    public void releaseLease(long performanceId, String owner) {
-        RedisFailures.translate(() -> redis.execute(RedisScripts.DELETE_IF_EQUALS,
-                List.of(RedisKeys.seatMapLease(performanceId)), owner));
     }
 }

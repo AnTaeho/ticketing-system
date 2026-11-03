@@ -13,7 +13,6 @@ public record TicketingProperties(
         Queue queue,
         Seatmap seatmap,
         Outbox outbox,
-        Ops ops,
         Pg pg,
         FakePg fakePg
 ) {
@@ -71,12 +70,10 @@ public record TicketingProperties(
         }
     }
 
+    // 로컬 캐시와 스케줄러 리스 길이는 주기에서 정한다
     public record Seatmap(
             boolean snapshotEnabled,
-            long snapshotIntervalMs, // @Scheduled 전용
-            Duration snapshotTtl,
-            Duration localCache,
-            Duration leaseTtl
+            long snapshotIntervalMs
     ) {
     }
 
@@ -90,9 +87,6 @@ public record TicketingProperties(
     ) {
     }
 
-    public record Ops(Duration stalePaymentAfter) {
-    }
-
     public record Pg(String baseUrl, Duration connectTimeout, Duration readTimeout) {
     }
 
@@ -101,8 +95,7 @@ public record TicketingProperties(
             Duration delayMax,
             double declineRate,
             double slowRate,
-            Duration slowDelay,
-            Duration staleMargin
+            Duration slowDelay
     ) {
     }
 }

@@ -3,9 +3,8 @@ package com.example.ticketing.queue.repository;
 import com.example.ticketing.common.redis.RedisFailures;
 import com.example.ticketing.common.redis.RedisKeys;
 import com.example.ticketing.common.redis.RedisScripts;
-import com.example.ticketing.queue.domain.QueueEntry;
-import com.example.ticketing.queue.domain.QueuePlacement;
 import com.example.ticketing.queue.domain.QueueTokenStatus;
+import com.example.ticketing.queue.dto.QueueEnterResult;
 import java.time.Duration;
 import java.util.List;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -22,19 +21,17 @@ public class QueueRedisStore {
         this.redis = redis;
     }
 
-    public QueuePlacement enter(QueueEntry entry) {
-        long pid = entry.performanceId();
+    // 시각(ms)은 진입 시각이자 waiting 점수다
+    public QueueEnterResult enter(long userId, long performanceId, String queueToken, long nowMs,
+                                  long processingExpireAtMs, int capacity, long waitingTtlMs) {
         List<?> reply = RedisFailures.translate(() -> redis.execute(RedisScripts.QUEUE_ENTER,
-                List.of(RedisKeys.queueProcessing(pid), RedisKeys.queueWaiting(pid),
-                        RedisKeys.queueUser(entry.userId(), pid), RedisKeys.queueAdmitted(pid),
-                        RedisKeys.queueLeaving(pid)),
-                entry.queueToken(), String.valueOf(entry.enteredAtMs()), String.valueOf(entry.processingExpireAtMs()),
-                String.valueOf(entry.capacity()), String.valueOf(entry.waitingTtlMs())));
-        if (reply == null || reply.size() != 2) {
-            throw new IllegalStateException("queue_enter.lua 응답이 예상과 다르다: " + reply);
-        }
-        return new QueuePlacement(QueueTokenStatus.valueOf(String.valueOf(reply.get(0))),
-                String.valueOf(reply.get(1)));
+                List.of(RedisKeys.queueProcessing(performanceId), RedisKeys.queueWaiting(performanceId),
+                        RedisKeys.queueUser(userId, performanceId), RedisKeys.queueAdmitted(performanceId),
+                        RedisKeys.queueLeaving(performanceId)),
+                queueToken, String.valueOf(nowMs), String.valueOf(processingExpireAtMs), String.valueOf(capacity),
+                String.valueOf(waitingTtlMs)));
+        return new QueueEnterResult(String.valueOf(reply.get(1)),
+                QueueTokenStatus.valueOf(String.valueOf(reply.get(0))));
     }
 
     // 반환: 승격한 수. 승격 토큰의 입장 시각은 nowMs다
@@ -105,14 +102,7 @@ public class QueueRedisStore {
     // 명/초. 기록이 없으면 0
     public double rate(long performanceId) {
         String raw = RedisFailures.translate(() -> redis.opsForValue().get(RedisKeys.queueRate(performanceId)));
-        if (raw == null) {
-            return 0;
-        }
-        try {
-            return Double.parseDouble(raw);
-        } catch (NumberFormatException e) {
-            return 0;
-        }
+        return raw == null ? 0 : Double.parseDouble(raw);
     }
 
     public void saveRate(long performanceId, double rate, Duration ttl) {

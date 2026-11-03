@@ -18,8 +18,7 @@
   var loading = document.getElementById('ops-loading');
   var el = bk.el;
 
-  var reduceMotion = false;
-  try { reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { /* 없으면 움직인다 */ }
+  var reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   var state = {
     previous: null,     // 지난번 숫자. 키는 'seats.HELD'처럼 칸마다 하나

@@ -16,7 +16,6 @@ import com.example.ticketing.support.IntegrationTest;
 import com.example.ticketing.support.TestDb;
 import com.example.ticketing.support.TestRedis;
 import com.example.ticketing.support.TestServices;
-import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
@@ -74,7 +73,7 @@ class SeatMapSnapshotSchedulerTest {
         assertThat(jsonMapper.readTree(first).get("performanceId").asLong()).isEqualTo(pid);
         assertThat(redis.opsForValue().get(RedisKeys.seatMapLease(pid))).isEqualTo(instanceA.value());
         assertThat(testRedis.pttl(RedisKeys.seatMap(pid)))
-                .isPositive().isLessThanOrEqualTo(properties.seatmap().snapshotTtl().toMillis());
+                .isPositive().isLessThanOrEqualTo(SeatMapRedisStore.SNAPSHOT_TTL.toMillis());
 
         b.run();
         assertThat(counters.count(Metrics.SEATMAP_REBUILD, Tag.SOURCE, RebuildSource.SCHEDULER) - before)
@@ -85,7 +84,7 @@ class SeatMapSnapshotSchedulerTest {
         assertThat(counters.count(Metrics.SEATMAP_REBUILD, Tag.SOURCE, RebuildSource.SCHEDULER) - before)
                 .isEqualTo(2.0);
         assertThat(testRedis.pttl(RedisKeys.seatMapLease(pid)))
-                .isPositive().isLessThanOrEqualTo(properties.seatmap().leaseTtl().toMillis());
+                .isPositive().isLessThanOrEqualTo(properties.seatmap().snapshotIntervalMs() * 2);
 
         // 리더가 멈춰 리스가 풀리면 다른 인스턴스가 이어받는다
         redis.delete(RedisKeys.seatMapLease(pid));
@@ -166,21 +165,6 @@ class SeatMapSnapshotSchedulerTest {
         scheduler.run();
         assertThat(seatMapRedisStore.isSoldOut(pid)).isTrue();
         assertThat(testRedis.pttl(RedisKeys.seatMapSoldOut(pid)))
-                .isPositive().isLessThanOrEqualTo(properties.seatmap().snapshotTtl().toMillis());
-    }
-
-    @Test
-    @DisplayName("리스 해제(releaseLease)는 값이 소유자와 같을 때만 지운다")
-    void releaseLeaseComparesOwner() {
-        long pid = fixtures.newPerformance(1, 1, 3);
-        assertThat(seatMapRedisStore.tryLease(pid, "owner-1", Duration.ofSeconds(2))).isTrue();
-        assertThat(seatMapRedisStore.tryLease(pid, "owner-2", Duration.ofSeconds(2))).isFalse();
-
-        seatMapRedisStore.releaseLease(pid, "owner-2");
-        assertThat(redis.opsForValue().get(RedisKeys.seatMapLease(pid))).isEqualTo("owner-1");
-
-        seatMapRedisStore.releaseLease(pid, "owner-1");
-        assertThat(redis.hasKey(RedisKeys.seatMapLease(pid))).isFalse();
-        assertThat(seatMapRedisStore.tryLease(pid, "owner-2", Duration.ofSeconds(2))).isTrue();
+                .isPositive().isLessThanOrEqualTo(SeatMapRedisStore.SNAPSHOT_TTL.toMillis());
     }
 }

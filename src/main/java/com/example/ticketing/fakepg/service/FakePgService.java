@@ -6,41 +6,44 @@ import com.example.ticketing.fakepg.domain.FakePgOrder;
 import com.example.ticketing.fakepg.domain.FakePgScenario;
 import com.example.ticketing.fakepg.domain.FakePgStatus;
 import com.example.ticketing.fakepg.dto.FakePgReply;
+import com.example.ticketing.fakepg.repository.FakePgOrderRepository;
+import java.time.Duration;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 
-// 지연은 PROCESSING 커밋 뒤 트랜잭션 밖에서 기다린다
+// 지연은 PROCESSING 커밋 뒤 트랜잭션 밖에서 기다린다. 읽기도 트랜잭션 밖이라 매번 커밋된 최신 행을 본다
 @Service
 public class FakePgService {
 
     // 상태는 앞으로만 가므로(없음 → PROCESSING/CANCELLED, APPROVED → CANCELLED) 세 번이면 결론이 난다
     private static final int MAX_CANCEL_ATTEMPTS = 3;
     private static final String PG_TX_ID_PREFIX = "fpg_";
+    // 가장 느린 응답보다 이만큼 더 PROCESSING이면 승인 시간 초과로 거절한다
+    public static final Duration STALE_MARGIN = Duration.ofSeconds(30);
 
     private final FakePgTransaction transaction;
-    private final FakePgReader reader;
+    private final FakePgOrderRepository repository;
     private final FakePgDecider decider;
     private final FakePgSleeper sleeper;
     private final long staleMicros;
 
-    public FakePgService(FakePgTransaction transaction, FakePgReader reader, FakePgDecider decider,
+    public FakePgService(FakePgTransaction transaction, FakePgOrderRepository repository, FakePgDecider decider,
                          FakePgSleeper sleeper, TicketingProperties properties) {
         this.transaction = transaction;
-        this.reader = reader;
+        this.repository = repository;
         this.decider = decider;
         this.sleeper = sleeper;
-        TicketingProperties.FakePg fakePg = properties.fakePg();
-        this.staleMicros = TimeUnit.MICROSECONDS.convert(fakePg.slowDelay().plus(fakePg.staleMargin()));
+        this.staleMicros = TimeUnit.MICROSECONDS.convert(properties.fakePg().slowDelay().plus(STALE_MARGIN));
     }
 
     public FakePgReply approve(String orderId, int amount, FakePgScenario scenario) {
         try {
             transaction.insertProcessing(orderId, amount);
         } catch (DataIntegrityViolationException e) {
-            return FakePgReply.toRepeatedApprove(reader.find(orderId).orElseThrow(() -> e));
+            return FakePgReply.toRepeatedApprove(repository.findById(orderId).orElseThrow(() -> e));
         }
 
         FakePgDecider.Plan plan = decider.plan(scenario);
@@ -53,7 +56,7 @@ public class FakePgService {
             return FakePgReply.of(orderId, plan.approve() ? FakePgStatus.APPROVED : FakePgStatus.DECLINED, pgTxId);
         }
         // 지연 중에 행이 바뀌었으면 지금 행을 그대로 알린다
-        return FakePgReply.toRepeatedApprove(reader.find(orderId).orElseThrow(
+        return FakePgReply.toRepeatedApprove(repository.findById(orderId).orElseThrow(
                 () -> new IllegalStateException("fake_pg_transaction 행이 사라졌다: " + orderId)));
     }
 
@@ -88,12 +91,12 @@ public class FakePgService {
 
     // 가장 느린 승인보다도 오래 PROCESSING이면 승인 시간 초과로 거절을 확정한 뒤 규칙을 적용한다
     private Optional<FakePgOrder> findSettlingStale(String orderId) {
-        Optional<FakePgOrder> row = reader.find(orderId);
+        Optional<FakePgOrder> row = repository.findById(orderId);
         if (row.isEmpty() || row.get().getStatus() != FakePgStatus.PROCESSING) {
             return row;
         }
         int updated = transaction.staleProcessingToDeclined(orderId, staleMicros);
-        return updated == 1 ? reader.find(orderId) : row;
+        return updated == 1 ? repository.findById(orderId) : row;
     }
 
     // 끊겨도 PROCESSING에 묶이지 않게 결과는 쓰고 끊김 표시만 되살린다

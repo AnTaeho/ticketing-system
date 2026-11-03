@@ -71,7 +71,7 @@ com.example.ticketing
 | HTTP → Controller | `*Request` (Bean Validation, `toCommand()`) | `dto` |
 | Controller → Service | `*Command` (값이 둘 이상일 때. id 하나는 그대로 넘긴다) | `dto` |
 | Service → Controller | `*Result` | `dto` |
-| Controller → HTTP | `*Result`를 그대로. 모양이 다를 때만 `*Response` (`from(result)`) | `dto` |
+| Controller → HTTP | `*Result`를 그대로. 필드 이름만 다르면 `*Result`에 `@JsonProperty`를 달고, 모양이 다를 때만 `*Response` (`from(result)`) | `dto` |
 | `*Transaction` → `*Service` | 결과를 뜻하는 이름의 record (예: `HoldPlacement`, `PaymentConclusion`) | `dto` |
 | Outbox 작업 | 작업 종류별 payload record. 쓰는 기능과 처리하는 기능이 함께 보므로 둘 다 의존하는 곳에 둔다 | `outbox/dto` |
 
@@ -106,11 +106,12 @@ com.example.ticketing
 - 사용자에게 돌려줄 실패는 `ApiException(ErrorCode, detail)`이다. 화면에 보일 문장은 `ErrorCode`에만 쓴다.
 - `detail`의 `reason`은 영문 대문자 코드다 (`COUNT`, `DUPLICATE`).
 - 결과 값을 예외로 바꾸는 일은 `*Service`에서 한다. `*Transaction`과 `*Client`는 결과 값을 돌려준다.
-- 입력 형식 검증은 `*Request`의 Bean Validation과 `toCommand()`에서 한다. 업무 규칙 검증은 `service`에서 한다.
+- 입력 형식 검증은 `*Request`의 Bean Validation과 `toCommand()`에서 한다. 업무 규칙 검증은 `service`에서 하고, 요청이 이미 본 필수 값은 다시 보지 않는다.
 
 ## 8. 설정
 
 - 설정은 `TicketingProperties`(접두사 `ticketing`) 하나에 둔다. 기본값은 `application.yml`에만 적는다.
+- 설정에는 정책 값(README에 적힌 시간·정원), 부하 시나리오가 바꾸는 값, 스케줄러 주기·스위치만 둔다. 아무도 바꾸지 않는 내부 값(스냅샷 TTL 등)은 쓰는 클래스의 상수로 두고, 다른 값에서 정해지는 값(리스 길이 = 주기 × 2)은 설정에서 끌어낸다.
 - 주기(`@Scheduled`)에 쓰는 값만 ms 정수이고, 나머지 기간은 `Duration`이다.
 - 스케줄러를 끄는 스위치(`*-enabled`)도 설정 record와 `application.yml`에 적는다.
 - 설정 값은 생성자에서 한 번 꺼내 `final` 필드에 둔다.
@@ -139,7 +140,8 @@ com.example.ticketing
 ## 12. 화면 (Thymeleaf + 순수 JS)
 
 - 전역은 `window.bk` 하나다. `api.js`는 데이터 쪽(요청, 폴링, 저장소 키 `bk.keys`, 링크 `bk.links`, 좌석 글), `bk-ui.js`는 화면 부품(확인 단계 `bk.confirmBox`, 상태 상자 `bk.stateBox`, 머리 채우기, 하단 띠)을 맡는다. 화면 JS는 IIFE 하나로 감싸고 이 부품을 쓴다. 싣는 순서는 api.js → bk-ui.js → 화면 스크립트다.
-- 화면 JS의 상태는 객체 하나로 묶고, 같은 꼴의 분기(결과 화면, 실패 코드별 처리)는 데이터 표 + 함수 하나로 쓴다.
+- 화면 JS의 상태는 객체 하나로 묶는다. 같은 꼴의 분기가 넷 이상이면(결과 화면, 실패 코드별 처리) 데이터 표 + 함수 하나로 쓰고 `TABLE[key]`로 꺼낸다. 셋 이하면 if로 쓴다.
+- 브라우저 표준(`AbortSignal.timeout`, `URLSearchParams`, `ResizeObserver`, `performance.now`)으로 되는 일은 도구를 만들지 않고, 지원하지 않는 브라우저용 대체 경로도 두지 않는다.
 - 템플릿 id는 화면 약자 + `-`로 시작한다 (`login-`, `shows-`, `show-`, `q-`, `seats-`, `co-`, `bk-`, `ops-`, 머리는 `page-`). 링크는 `th:href`로 쓴다.
 - 폴링은 `bk.poller`로 한다. 탭이 숨으면 멈추고, 늦게 온 응답은 버린다.
 - 예외로 대기열 화면의 순서 조회와 좌석 화면의 생존 신호만 `keepWhenHidden`으로 숨어도 돈다. 숨은 사이에 대기열 자리를 잃지 않게 하려는 것이다.

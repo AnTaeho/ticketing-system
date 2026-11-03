@@ -539,7 +539,7 @@
   };
 
   function holdFailed(e, ids) {
-    if (Object.prototype.hasOwnProperty.call(HOLD_FAILURES, e.code)) HOLD_FAILURES[e.code](e, ids);
+    if (HOLD_FAILURES[e.code]) HOLD_FAILURES[e.code](e, ids);
     else note.show(e.message);
   }
 
