@@ -56,6 +56,8 @@ class BookingCancelTest {
     @Autowired
     private BookingService bookingService;
     @Autowired
+    private BookingReader bookingReader;
+    @Autowired
     private SeatCatalog seatCatalog;
     @Autowired
     private StubPgClient stubPg;
@@ -198,7 +200,7 @@ class BookingCancelTest {
         assertThat(db.seat(c.seatIds().get(0))).containsEntry("status", "SOLD").containsEntry("hold_id", c.holdId());
         assertThat(db.outboxCount("REFUND_REQUESTED", c.paymentId())).isZero();
         assertThat(redis.opsForValue().get(RedisKeys.seat(c.pid(), c.seatIds().get(0)))).isEqualTo(c.holdToken());
-        assertThat(bookingService.detail(c.userId(), c.bookingId()).cancellable()).isFalse();
+        assertThat(bookingReader.find(c.userId(), c.bookingId()).cancellable()).isFalse();
     }
 
     @Test
@@ -220,11 +222,11 @@ class BookingCancelTest {
 
         assertThat(catchApiException(() -> bookingService.cancel(stranger, c.bookingId())).getCode())
                 .isEqualTo(ErrorCode.BOOKING_NOT_FOUND);
-        assertThat(catchApiException(() -> bookingService.detail(stranger, c.bookingId())).getCode())
+        assertThat(catchApiException(() -> bookingReader.find(stranger, c.bookingId())).getCode())
                 .isEqualTo(ErrorCode.BOOKING_NOT_FOUND);
         assertThat(catchApiException(() -> bookingService.cancel(c.userId(), Long.MAX_VALUE)).getCode())
                 .isEqualTo(ErrorCode.BOOKING_NOT_FOUND);
-        assertThat(bookingService.list(stranger)).isEmpty();
+        assertThat(bookingReader.findByUser(stranger)).isEmpty();
 
         assertThat(jdbcTemplate.queryForObject("SELECT status FROM booking WHERE booking_id = ?", String.class, c.bookingId()))
                 .isEqualTo("CONFIRMED");
@@ -237,7 +239,7 @@ class BookingCancelTest {
     void refundCompletesAfterCancel() {
         Confirmed c = fixtures.confirmed(2);
         bookingService.cancel(c.userId(), c.bookingId());
-        assertThat(bookingService.detail(c.userId(), c.bookingId()).refund()).isEqualTo(RefundStatus.REQUESTED);
+        assertThat(bookingReader.find(c.userId(), c.bookingId()).refund()).isEqualTo(RefundStatus.REQUESTED);
         db.parkOutboxTasksExcept("REFUND_REQUESTED", c.paymentId());
         stubPg.cancelWith(PgResult.of(PgStatus.CANCELLED, null));
 
@@ -247,7 +249,7 @@ class BookingCancelTest {
         assertThat(db.payment(c.paymentId())).containsEntry("status", "CANCELLED");
         assertThat(db.outboxTask("REFUND_REQUESTED", c.paymentId())).containsEntry("status", "DONE");
         assertThat(db.holdStatus(c.holdId())).isEqualTo("CONFIRMED");
-        BookingResult detail = bookingService.detail(c.userId(), c.bookingId());
+        BookingResult detail = bookingReader.find(c.userId(), c.bookingId());
         assertThat(detail.status()).isEqualTo(BookingStatus.CANCELLED);
         assertThat(detail.refund()).isEqualTo(RefundStatus.DONE);
         assertThat(detail.cancellable()).isFalse();

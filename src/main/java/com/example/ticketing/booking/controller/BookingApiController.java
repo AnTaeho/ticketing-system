@@ -2,6 +2,7 @@ package com.example.ticketing.booking.controller;
 
 import com.example.ticketing.booking.dto.BookingResult;
 import com.example.ticketing.booking.dto.CancelResult;
+import com.example.ticketing.booking.service.BookingReader;
 import com.example.ticketing.booking.service.BookingService;
 import com.example.ticketing.common.web.CurrentUser;
 import java.util.List;
@@ -15,16 +16,17 @@ import org.springframework.web.bind.annotation.RestController;
 @RequiredArgsConstructor
 public class BookingApiController {
 
+    private final BookingReader bookingReader;
     private final BookingService bookingService;
 
     @GetMapping("/api/bookings")
     public List<BookingResult> list(@CurrentUser Long userId) {
-        return bookingService.list(userId);
+        return bookingReader.findByUser(userId);
     }
 
     @GetMapping("/api/bookings/{bookingId}")
     public BookingResult detail(@CurrentUser Long userId, @PathVariable long bookingId) {
-        return bookingService.detail(userId, bookingId);
+        return bookingReader.find(userId, bookingId);
     }
 
     @PostMapping("/api/bookings/{bookingId}/cancel")

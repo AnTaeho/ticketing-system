@@ -8,9 +8,10 @@ import com.example.ticketing.booking.dto.BookingResult;
 import com.example.ticketing.booking.dto.BookingSeatResult;
 import com.example.ticketing.booking.repository.BookingRepository;
 import com.example.ticketing.booking.repository.BookingSeatRepository;
+import com.example.ticketing.common.error.ApiException;
+import com.example.ticketing.common.error.ErrorCode;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
@@ -27,8 +28,10 @@ public class BookingReader {
         return withSeats(bookingRepository.findResults(userId));
     }
 
-    public Optional<BookingResult> findOne(long userId, long bookingId) {
-        return bookingRepository.findResult(userId, bookingId).map(result -> withSeats(List.of(result)).get(0));
+    public BookingResult find(long userId, long bookingId) {
+        BookingResult result = bookingRepository.findResult(userId, bookingId)
+                .orElseThrow(() -> new ApiException(ErrorCode.BOOKING_NOT_FOUND, Map.of("bookingId", bookingId)));
+        return withSeats(List.of(result)).get(0);
     }
 
     private List<BookingResult> withSeats(List<BookingResult> results) {

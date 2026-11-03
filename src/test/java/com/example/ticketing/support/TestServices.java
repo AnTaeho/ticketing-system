@@ -1,6 +1,5 @@
 package com.example.ticketing.support;
 
-import com.example.ticketing.booking.service.BookingReader;
 import com.example.ticketing.booking.service.BookingService;
 import com.example.ticketing.booking.service.BookingTransaction;
 import com.example.ticketing.common.config.TicketingProperties;
@@ -181,7 +180,7 @@ public class TestServices {
     }
 
     public BookingService bookingService(SeatGateReflector reflector) {
-        return new BookingService(bean(BookingTransaction.class), bean(BookingReader.class), reflector);
+        return new BookingService(bean(BookingTransaction.class), reflector);
     }
 
     public static PaymentReconcileScheduler paymentReconcileScheduler(
