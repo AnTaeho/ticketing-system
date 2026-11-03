@@ -17,8 +17,9 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.env.Environment;
+import org.springframework.jdbc.core.JdbcTemplate;
 
-// 묘비·취소 규칙은 FakePg 테스트가 본다. 여기서는 승인·거절·시간 초과·연결 실패가 PG 상태로 바뀌는지만 본다
+// 묘비·취소 규칙은 FakePg 테스트가 본다. 여기서는 승인·거절·시간 초과·연결 실패·취소 409가 PG 상태로 바뀌는지만 본다
 @HttpIntegrationTest
 class HttpPgClientTest {
 
@@ -32,6 +33,8 @@ class HttpPgClientTest {
     private Environment environment;
     @Autowired
     private TestServices services;
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
 
     @Test
     @DisplayName("설정에 PG 주소가 없어도 실행 중 포트의 Fake PG로 승인하고 조회한다")
@@ -70,6 +73,17 @@ class HttpPgClientTest {
         PgResult settled = awaitSettled(orderId);
         assertThat(settled.status()).isEqualTo(PgStatus.APPROVED);
         assertThat(settled.pgTxId()).isNotBlank();
+    }
+
+    @Test
+    @DisplayName("처리 중인 주문을 취소해 PG가 409로 답하면 CONFLICT이고 주문은 그대로 PROCESSING이다")
+    void cancelWhileProcessingConflicts() {
+        String orderId = newOrderId();
+        jdbcTemplate.update("INSERT INTO fake_pg_transaction (order_id, amount, status, pg_tx_id, created_at, "
+                + "updated_at) VALUES (?, ?, 'PROCESSING', NULL, NOW(6), NOW(6))", orderId, AMOUNT);
+
+        assertThat(pgClient.cancel(orderId)).isEqualTo(PgResult.of(PgStatus.CONFLICT, null));
+        assertThat(pgClient.query(orderId).status()).isEqualTo(PgStatus.PROCESSING);
     }
 
     @Test
