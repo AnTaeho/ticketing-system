@@ -28,26 +28,26 @@ public class OutboxTaskJdbcRepository {
 
     // 처리 중 멈춘 작업(locked_until 지남)도 다시 집는다
     private static final String CLAIM_DUE_SQL = """
-            SELECT id, task_type, aggregate_id, payload, attempt FROM outbox_task
+            SELECT outbox_task_id AS id, task_type, aggregate_id, payload, attempt FROM outbox_task
              WHERE (status = 'PENDING' AND next_attempt_at <= NOW(6))
                 OR (status = 'PROCESSING' AND locked_until < NOW(6))
-             ORDER BY id LIMIT :batch
+             ORDER BY outbox_task_id LIMIT :batch
              FOR UPDATE SKIP LOCKED""";
 
     private static final String LOCK_SQL = """
             UPDATE outbox_task SET status = 'PROCESSING', locked_until = :lockedUntil, updated_at = NOW(6)
-             WHERE id IN (:ids)""";
+             WHERE outbox_task_id IN (:ids)""";
 
     private static final String DONE_SQL = """
             UPDATE outbox_task SET status = 'DONE', locked_until = NULL, updated_at = NOW(6)
-             WHERE id = :id AND status = 'PROCESSING' AND locked_until = :lockedUntil""";
+             WHERE outbox_task_id = :id AND status = 'PROCESSING' AND locked_until = :lockedUntil""";
 
     private static final String FAILED_ATTEMPT_SQL = """
             UPDATE outbox_task
                SET status = :status, attempt = :attempt,
                    next_attempt_at = DATE_ADD(NOW(6), INTERVAL :backoffSeconds SECOND),
                    locked_until = NULL, last_error = :lastError, updated_at = NOW(6)
-             WHERE id = :id""";
+             WHERE outbox_task_id = :id""";
 
     private static final String STILL_CLAIMED = " AND status = 'PROCESSING' AND locked_until = :lockedUntil";
 

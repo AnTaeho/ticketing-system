@@ -49,7 +49,7 @@ class OutboxWriterTest {
 
         Map<String, Object> row = jdbcTemplate.queryForMap("SELECT task_type, aggregate_id, payload, status, attempt, "
                 + "locked_until, last_error, TIMESTAMPDIFF(MICROSECOND, next_attempt_at, NOW(6)) AS age_us "
-                + "FROM outbox_task WHERE id = ?", id);
+                + "FROM outbox_task WHERE outbox_task_id = ?", id);
         assertThat(row).containsEntry("task_type", "REFUND_REQUESTED").containsEntry("aggregate_id", aggregateId)
                 .containsEntry("payload", "{\"paymentId\":" + aggregateId + ",\"orderId\":\"order-1\"}")
                 .containsEntry("status", "PENDING")
@@ -63,7 +63,7 @@ class OutboxWriterTest {
         });
 
         assertThat(count(rolledBack)).isZero();
-        jdbcTemplate.update("DELETE FROM outbox_task WHERE id = ?", id);
+        jdbcTemplate.update("DELETE FROM outbox_task WHERE outbox_task_id = ?", id);
     }
 
     private long count(long aggregateId) {

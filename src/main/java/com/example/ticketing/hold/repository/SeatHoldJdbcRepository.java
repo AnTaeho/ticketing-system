@@ -15,9 +15,9 @@ import org.springframework.transaction.annotation.Transactional;
 public class SeatHoldJdbcRepository {
 
     private static final String CLAIM_EXPIRED_SQL = """
-            SELECT id AS hold_id, user_id, performance_id, hold_token FROM seat_hold
+            SELECT hold_id, user_id, performance_id, hold_token FROM seat_hold
              WHERE status = 'HELD' AND expires_at < NOW(6)
-             ORDER BY id LIMIT :batch
+             ORDER BY hold_id LIMIT :batch
              FOR UPDATE SKIP LOCKED""";
 
     private final NamedParameterJdbcTemplate jdbcTemplate;

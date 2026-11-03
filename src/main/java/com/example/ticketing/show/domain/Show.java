@@ -19,6 +19,7 @@ public class Show {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Column(name = "show_id")
     private Long id;
 
     @Column(nullable = false, length = 200)

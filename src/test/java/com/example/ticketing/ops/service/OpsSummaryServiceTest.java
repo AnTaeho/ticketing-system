@@ -66,10 +66,10 @@ class OpsSummaryServiceTest {
 
     @AfterEach
     void tearDown() {
-        delete("outbox_task", tasks);
-        delete("booking", bookings);
-        delete("booking_payment", payments);
-        delete("seat_hold", holds);
+        delete("outbox_task", "outbox_task_id", tasks);
+        delete("booking", "booking_id", bookings);
+        delete("booking_payment", "payment_id", payments);
+        delete("seat_hold", "hold_id", holds);
     }
 
     @Test
@@ -232,7 +232,7 @@ class OpsSummaryServiceTest {
 
     private void markSeats(long holdId, String status, Long... seatIds) {
         for (Long seatId : seatIds) {
-            jdbcTemplate.update("UPDATE seat SET status = ?, hold_id = ? WHERE id = ?", status, holdId, seatId);
+            jdbcTemplate.update("UPDATE seat SET status = ?, hold_id = ? WHERE seat_id = ?", status, holdId, seatId);
         }
     }
 
@@ -281,8 +281,8 @@ class OpsSummaryServiceTest {
         return keys.getKey().longValue();
     }
 
-    private void delete(String table, List<Long> ids) {
-        ids.forEach(id -> jdbcTemplate.update("DELETE FROM " + table + " WHERE id = ?", id));
+    private void delete(String table, String idColumn, List<Long> ids) {
+        ids.forEach(id -> jdbcTemplate.update("DELETE FROM " + table + " WHERE " + idColumn + " = ?", id));
         ids.clear();
     }
 

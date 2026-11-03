@@ -254,7 +254,7 @@ class GateKeyReconcileSchedulerTest {
                 fixtures.admit(pid, releasedUser)));
         testRedis.gateKeys(pid).forEach(this::age);
         // 만료 처리와 선점 취소의 DB 쪽만 반영하고 키 해제는 실패한 상황
-        jdbcTemplate.update("UPDATE seat_hold SET status = 'EXPIRED' WHERE id = ?", expired.holdId());
+        jdbcTemplate.update("UPDATE seat_hold SET status = 'EXPIRED' WHERE hold_id = ?", expired.holdId());
         jdbcTemplate.update("UPDATE seat SET status = 'AVAILABLE', hold_id = NULL, held_until = NULL WHERE hold_id = ?",
                 expired.holdId());
         seatHoldTransaction.heldToReleased(releasedUser, released.holdId());

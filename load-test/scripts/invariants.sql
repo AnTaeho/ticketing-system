@@ -3,7 +3,7 @@
 
 -- 같은 좌석이 확정 예매 두 건 이상에 들어간 좌석 수
 SELECT 'overbooked_seats', COUNT(*) FROM (
-  SELECT bs.seat_id FROM booking_seat bs JOIN booking b ON b.id = bs.booking_id
+  SELECT bs.seat_id FROM booking_seat bs JOIN booking b ON b.booking_id = bs.booking_id
    WHERE b.status = 'CONFIRMED' AND b.performance_id = @pid
    GROUP BY bs.seat_id HAVING COUNT(*) > 1) t;
 
@@ -16,13 +16,13 @@ SELECT 'held_seats_past_expiry', COUNT(*) FROM seat
  WHERE performance_id = @pid AND status = 'HELD' AND (held_until IS NULL OR held_until < NOW(6));
 
 SELECT 'confirmed_bookings', COUNT(*) FROM booking WHERE performance_id = @pid AND status = 'CONFIRMED';
-SELECT 'confirmed_booking_seats', COUNT(*) FROM booking_seat bs JOIN booking b ON b.id = bs.booking_id
+SELECT 'confirmed_booking_seats', COUNT(*) FROM booking_seat bs JOIN booking b ON b.booking_id = bs.booking_id
  WHERE b.status = 'CONFIRMED' AND b.performance_id = @pid;
 
 -- 결제가 아직 열린 상태(REQUESTED·UNKNOWN)
-SELECT 'open_payments', COUNT(*) FROM booking_payment bp JOIN seat_hold h ON h.id = bp.hold_id
+SELECT 'open_payments', COUNT(*) FROM booking_payment bp JOIN seat_hold h ON h.hold_id = bp.hold_id
  WHERE h.performance_id = @pid AND bp.status IN ('REQUESTED', 'UNKNOWN');
-SELECT CONCAT('payments_', bp.status), COUNT(*) FROM booking_payment bp JOIN seat_hold h ON h.id = bp.hold_id
+SELECT CONCAT('payments_', bp.status), COUNT(*) FROM booking_payment bp JOIN seat_hold h ON h.hold_id = bp.hold_id
  WHERE h.performance_id = @pid GROUP BY bp.status;
 
 SELECT 'paying_holds', COUNT(*) FROM seat_hold WHERE performance_id = @pid AND status = 'PAYING';
@@ -32,9 +32,9 @@ SELECT CONCAT('holds_', status), COUNT(*) FROM seat_hold WHERE performance_id = 
 -- 이 회차의 Outbox 작업(발권 알림은 예매, 환불은 결제를 가리킨다)
 SELECT CONCAT('outbox_', o.task_type, '_', o.status), COUNT(*) FROM outbox_task o
  WHERE (o.task_type = 'TICKET_ISSUED'
-        AND o.aggregate_id IN (SELECT b.id FROM booking b WHERE b.performance_id = @pid))
+        AND o.aggregate_id IN (SELECT b.booking_id FROM booking b WHERE b.performance_id = @pid))
     OR (o.task_type = 'REFUND_REQUESTED'
-        AND o.aggregate_id IN (SELECT bp.id FROM booking_payment bp JOIN seat_hold h ON h.id = bp.hold_id
+        AND o.aggregate_id IN (SELECT bp.payment_id FROM booking_payment bp JOIN seat_hold h ON h.hold_id = bp.hold_id
                                 WHERE h.performance_id = @pid))
  GROUP BY o.task_type, o.status;
 

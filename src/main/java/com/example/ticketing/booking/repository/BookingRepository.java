@@ -42,12 +42,12 @@ public interface BookingRepository extends JpaRepository<Booking, Long> {
     @Query("select case when pay.status = CANCELLED then true else false end from Payment pay where pay.id = :paymentId")
     Optional<Boolean> findPaymentRefunded(@Param("paymentId") long paymentId);
 
-    @Query(value = "SELECT * FROM booking WHERE id = :id AND user_id = :userId FOR UPDATE", nativeQuery = true)
+    @Query(value = "SELECT * FROM booking WHERE booking_id = :id AND user_id = :userId FOR UPDATE", nativeQuery = true)
     Optional<Booking> lockByIdAndUserId(@Param("id") long id, @Param("userId") long userId);
 
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query(value = """
             UPDATE booking SET status = 'CANCELLED', cancelled_at = NOW(6)
-             WHERE id = :id AND status = 'CONFIRMED'""", nativeQuery = true)
+             WHERE booking_id = :id AND status = 'CONFIRMED'""", nativeQuery = true)
     int confirmedToCancelled(@Param("id") long id);
 }

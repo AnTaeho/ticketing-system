@@ -23,6 +23,7 @@ public class Performance {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Column(name = "performance_id")
     private Long id;
 
     @Column(name = "show_id", nullable = false)

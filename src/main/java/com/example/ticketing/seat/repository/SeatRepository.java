@@ -24,7 +24,7 @@ public interface SeatRepository extends JpaRepository<Seat, Long> {
             UPDATE seat
                SET status = 'HELD', hold_id = :holdId, held_until = :heldUntil
              WHERE performance_id = :performanceId
-               AND id IN (:seatIds)
+               AND seat_id IN (:seatIds)
                AND (status = 'AVAILABLE' OR (status = 'HELD' AND held_until < NOW(6)))""", nativeQuery = true)
     int availableOrExpiredToHeld(@Param("performanceId") long performanceId,
                                  @Param("seatIds") Collection<Long> seatIds,
@@ -72,7 +72,7 @@ public interface SeatRepository extends JpaRepository<Seat, Long> {
             + "where s.holdId in :holdIds and s.status = HELD order by s.id")
     List<HeldSeat> findHeldSeats(@Param("holdIds") Collection<Long> holdIds);
 
-    @Query(value = "SELECT id FROM seat WHERE hold_id = :holdId AND status = 'HELD' ORDER BY id FOR UPDATE",
+    @Query(value = "SELECT seat_id FROM seat WHERE hold_id = :holdId AND status = 'HELD' ORDER BY seat_id FOR UPDATE",
             nativeQuery = true)
     List<Long> lockHeldSeatIds(@Param("holdId") long holdId);
 
@@ -102,7 +102,7 @@ public interface SeatRepository extends JpaRepository<Seat, Long> {
              WHERE hold_id IN (:holdIds) AND status = 'HELD'""", nativeQuery = true)
     int heldToAvailableOfHolds(@Param("holdIds") Collection<Long> holdIds);
 
-    @Query(value = "SELECT id FROM seat WHERE hold_id = :holdId AND status = 'SOLD' ORDER BY id FOR UPDATE",
+    @Query(value = "SELECT seat_id FROM seat WHERE hold_id = :holdId AND status = 'SOLD' ORDER BY seat_id FOR UPDATE",
             nativeQuery = true)
     List<Long> lockSoldSeatIds(@Param("holdId") long holdId);
 

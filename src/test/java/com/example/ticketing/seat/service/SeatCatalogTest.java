@@ -58,8 +58,8 @@ class SeatCatalogTest {
         assertThat(info.gateCloseAt()).isEqualTo(performance.getGateCloseAt());
 
         List<SeatInfo> fromDb = jdbcTemplate.query(
-                "SELECT id, section, row_no, seat_no, grade, price FROM seat WHERE performance_id = ?",
-                (rs, i) -> new SeatInfo(rs.getLong("id"), rs.getString("section"), rs.getInt("row_no"),
+                "SELECT seat_id, section, row_no, seat_no, grade, price FROM seat WHERE performance_id = ?",
+                (rs, i) -> new SeatInfo(rs.getLong("seat_id"), rs.getString("section"), rs.getInt("row_no"),
                         rs.getInt("seat_no"), SeatGrade.valueOf(rs.getString("grade")), rs.getInt("price")),
                 pid);
         assertThat(fromDb).hasSize(80);

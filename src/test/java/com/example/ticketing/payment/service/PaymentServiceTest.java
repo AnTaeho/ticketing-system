@@ -118,7 +118,7 @@ class PaymentServiceTest {
 
         Map<String, Object> booking = jdbcTemplate.queryForMap(
                 "SELECT hold_id, payment_id, user_id, performance_id, total_amount, status, booking_number "
-                        + "FROM booking WHERE id = ?", bookingId);
+                        + "FROM booking WHERE booking_id = ?", bookingId);
         assertThat(booking).containsEntry("hold_id", held.holdId()).containsEntry("payment_id", paymentId)
                 .containsEntry("user_id", held.userId()).containsEntry("performance_id", held.pid())
                 .containsEntry("total_amount", held.totalAmount()).containsEntry("status", "CONFIRMED")
@@ -129,7 +129,7 @@ class PaymentServiceTest {
                 "SELECT bs.seat_id, bs.price, s.price AS seat_price, bs.section, s.section AS seat_section, "
                         + "bs.row_no, s.row_no AS seat_row, bs.seat_no, s.seat_no AS seat_seat_no, "
                         + "bs.grade, s.grade AS seat_grade "
-                        + "FROM booking_seat bs JOIN seat s ON s.id = bs.seat_id "
+                        + "FROM booking_seat bs JOIN seat s ON s.seat_id = bs.seat_id "
                         + "WHERE bs.booking_id = ? ORDER BY bs.seat_id", bookingId);
         assertThat(copied).extracting(row -> ((Number) row.get("seat_id")).longValue())
                 .containsExactlyElementsOf(held.seatIds());
@@ -166,7 +166,7 @@ class PaymentServiceTest {
         assertThat(stubPg.approvals().get(0).orderId()).isEqualTo(payment.get("order_id"));
 
         LocalDateTime gateCloseAt = jdbcTemplate.queryForObject(
-                "SELECT gate_close_at FROM performance WHERE id = ?", LocalDateTime.class, held.pid());
+                "SELECT gate_close_at FROM performance WHERE performance_id = ?", LocalDateTime.class, held.pid());
         long expectedMs = Duration.between(now, gateCloseAt).toMillis();
         for (long seatId : held.seatIds()) {
             String seatKey = RedisKeys.seat(held.pid(), seatId);
@@ -405,7 +405,7 @@ class PaymentServiceTest {
                 new CreateHoldCommand(thief, held.pid(), List.of(db.seatIds(held.pid()).get(2)),
                 fixtures.admit(held.pid(), thief)));
         stubPg.beforeApproveReturns(orderId ->
-                jdbcTemplate.update("UPDATE seat SET hold_id = ? WHERE id = ?", thiefHold.holdId(), lost));
+                jdbcTemplate.update("UPDATE seat SET hold_id = ? WHERE seat_id = ?", thiefHold.holdId(), lost));
         String key = key();
 
         ApiException e = catchApiException(() -> paymentService.pay(command(held, key)));

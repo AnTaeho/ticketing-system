@@ -44,12 +44,12 @@ class LocalSeedRunnerTest {
         runner.seed();
         runner.seed();
 
-        List<Long> showIds = jdbcTemplate.queryForList("SELECT id FROM show_info WHERE title = ?",
+        List<Long> showIds = jdbcTemplate.queryForList("SELECT show_id FROM show_info WHERE title = ?",
                 Long.class, LocalSeedRunner.SEED_TITLE);
         assertThat(showIds).hasSize(1);
         List<Map<String, Object>> performances = jdbcTemplate.queryForList("""
-                SELECT p.id, p.open_at, p.starts_at,
-                       (SELECT COUNT(*) FROM seat s WHERE s.performance_id = p.id) AS seat_count
+                SELECT p.performance_id, p.open_at, p.starts_at,
+                       (SELECT COUNT(*) FROM seat s WHERE s.performance_id = p.performance_id) AS seat_count
                 FROM performance p WHERE p.show_id = ? ORDER BY p.open_at""", showIds.get(0));
         assertThat(performances).hasSize(2);
 
@@ -66,13 +66,13 @@ class LocalSeedRunnerTest {
 
     // 이 테스트 DB에 이전 실행이 남긴 시드만 지워 첫 호출이 실제로 만들게 한다
     private void deleteExistingSeed() {
-        List<Long> showIds = jdbcTemplate.queryForList("SELECT id FROM show_info WHERE title = ?",
+        List<Long> showIds = jdbcTemplate.queryForList("SELECT show_id FROM show_info WHERE title = ?",
                 Long.class, LocalSeedRunner.SEED_TITLE);
         for (Long showId : showIds) {
-            jdbcTemplate.update("DELETE s FROM seat s JOIN performance p ON s.performance_id = p.id WHERE p.show_id = ?",
+            jdbcTemplate.update("DELETE s FROM seat s JOIN performance p ON s.performance_id = p.performance_id WHERE p.show_id = ?",
                     showId);
             jdbcTemplate.update("DELETE FROM performance WHERE show_id = ?", showId);
-            jdbcTemplate.update("DELETE FROM show_info WHERE id = ?", showId);
+            jdbcTemplate.update("DELETE FROM show_info WHERE show_id = ?", showId);
         }
     }
 }

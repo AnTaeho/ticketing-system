@@ -218,13 +218,13 @@ create_performance() {
 # 결제·hold·Outbox가 끝날 때까지 남은 일(열린 결제 + PAYING·REFUNDING hold + 대기·처리 중 Outbox)
 open_work() {
   sql "SELECT
-    (SELECT COUNT(*) FROM booking_payment bp JOIN seat_hold h ON h.id = bp.hold_id
+    (SELECT COUNT(*) FROM booking_payment bp JOIN seat_hold h ON h.hold_id = bp.hold_id
       WHERE h.performance_id = $1 AND bp.status IN ('REQUESTED','UNKNOWN'))
   + (SELECT COUNT(*) FROM seat_hold WHERE performance_id = $1 AND status IN ('PAYING','REFUNDING'))
   + (SELECT COUNT(*) FROM outbox_task o WHERE o.status IN ('PENDING','PROCESSING') AND (
-       (o.task_type = 'TICKET_ISSUED' AND o.aggregate_id IN (SELECT id FROM booking WHERE performance_id = $1))
-    OR (o.task_type = 'REFUND_REQUESTED' AND o.aggregate_id IN (SELECT bp.id FROM booking_payment bp
-          JOIN seat_hold h ON h.id = bp.hold_id WHERE h.performance_id = $1))))"
+       (o.task_type = 'TICKET_ISSUED' AND o.aggregate_id IN (SELECT booking_id FROM booking WHERE performance_id = $1))
+    OR (o.task_type = 'REFUND_REQUESTED' AND o.aggregate_id IN (SELECT bp.payment_id FROM booking_payment bp
+          JOIN seat_hold h ON h.hold_id = bp.hold_id WHERE h.performance_id = $1))))"
 }
 
 # 남은 일이 0이 될 때까지 2초 간격으로 DRAIN_SECONDS까지 기다린다. "걸린 초 남은 일" 을 돌려준다

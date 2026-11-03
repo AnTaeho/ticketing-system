@@ -21,6 +21,7 @@ class SchemaTest {
         String ddl = db.showCreateTable("app_user");
 
         assertThat(ddl)
+                .contains("PRIMARY KEY (`user_id`)")
                 .contains("UNIQUE KEY `uk_app_user_nickname` (`nickname`)")
                 .contains("`nickname` varchar(30) NOT NULL")
                 .contains("`created_at` datetime(6) NOT NULL");
@@ -32,6 +33,7 @@ class SchemaTest {
         String ddl = db.showCreateTable("show_info");
 
         assertThat(ddl)
+                .contains("PRIMARY KEY (`show_id`)")
                 .contains("`title` varchar(200) NOT NULL")
                 .contains("`venue_name` varchar(100) NOT NULL")
                 .contains("`description` varchar(1000)");
@@ -43,6 +45,7 @@ class SchemaTest {
         String ddl = db.showCreateTable("performance");
 
         assertThat(ddl)
+                .contains("PRIMARY KEY (`performance_id`)")
                 .contains("KEY `idx_perf_show` (`show_id`,`starts_at`)")
                 .contains("KEY `idx_perf_open` (`open_at`,`starts_at`)")
                 .contains("`starts_at` datetime(6) NOT NULL")
@@ -56,6 +59,7 @@ class SchemaTest {
         String ddl = db.showCreateTable("seat");
 
         assertThat(ddl)
+                .contains("PRIMARY KEY (`seat_id`)")
                 .contains("UNIQUE KEY `uk_seat_position` (`performance_id`,`section`,`row_no`,`seat_no`)")
                 .contains("KEY `idx_seat_perf_status` (`performance_id`,`status`)")
                 .contains("KEY `idx_seat_hold` (`hold_id`)")
@@ -70,6 +74,7 @@ class SchemaTest {
         String ddl = db.showCreateTable("seat_hold");
 
         assertThat(ddl)
+                .contains("PRIMARY KEY (`hold_id`)")
                 .contains("UNIQUE KEY `uk_hold_token` (`hold_token`)")
                 .contains("KEY `idx_hold_expiry` (`status`,`expires_at`)")
                 .contains("KEY `idx_hold_user` (`user_id`,`performance_id`,`status`)")
@@ -87,6 +92,7 @@ class SchemaTest {
         String ddl = db.showCreateTable("booking_payment");
 
         assertThat(ddl)
+                .contains("PRIMARY KEY (`payment_id`)")
                 .contains("UNIQUE KEY `uk_payment_hold` (`hold_id`)")
                 .contains("UNIQUE KEY `uk_payment_idem` (`user_id`,`idempotency_key`)")
                 .contains("UNIQUE KEY `uk_payment_order` (`order_id`)")
@@ -108,6 +114,7 @@ class SchemaTest {
         String ddl = db.showCreateTable("booking");
 
         assertThat(ddl)
+                .contains("PRIMARY KEY (`booking_id`)")
                 .contains("UNIQUE KEY `uk_booking_hold` (`hold_id`)")
                 .contains("UNIQUE KEY `uk_booking_number` (`booking_number`)")
                 .contains("KEY `idx_booking_user` (`user_id`,`created_at`)")
@@ -139,6 +146,7 @@ class SchemaTest {
         String ddl = db.showCreateTable("outbox_task");
 
         assertThat(ddl)
+                .contains("PRIMARY KEY (`outbox_task_id`)")
                 .contains("UNIQUE KEY `uk_outbox_dedup` (`task_type`,`aggregate_id`)")
                 .contains("KEY `idx_outbox_poll` (`status`,`next_attempt_at`)")
                 .contains("`task_type` varchar(30) NOT NULL")
@@ -157,6 +165,7 @@ class SchemaTest {
         String ddl = db.showCreateTable("notification");
 
         assertThat(ddl)
+                .contains("PRIMARY KEY (`notification_id`)")
                 .contains("UNIQUE KEY `uk_notification_booking` (`booking_id`)")
                 .contains("KEY `idx_notification_user` (`user_id`,`created_at`)")
                 .contains("`message` varchar(300) NOT NULL")

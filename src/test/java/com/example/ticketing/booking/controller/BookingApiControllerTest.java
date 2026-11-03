@@ -162,7 +162,7 @@ class BookingApiControllerTest {
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.code").value("LOGIN_REQUIRED"));
 
-        jdbcTemplate.update("UPDATE performance SET starts_at = NOW(6) - INTERVAL 1 SECOND WHERE id = ?", b.pid());
+        jdbcTemplate.update("UPDATE performance SET starts_at = NOW(6) - INTERVAL 1 SECOND WHERE performance_id = ?", b.pid());
         mockMvc.perform(post("/api/bookings/{id}/cancel", b.bookingId()).header(USER_ID_HEADER, userId))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("CANCEL_NOT_ALLOWED"));

@@ -15,15 +15,15 @@ import org.springframework.transaction.annotation.Transactional;
 public class PaymentJdbcRepository {
 
     private static final String CLAIM_DUE_SQL = """
-            SELECT id AS payment_id, order_id, created_at FROM booking_payment
+            SELECT payment_id, order_id, created_at FROM booking_payment
              WHERE status IN ('REQUESTED', 'UNKNOWN') AND next_check_at <= NOW(6)
-             ORDER BY id LIMIT :batch
+             ORDER BY payment_id LIMIT :batch
              FOR UPDATE SKIP LOCKED""";
 
     private static final String LEASE_SQL = """
             UPDATE booking_payment
                SET next_check_at = DATE_ADD(NOW(6), INTERVAL :leaseMicros MICROSECOND), updated_at = NOW(6)
-             WHERE id IN (:ids)""";
+             WHERE payment_id IN (:ids)""";
 
     private final NamedParameterJdbcTemplate jdbcTemplate;
 

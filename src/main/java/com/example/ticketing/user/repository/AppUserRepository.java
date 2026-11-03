@@ -11,6 +11,6 @@ public interface AppUserRepository extends JpaRepository<AppUser, Long> {
     Optional<AppUser> findByNickname(String nickname);
 
     // 같은 사용자의 상태 변경 트랜잭션을 이 행에서 줄 세운다
-    @Query(value = "SELECT id FROM app_user WHERE id = :id FOR UPDATE", nativeQuery = true)
+    @Query(value = "SELECT user_id FROM app_user WHERE user_id = :id FOR UPDATE", nativeQuery = true)
     Optional<Long> lockById(@Param("id") long id);
 }

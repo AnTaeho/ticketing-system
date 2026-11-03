@@ -42,7 +42,7 @@ class DemoLoginServiceTest {
         assertThat(userIds).hasSize(1);
         assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM app_user WHERE nickname = ?",
                 Long.class, nickname)).isEqualTo(1L);
-        Long rowId = jdbcTemplate.queryForObject("SELECT id FROM app_user WHERE nickname = ?", Long.class, nickname);
+        Long rowId = jdbcTemplate.queryForObject("SELECT user_id FROM app_user WHERE nickname = ?", Long.class, nickname);
         assertThat(userIds).containsExactly(rowId);
     }
 

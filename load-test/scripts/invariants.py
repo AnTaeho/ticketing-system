@@ -51,7 +51,7 @@ def redis_values(pattern):
 def gate_mismatch(pid):
     """게이트 키와 DB가 어긋난 수. 살아 있는 좌석(HELD·SOLD)은 그 hold 토큰을 값으로 가진 키가 있어야 한다."""
     live_seats = {}
-    for line in mysql(f"""SELECT s.id, h.hold_token FROM seat s JOIN seat_hold h ON h.id = s.hold_id
+    for line in mysql(f"""SELECT s.seat_id, h.hold_token FROM seat s JOIN seat_hold h ON h.hold_id = s.hold_id
                            WHERE s.performance_id = {pid} AND s.status IN ('HELD', 'SOLD')""").splitlines():
         seat_id, token = line.split("\t")
         live_seats[f"seat:{{p:{pid}}}:{seat_id}"] = token

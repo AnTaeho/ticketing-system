@@ -121,7 +121,7 @@ class BookingCancelTest {
         assertThat(response)
                 .isEqualTo(new CancelResult(c.bookingId(), BookingStatus.CANCELLED, RefundStatus.REQUESTED));
         Map<String, Object> booking = jdbcTemplate.queryForMap(
-                "SELECT status, cancelled_at FROM booking WHERE id = ?", c.bookingId());
+                "SELECT status, cancelled_at FROM booking WHERE booking_id = ?", c.bookingId());
         assertThat(booking).containsEntry("status", "CANCELLED");
         assertThat(booking.get("cancelled_at")).isNotNull();
         c.seatIds().forEach(seatId -> assertThat(db.seat(seatId)).containsEntry("status", "AVAILABLE")
@@ -196,7 +196,7 @@ class BookingCancelTest {
         ApiException e = catchApiException(() -> bookingService.cancel(c.userId(), c.bookingId()));
 
         assertThat(e.getCode()).isEqualTo(ErrorCode.CANCEL_NOT_ALLOWED);
-        assertThat(jdbcTemplate.queryForMap("SELECT status, cancelled_at FROM booking WHERE id = ?", c.bookingId()))
+        assertThat(jdbcTemplate.queryForMap("SELECT status, cancelled_at FROM booking WHERE booking_id = ?", c.bookingId()))
                 .containsEntry("status", "CONFIRMED").containsEntry("cancelled_at", null);
         assertThat(db.seat(c.seatIds().get(0))).containsEntry("status", "SOLD").containsEntry("hold_id", c.holdId());
         assertThat(db.outboxCount("REFUND_REQUESTED", c.paymentId())).isZero();
@@ -229,7 +229,7 @@ class BookingCancelTest {
                 .isEqualTo(ErrorCode.BOOKING_NOT_FOUND);
         assertThat(bookingService.list(stranger)).isEmpty();
 
-        assertThat(jdbcTemplate.queryForObject("SELECT status FROM booking WHERE id = ?", String.class, c.bookingId()))
+        assertThat(jdbcTemplate.queryForObject("SELECT status FROM booking WHERE booking_id = ?", String.class, c.bookingId()))
                 .isEqualTo("CONFIRMED");
         assertThat(db.seat(c.seatIds().get(0))).containsEntry("status", "SOLD");
         assertThat(db.outboxCount("REFUND_REQUESTED", c.paymentId())).isZero();
@@ -284,11 +284,11 @@ class BookingCancelTest {
     }
 
     private void startPerformance(long pid) {
-        jdbcTemplate.update("UPDATE performance SET starts_at = NOW(6) - INTERVAL 1 SECOND WHERE id = ?", pid);
+        jdbcTemplate.update("UPDATE performance SET starts_at = NOW(6) - INTERVAL 1 SECOND WHERE performance_id = ?", pid);
     }
 
     private LocalDateTime cancelledAt(long bookingId) {
-        return jdbcTemplate.queryForObject("SELECT cancelled_at FROM booking WHERE id = ?", LocalDateTime.class,
+        return jdbcTemplate.queryForObject("SELECT cancelled_at FROM booking WHERE booking_id = ?", LocalDateTime.class,
                 bookingId);
     }
 

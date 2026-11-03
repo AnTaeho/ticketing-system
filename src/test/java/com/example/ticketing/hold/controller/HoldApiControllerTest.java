@@ -142,7 +142,7 @@ class HoldApiControllerTest {
         long userId = fixtures.newUser();
         long holdId = testMvc.body(hold(userId, pid, List.of(seatId))
                 .andExpect(status().isCreated()).andReturn()).get("holdId").asLong();
-        jdbcTemplate.update("UPDATE seat_hold SET status = 'PAYING' WHERE id = ?", holdId);
+        jdbcTemplate.update("UPDATE seat_hold SET status = 'PAYING' WHERE hold_id = ?", holdId);
 
         mockMvc.perform(delete("/api/holds/{holdId}", holdId).header(USER_ID_HEADER, userId))
                 .andExpect(status().isConflict())
@@ -161,7 +161,7 @@ class HoldApiControllerTest {
             long userId = fixtures.newUser();
             long holdId = testMvc.body(hold(userId, pid, List.of(db.seatIds(pid).get(i)))
                     .andExpect(status().isCreated()).andReturn()).get("holdId").asLong();
-            jdbcTemplate.update("UPDATE seat_hold SET status = ? WHERE id = ?", finished, holdId);
+            jdbcTemplate.update("UPDATE seat_hold SET status = ? WHERE hold_id = ?", finished, holdId);
 
             mockMvc.perform(delete("/api/holds/{holdId}", holdId).header(USER_ID_HEADER, userId))
                     .andExpect(status().isConflict())
@@ -248,7 +248,7 @@ class HoldApiControllerTest {
 
         long holdId = holdId(userId, pid, db.seatIds(pid).get(0));
         String expiresAt = jdbcTemplate.queryForObject(
-                "SELECT DATE_FORMAT(expires_at, '%Y-%m-%dT%H:%i:%s') FROM seat_hold WHERE id = ?", String.class, holdId);
+                "SELECT DATE_FORMAT(expires_at, '%Y-%m-%dT%H:%i:%s') FROM seat_hold WHERE hold_id = ?", String.class, holdId);
 
         mine(userId, pid)
                 .andExpect(status().isOk())
@@ -263,7 +263,7 @@ class HoldApiControllerTest {
         long pid = fixtures.newPerformance(1, 1, 2);
         long userId = fixtures.newUser();
         long holdId = holdId(userId, pid, db.seatIds(pid).get(0));
-        jdbcTemplate.update("UPDATE seat_hold SET status = 'PAYING' WHERE id = ?", holdId);
+        jdbcTemplate.update("UPDATE seat_hold SET status = 'PAYING' WHERE hold_id = ?", holdId);
 
         mine(userId, pid)
                 .andExpect(status().isOk())

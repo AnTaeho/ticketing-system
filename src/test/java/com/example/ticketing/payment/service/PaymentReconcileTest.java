@@ -119,7 +119,7 @@ class PaymentReconcileTest {
         assertThat(db.outboxCount("TICKET_ISSUED", bookingId)).isEqualTo(1);
 
         LocalDateTime gateCloseAt = jdbcTemplate.queryForObject(
-                "SELECT gate_close_at FROM performance WHERE id = ?", LocalDateTime.class, held.pid());
+                "SELECT gate_close_at FROM performance WHERE performance_id = ?", LocalDateTime.class, held.pid());
         long expectedMs = Duration.between(db.dbNow(), gateCloseAt).toMillis();
         for (long seatId : held.seatIds()) {
             String seatKey = RedisKeys.seat(held.pid(), seatId);
@@ -202,7 +202,7 @@ class PaymentReconcileTest {
         long kept = held.seatIds().get(0);
         long lost = held.seatIds().get(1);
         long paymentId = orphan(held);
-        jdbcTemplate.update("UPDATE seat SET held_until = NOW(6) - INTERVAL 1 SECOND WHERE id = ?", lost);
+        jdbcTemplate.update("UPDATE seat SET held_until = NOW(6) - INTERVAL 1 SECOND WHERE seat_id = ?", lost);
         redis.delete(RedisKeys.seat(held.pid(), lost));
         long thief = fixtures.newUser();
         CreateHoldResult thiefHold = seatHoldService.hold(
@@ -258,7 +258,7 @@ class PaymentReconcileTest {
         TransactionTemplate tx = new TransactionTemplate(transactionManager);
         try (Running<Void> holder = Concurrently.of(1).within(Duration.ofSeconds(10)).start(i -> {
             tx.executeWithoutResult(status -> {
-                jdbcTemplate.queryForList("SELECT id FROM booking_payment WHERE id = ? FOR UPDATE", paymentId);
+                jdbcTemplate.queryForList("SELECT payment_id FROM booking_payment WHERE payment_id = ? FOR UPDATE", paymentId);
                 locked.countDown();
                 await(release);
             });

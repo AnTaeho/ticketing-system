@@ -2,34 +2,34 @@
 -- prod 프로필은 ddl-auto: validate라 이 DDL로 테이블을 먼저 만든다.
 
 CREATE TABLE `app_user` (
-  `id` bigint NOT NULL AUTO_INCREMENT,
+  `user_id` bigint NOT NULL AUTO_INCREMENT,
   `created_at` datetime(6) NOT NULL,
   `nickname` varchar(30) NOT NULL,
-  PRIMARY KEY (`id`),
+  PRIMARY KEY (`user_id`),
   UNIQUE KEY `uk_app_user_nickname` (`nickname`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE `show_info` (
-  `id` bigint NOT NULL AUTO_INCREMENT,
+  `show_id` bigint NOT NULL AUTO_INCREMENT,
   `description` varchar(1000) DEFAULT NULL,
   `title` varchar(200) NOT NULL,
   `venue_name` varchar(100) NOT NULL,
-  PRIMARY KEY (`id`)
+  PRIMARY KEY (`show_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE `performance` (
-  `id` bigint NOT NULL AUTO_INCREMENT,
+  `performance_id` bigint NOT NULL AUTO_INCREMENT,
   `gate_close_at` datetime(6) NOT NULL,
   `open_at` datetime(6) NOT NULL,
   `show_id` bigint NOT NULL,
   `starts_at` datetime(6) NOT NULL,
-  PRIMARY KEY (`id`),
+  PRIMARY KEY (`performance_id`),
   KEY `idx_perf_show` (`show_id`,`starts_at`),
   KEY `idx_perf_open` (`open_at`,`starts_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE `seat` (
-  `id` bigint NOT NULL AUTO_INCREMENT,
+  `seat_id` bigint NOT NULL AUTO_INCREMENT,
   `grade` varchar(10) NOT NULL,
   `held_until` datetime(6) DEFAULT NULL,
   `hold_id` bigint DEFAULT NULL,
@@ -39,7 +39,7 @@ CREATE TABLE `seat` (
   `seat_no` int NOT NULL,
   `section` varchar(10) NOT NULL,
   `status` varchar(10) NOT NULL,
-  PRIMARY KEY (`id`),
+  PRIMARY KEY (`seat_id`),
   UNIQUE KEY `uk_seat_position` (`performance_id`,`section`,`row_no`,`seat_no`),
   KEY `idx_seat_perf_status` (`performance_id`,`status`),
   KEY `idx_seat_hold` (`hold_id`),
@@ -48,7 +48,7 @@ CREATE TABLE `seat` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE `seat_hold` (
-  `id` bigint NOT NULL AUTO_INCREMENT,
+  `hold_id` bigint NOT NULL AUTO_INCREMENT,
   `created_at` datetime(6) NOT NULL,
   `expires_at` datetime(6) NOT NULL,
   `hold_token` char(36) NOT NULL,
@@ -59,7 +59,7 @@ CREATE TABLE `seat_hold` (
   `total_amount` int NOT NULL,
   `updated_at` datetime(6) NOT NULL,
   `user_id` bigint NOT NULL,
-  PRIMARY KEY (`id`),
+  PRIMARY KEY (`hold_id`),
   UNIQUE KEY `uk_hold_token` (`hold_token`),
   KEY `idx_hold_expiry` (`status`,`expires_at`),
   KEY `idx_hold_user` (`user_id`,`performance_id`,`status`),
@@ -67,7 +67,7 @@ CREATE TABLE `seat_hold` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE `booking_payment` (
-  `id` bigint NOT NULL AUTO_INCREMENT,
+  `payment_id` bigint NOT NULL AUTO_INCREMENT,
   `amount` int NOT NULL,
   `created_at` datetime(6) NOT NULL,
   `hold_id` bigint NOT NULL,
@@ -79,7 +79,7 @@ CREATE TABLE `booking_payment` (
   `status` varchar(12) NOT NULL,
   `updated_at` datetime(6) NOT NULL,
   `user_id` bigint NOT NULL,
-  PRIMARY KEY (`id`),
+  PRIMARY KEY (`payment_id`),
   UNIQUE KEY `uk_payment_hold` (`hold_id`),
   UNIQUE KEY `uk_payment_idem` (`user_id`,`idempotency_key`),
   UNIQUE KEY `uk_payment_order` (`order_id`),
@@ -88,7 +88,7 @@ CREATE TABLE `booking_payment` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE `booking` (
-  `id` bigint NOT NULL AUTO_INCREMENT,
+  `booking_id` bigint NOT NULL AUTO_INCREMENT,
   `booking_number` varchar(20) NOT NULL,
   `cancelled_at` datetime(6) DEFAULT NULL,
   `created_at` datetime(6) NOT NULL,
@@ -98,7 +98,7 @@ CREATE TABLE `booking` (
   `status` varchar(12) NOT NULL,
   `total_amount` int NOT NULL,
   `user_id` bigint NOT NULL,
-  PRIMARY KEY (`id`),
+  PRIMARY KEY (`booking_id`),
   UNIQUE KEY `uk_booking_hold` (`hold_id`),
   UNIQUE KEY `uk_booking_number` (`booking_number`),
   KEY `idx_booking_user` (`user_id`,`created_at`),
@@ -118,7 +118,7 @@ CREATE TABLE `booking_seat` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE `outbox_task` (
-  `id` bigint NOT NULL AUTO_INCREMENT,
+  `outbox_task_id` bigint NOT NULL AUTO_INCREMENT,
   `aggregate_id` bigint NOT NULL,
   `attempt` int NOT NULL,
   `created_at` datetime(6) NOT NULL,
@@ -129,7 +129,7 @@ CREATE TABLE `outbox_task` (
   `status` varchar(12) NOT NULL,
   `task_type` varchar(30) NOT NULL,
   `updated_at` datetime(6) NOT NULL,
-  PRIMARY KEY (`id`),
+  PRIMARY KEY (`outbox_task_id`),
   UNIQUE KEY `uk_outbox_dedup` (`task_type`,`aggregate_id`),
   KEY `idx_outbox_poll` (`status`,`next_attempt_at`),
   CONSTRAINT `outbox_task_chk_1` CHECK ((`status` in (_utf8mb4'PENDING',_utf8mb4'PROCESSING',_utf8mb4'DONE',_utf8mb4'FAILED'))),
@@ -137,12 +137,12 @@ CREATE TABLE `outbox_task` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE `notification` (
-  `id` bigint NOT NULL AUTO_INCREMENT,
+  `notification_id` bigint NOT NULL AUTO_INCREMENT,
   `booking_id` bigint NOT NULL,
   `created_at` datetime(6) NOT NULL,
   `message` varchar(300) NOT NULL,
   `user_id` bigint NOT NULL,
-  PRIMARY KEY (`id`),
+  PRIMARY KEY (`notification_id`),
   UNIQUE KEY `uk_notification_booking` (`booking_id`),
   KEY `idx_notification_user` (`user_id`,`created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;

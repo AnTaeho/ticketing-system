@@ -36,6 +36,7 @@ public class SeatHold {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Column(name = "hold_id")
     private Long id;
 
     @Column(name = "performance_id", nullable = false)

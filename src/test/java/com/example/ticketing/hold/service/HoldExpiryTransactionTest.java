@@ -87,7 +87,7 @@ class HoldExpiryTransactionTest {
         List<Long> target = db.seatIds(pid).subList(0, 2);
         long holdId = fixtures.held(pid, target).holdId();
         jdbcTemplate.update("UPDATE seat_hold SET status = 'PAYING', expires_at = NOW(6) - INTERVAL 1 MINUTE "
-                + "WHERE id = ?", holdId);
+                + "WHERE hold_id = ?", holdId);
 
         List<HoldExpiry> returned = drain();
 

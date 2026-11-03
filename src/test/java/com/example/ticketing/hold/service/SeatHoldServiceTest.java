@@ -63,7 +63,7 @@ class SeatHoldServiceTest {
                 new CreateHoldCommand(userId, pid, List.of(ids.get(1), ids.get(0)),
                 fixtures.admit(pid, userId)));
 
-        Map<String, Object> hold = jdbcTemplate.queryForMap("SELECT * FROM seat_hold WHERE id = ?", created.holdId());
+        Map<String, Object> hold = jdbcTemplate.queryForMap("SELECT * FROM seat_hold WHERE hold_id = ?", created.holdId());
         assertThat(hold.get("status")).isEqualTo("HELD");
         assertThat(hold.get("user_id")).isEqualTo(userId);
         assertThat(hold.get("performance_id")).isEqualTo(pid);
@@ -107,7 +107,7 @@ class SeatHoldServiceTest {
 
         assertThat(db.holdStatus(holdA.holdId())).isEqualTo("RELEASED");
         List<Map<String, Object>> seats = jdbcTemplate.queryForList(
-                "SELECT status, hold_id, held_until FROM seat WHERE id IN (?, ?)", target.get(0), target.get(1));
+                "SELECT status, hold_id, held_until FROM seat WHERE seat_id IN (?, ?)", target.get(0), target.get(1));
         assertThat(seats).allSatisfy(seat -> {
             assertThat(seat.get("status")).isEqualTo("AVAILABLE");
             assertThat(seat.get("hold_id")).isNull();

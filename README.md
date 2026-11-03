@@ -57,7 +57,7 @@ flowchart LR
 | 대기열 | 회차별 처리열 정원(기본 200)으로 좌석 화면 유입을 묶습니다. 정원 칸은 좌석 잡기가 DB 커밋까지 성공하거나, 좌석 화면의 생존 신호가 2분 끊기거나, 화면을 떠나고 10초가 지나면 비웁니다. 매진이면 새 진입과 승격을 멈추고 기다리던 사람에게 매진을 알립니다 | Redis Sorted Set + Lua |
 | 좌석맵 | 리스를 잡은 서버 한 대가 1초마다 스냅샷을 만들고, 나머지는 로컬 캐시 → Redis 순으로 읽습니다 | Redis + 로컬 캐시 |
 | 좌석 게이트 | `seat:{p:N}:<seatId> = holdToken`. 1인 동시 1건, 만료 좌석 재잡기 10분 쿨다운 | Redis Lua |
-| 좌석 판정 | `UPDATE seat SET HELD ... WHERE id IN (...) AND (AVAILABLE OR held_until < NOW(6))`, 영향 행 수 = 좌석 수일 때만 성공 | MySQL |
+| 좌석 판정 | `UPDATE seat SET HELD ... WHERE seat_id IN (...) AND (AVAILABLE OR held_until < NOW(6))`, 영향 행 수 = 좌석 수일 때만 성공 | MySQL |
 | 결제 | 멱등키 · hold 행 락 + 조건부 전이 · 유니크 · PG 주문번호의 네 겹으로 이중 결제를 막습니다 | MySQL + Fake PG(HTTP) |
 | 대사·워커 | 만료(SKIP LOCKED), 결제 대사, Outbox 워커(발권 알림·환불), 고아 게이트 키 정리 | MySQL + Redis 리스 |
 

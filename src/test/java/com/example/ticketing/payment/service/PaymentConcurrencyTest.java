@@ -169,7 +169,7 @@ class PaymentConcurrencyTest {
         // 두 hold 행을 잠가 두 요청이 1단계(멱등키 조회)를 모두 지난 뒤 hold 락에서 기다리게 한다
         try (Running<Void> blocker = Concurrently.of(1).within(Duration.ofSeconds(30)).start(i -> {
             new TransactionTemplate(transactionManager).executeWithoutResult(s -> {
-                jdbcTemplate.queryForList("SELECT id FROM seat_hold WHERE id IN (?, ?) ORDER BY id FOR UPDATE",
+                jdbcTemplate.queryForList("SELECT hold_id FROM seat_hold WHERE hold_id IN (?, ?) ORDER BY hold_id FOR UPDATE",
                         Long.class, holdA, holdB);
                 locked.countDown();
                 try {
@@ -216,7 +216,7 @@ class PaymentConcurrencyTest {
             for (long holdId : holdIds) {
                 Long count = jdbcTemplate.queryForObject(
                         "SELECT COUNT(*) FROM information_schema.PROCESSLIST WHERE info LIKE ?", Long.class,
-                        "SELECT * FROM seat_hold WHERE id = " + holdId + " AND user_id = % FOR UPDATE");
+                        "SELECT * FROM seat_hold WHERE hold_id = " + holdId + " AND user_id = % FOR UPDATE");
                 waiting += count == null ? 0 : count.intValue();
             }
             return waiting >= holdIds.length;

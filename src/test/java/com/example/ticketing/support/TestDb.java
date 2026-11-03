@@ -25,26 +25,26 @@ public class TestDb {
     }
 
     public List<Long> seatIds(long pid) {
-        return jdbcTemplate.queryForList("SELECT id FROM seat WHERE performance_id = ? ORDER BY id", Long.class, pid);
+        return jdbcTemplate.queryForList("SELECT seat_id FROM seat WHERE performance_id = ? ORDER BY seat_id", Long.class, pid);
     }
 
     // 배치 순서(열, 구역, 번호). 등급이 열로 정해지므로 앞쪽이 비싼 좌석이다
     public List<Long> seatIdsInLayoutOrder(long pid) {
         return jdbcTemplate.queryForList(
-                "SELECT id FROM seat WHERE performance_id = ? ORDER BY row_no, section, seat_no", Long.class, pid);
+                "SELECT seat_id FROM seat WHERE performance_id = ? ORDER BY row_no, section, seat_no", Long.class, pid);
     }
 
     public Map<String, Object> seat(long seatId) {
-        return jdbcTemplate.queryForMap("SELECT status, hold_id, held_until, price FROM seat WHERE id = ?", seatId);
+        return jdbcTemplate.queryForMap("SELECT status, hold_id, held_until, price FROM seat WHERE seat_id = ?", seatId);
     }
 
     public String seatStatus(long seatId) {
-        return jdbcTemplate.queryForObject("SELECT status FROM seat WHERE id = ?", String.class, seatId);
+        return jdbcTemplate.queryForObject("SELECT status FROM seat WHERE seat_id = ?", String.class, seatId);
     }
 
     public List<Long> heldSeats(long pid, long holdId) {
         return jdbcTemplate.queryForList(
-                "SELECT id FROM seat WHERE performance_id = ? AND hold_id = ? AND status = 'HELD' ORDER BY id",
+                "SELECT seat_id FROM seat WHERE performance_id = ? AND hold_id = ? AND status = 'HELD' ORDER BY seat_id",
                 Long.class, pid, holdId);
     }
 
@@ -54,15 +54,15 @@ public class TestDb {
     }
 
     public String holdStatus(long holdId) {
-        return jdbcTemplate.queryForObject("SELECT status FROM seat_hold WHERE id = ?", String.class, holdId);
+        return jdbcTemplate.queryForObject("SELECT status FROM seat_hold WHERE hold_id = ?", String.class, holdId);
     }
 
     public String holdToken(long holdId) {
-        return jdbcTemplate.queryForObject("SELECT hold_token FROM seat_hold WHERE id = ?", String.class, holdId);
+        return jdbcTemplate.queryForObject("SELECT hold_token FROM seat_hold WHERE hold_id = ?", String.class, holdId);
     }
 
     public LocalDateTime payDeadline(long holdId) {
-        return jdbcTemplate.queryForObject("SELECT pay_deadline FROM seat_hold WHERE id = ?", LocalDateTime.class,
+        return jdbcTemplate.queryForObject("SELECT pay_deadline FROM seat_hold WHERE hold_id = ?", LocalDateTime.class,
                 holdId);
     }
 
@@ -72,18 +72,18 @@ public class TestDb {
 
     // 선점의 만료 시각만 1초 전으로 당긴다. 좌석 held_until은 그대로다
     public void expireHold(long holdId) {
-        jdbcTemplate.update("UPDATE seat_hold SET expires_at = NOW(6) - INTERVAL 1 SECOND WHERE id = ?", holdId);
+        jdbcTemplate.update("UPDATE seat_hold SET expires_at = NOW(6) - INTERVAL 1 SECOND WHERE hold_id = ?", holdId);
     }
 
     // 선점과 그 좌석의 기한을 함께 1분 전으로 당긴다
     public void expireHoldAndSeats(long holdId) {
-        jdbcTemplate.update("UPDATE seat_hold SET expires_at = NOW(6) - INTERVAL 1 MINUTE WHERE id = ?", holdId);
+        jdbcTemplate.update("UPDATE seat_hold SET expires_at = NOW(6) - INTERVAL 1 MINUTE WHERE hold_id = ?", holdId);
         jdbcTemplate.update("UPDATE seat SET held_until = NOW(6) - INTERVAL 1 MINUTE WHERE hold_id = ?", holdId);
     }
 
     public Map<String, Object> payment(long paymentId) {
         return jdbcTemplate.queryForMap("SELECT hold_id, user_id, idempotency_key, order_id, amount, status, pg_tx_id, "
-                + "last_error, next_check_at FROM booking_payment WHERE id = ?", paymentId);
+                + "last_error, next_check_at FROM booking_payment WHERE payment_id = ?", paymentId);
     }
 
     public long paymentCountOfHold(long holdId) {
@@ -96,23 +96,23 @@ public class TestDb {
     }
 
     public long bookingIdOfHold(long holdId) {
-        return jdbcTemplate.queryForObject("SELECT id FROM booking WHERE hold_id = ?", Long.class, holdId);
+        return jdbcTemplate.queryForObject("SELECT booking_id FROM booking WHERE hold_id = ?", Long.class, holdId);
     }
 
     public void makePaymentDue(long paymentId) {
-        jdbcTemplate.update("UPDATE booking_payment SET next_check_at = NOW(6) - INTERVAL 1 SECOND WHERE id = ?",
+        jdbcTemplate.update("UPDATE booking_payment SET next_check_at = NOW(6) - INTERVAL 1 SECOND WHERE payment_id = ?",
                 paymentId);
     }
 
     public void agePayment(long paymentId, int seconds) {
-        jdbcTemplate.update("UPDATE booking_payment SET created_at = NOW(6) - INTERVAL ? SECOND WHERE id = ?",
+        jdbcTemplate.update("UPDATE booking_payment SET created_at = NOW(6) - INTERVAL ? SECOND WHERE payment_id = ?",
                 seconds, paymentId);
     }
 
     // 다음 확인 시각까지 남은 시간(ms). 과거면 음수
     public long paymentRecheckMs(long paymentId) {
         return jdbcTemplate.queryForObject("SELECT TIMESTAMPDIFF(MICROSECOND, NOW(6), next_check_at) "
-                + "FROM booking_payment WHERE id = ?", Long.class, paymentId) / 1_000;
+                + "FROM booking_payment WHERE payment_id = ?", Long.class, paymentId) / 1_000;
     }
 
     public long outboxCount(String type, long aggregateId) {
@@ -126,23 +126,23 @@ public class TestDb {
     }
 
     public long outboxTaskId(String type, long aggregateId) {
-        return jdbcTemplate.queryForObject("SELECT id FROM outbox_task WHERE task_type = ? AND aggregate_id = ?",
+        return jdbcTemplate.queryForObject("SELECT outbox_task_id FROM outbox_task WHERE task_type = ? AND aggregate_id = ?",
                 Long.class, type, aggregateId);
     }
 
     public void expireOutboxLock(long taskId) {
-        jdbcTemplate.update("UPDATE outbox_task SET locked_until = NOW(6) - INTERVAL 1 SECOND WHERE id = ?", taskId);
+        jdbcTemplate.update("UPDATE outbox_task SET locked_until = NOW(6) - INTERVAL 1 SECOND WHERE outbox_task_id = ?", taskId);
     }
 
     public void makeOutboxDue(long taskId) {
-        jdbcTemplate.update("UPDATE outbox_task SET next_attempt_at = NOW(6) - INTERVAL 1 SECOND WHERE id = ?",
+        jdbcTemplate.update("UPDATE outbox_task SET next_attempt_at = NOW(6) - INTERVAL 1 SECOND WHERE outbox_task_id = ?",
                 taskId);
     }
 
     // 다음 시도까지 남은 시간(ms)
     public long outboxRetryDelayMs(long taskId) {
         return jdbcTemplate.queryForObject("SELECT TIMESTAMPDIFF(MICROSECOND, NOW(6), next_attempt_at) "
-                + "FROM outbox_task WHERE id = ?", Long.class, taskId) / 1_000;
+                + "FROM outbox_task WHERE outbox_task_id = ?", Long.class, taskId) / 1_000;
     }
 
     // 대사 테스트가 이전 테스트들이 남긴 결과 모름·요청 결제를 집지 않게 먼 미래로 미룬다(테스트 전용 DB)

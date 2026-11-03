@@ -46,7 +46,7 @@ class DemoLoginApiControllerTest {
                 .andExpect(jsonPath("$.nickname").value(nickname))
                 .andReturn();
 
-        Long userId = jdbcTemplate.queryForObject("SELECT id FROM app_user WHERE nickname = ?", Long.class, nickname);
+        Long userId = jdbcTemplate.queryForObject("SELECT user_id FROM app_user WHERE nickname = ?", Long.class, nickname);
         String setCookie = result.getResponse().getHeader(HttpHeaders.SET_COOKIE);
         assertThat(setCookie)
                 .startsWith("bk_uid=" + userId + ";")

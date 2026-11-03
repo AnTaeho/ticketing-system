@@ -156,13 +156,13 @@ class SeatMapSnapshotSchedulerTest {
         assertThat(seatMapRedisStore.isSoldOut(pid)).isFalse();
         assertThat(redis.opsForValue().get(RedisKeys.seatMapSoldOut(pid))).isEqualTo("0");
 
-        jdbcTemplate.update("UPDATE seat SET status = 'SOLD' WHERE id IN (?, ?)", seatIds.get(0), seatIds.get(1));
-        jdbcTemplate.update("UPDATE seat SET status = 'HELD', held_until = NOW(6) + INTERVAL 5 MINUTE WHERE id = ?",
+        jdbcTemplate.update("UPDATE seat SET status = 'SOLD' WHERE seat_id IN (?, ?)", seatIds.get(0), seatIds.get(1));
+        jdbcTemplate.update("UPDATE seat SET status = 'HELD', held_until = NOW(6) + INTERVAL 5 MINUTE WHERE seat_id = ?",
                 seatIds.get(2));
         scheduler.run();
         assertThat(seatMapRedisStore.isSoldOut(pid)).as("HELD는 다시 풀릴 수 있다").isFalse();
 
-        jdbcTemplate.update("UPDATE seat SET status = 'SOLD', held_until = NULL WHERE id = ?", seatIds.get(2));
+        jdbcTemplate.update("UPDATE seat SET status = 'SOLD', held_until = NULL WHERE seat_id = ?", seatIds.get(2));
         scheduler.run();
         assertThat(seatMapRedisStore.isSoldOut(pid)).isTrue();
         assertThat(testRedis.pttl(RedisKeys.seatMapSoldOut(pid)))

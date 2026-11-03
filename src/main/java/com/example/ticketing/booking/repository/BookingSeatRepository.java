@@ -21,7 +21,7 @@ public interface BookingSeatRepository extends JpaRepository<BookingSeat, Bookin
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query(value = """
             INSERT INTO booking_seat (booking_id, seat_id, section, row_no, seat_no, grade, price)
-            SELECT :bookingId, id, section, row_no, seat_no, grade, price
+            SELECT :bookingId, seat_id, section, row_no, seat_no, grade, price
               FROM seat WHERE hold_id = :holdId AND status = 'SOLD'""", nativeQuery = true)
     int copySoldSeats(@Param("bookingId") long bookingId, @Param("holdId") long holdId);
 }

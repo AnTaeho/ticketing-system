@@ -30,6 +30,7 @@ public class OutboxTask {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Column(name = "outbox_task_id")
     private Long id;
 
     @Enumerated(EnumType.STRING)

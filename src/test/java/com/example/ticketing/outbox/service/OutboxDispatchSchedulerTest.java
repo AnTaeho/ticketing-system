@@ -108,8 +108,8 @@ class OutboxDispatchSchedulerTest {
         String message = (String) notification.get("message");
         assertThat(notification).containsEntry("user_id", c.userId());
         Map<String, Object> booking = jdbcTemplate.queryForMap("SELECT b.booking_number, s.title FROM booking b "
-                + "JOIN performance p ON p.id = b.performance_id JOIN show_info s ON s.id = p.show_id "
-                + "WHERE b.id = ?", c.bookingId());
+                + "JOIN performance p ON p.performance_id = b.performance_id JOIN show_info s ON s.show_id = p.show_id "
+                + "WHERE b.booking_id = ?", c.bookingId());
         assertThat(message)
                 .startsWith("「" + booking.get("title") + "」 ")
                 .matches("「.+」 \\d{4}\\.\\d{1,2}\\.\\d{1,2}\\(.\\) \\d{2}:\\d{2} A구역 1열 1번 외 2석 예매가 확정됐어요\\. "
@@ -329,7 +329,7 @@ class OutboxDispatchSchedulerTest {
         assertThat(first).extracting(ClaimedOutboxTask::id).containsExactly(taskId);
         assertThat(second).isEmpty();
         long lockMs = jdbcTemplate.queryForObject("SELECT TIMESTAMPDIFF(MICROSECOND, NOW(6), locked_until) "
-                + "FROM outbox_task WHERE id = ?", Long.class, taskId) / 1_000;
+                + "FROM outbox_task WHERE outbox_task_id = ?", Long.class, taskId) / 1_000;
         long expectedMs = properties.outbox().lockDuration().toMillis();
         assertThat(lockMs).isBetween(expectedMs - TOLERANCE_MS, expectedMs);
         assertThat(outboxTaskTransaction.processingToDone(first.get(0))).isTrue();
@@ -355,7 +355,7 @@ class OutboxDispatchSchedulerTest {
         Started started = (Started) paymentTransaction.start(held.userId(), held.holdId(), UUID.randomUUID().toString());
         long paymentId = started.paymentId();
         long lost = held.seatIds().get(1);
-        jdbcTemplate.update("UPDATE seat SET held_until = NOW(6) - INTERVAL 1 SECOND WHERE id = ?", lost);
+        jdbcTemplate.update("UPDATE seat SET held_until = NOW(6) - INTERVAL 1 SECOND WHERE seat_id = ?", lost);
         testRedis.clean(held.pid());
         fixtures.held(held.pid(), List.of(lost));
         paymentTransaction.openToApproved(paymentId, "pg-refund-" + paymentId);
