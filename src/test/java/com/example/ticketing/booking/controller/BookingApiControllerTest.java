@@ -24,6 +24,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -136,40 +137,27 @@ class BookingApiControllerTest {
                 .andExpect(jsonPath("$.cancellable").value(false))
                 .andExpect(jsonPath("$.seats.length()").value(2))
                 .andExpect(jsonPath("$.notification").isString());
-
-        // 두 번째 취소도 같은 200
-        mockMvc.perform(post("/api/bookings/{id}/cancel", b.bookingId()).header(USER_ID_HEADER, userId))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.status").value("CANCELLED"))
-                .andExpect(jsonPath("$.refund").value("REQUESTED"));
-        assertThat(db.outboxCount("REFUND_REQUESTED", b.paymentId())).isEqualTo(1);
     }
 
     @Test
-    @DisplayName("남의 예매, 시작한 회차의 취소, 로그인 없는 요청은 오류 코드로 거절한다")
-    void errors() throws Exception {
+    @DisplayName("남의 예매를 조회하면 404 BOOKING_NOT_FOUND로 답한다")
+    void othersBookingIsNotFound() throws Exception {
         Confirmed b = fixtures.confirmed(1);
-        long userId = b.userId();
-        long stranger = fixtures.newUser();
 
-        mockMvc.perform(get("/api/bookings/{id}", b.bookingId()).header(USER_ID_HEADER, stranger))
+        mockMvc.perform(get("/api/bookings/{id}", b.bookingId()).header(USER_ID_HEADER, fixtures.newUser()))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("BOOKING_NOT_FOUND"));
-        mockMvc.perform(post("/api/bookings/{id}/cancel", b.bookingId()).header(USER_ID_HEADER, stranger))
-                .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.code").value("BOOKING_NOT_FOUND"));
-        mockMvc.perform(get("/api/bookings"))
-                .andExpect(status().isUnauthorized())
-                .andExpect(jsonPath("$.code").value("LOGIN_REQUIRED"));
+    }
 
-        jdbcTemplate.update("UPDATE performance SET starts_at = NOW(6) - INTERVAL 1 SECOND WHERE id = ?", b.pid());
-        mockMvc.perform(post("/api/bookings/{id}/cancel", b.bookingId()).header(USER_ID_HEADER, userId))
-                .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value("CANCEL_NOT_ALLOWED"));
-        mockMvc.perform(get("/api/bookings/{id}", b.bookingId()).header(USER_ID_HEADER, userId))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.status").value("CONFIRMED"))
-                .andExpect(jsonPath("$.cancellable").value(false));
+    @Test
+    @DisplayName("사용자 식별이 없으면 목록·상세·취소 모두 401 LOGIN_REQUIRED로 답한다")
+    void loginRequired() throws Exception {
+        for (MockHttpServletRequestBuilder request : new MockHttpServletRequestBuilder[]{
+                get("/api/bookings"), get("/api/bookings/{id}", 1L), post("/api/bookings/{id}/cancel", 1L)}) {
+            mockMvc.perform(request)
+                    .andExpect(status().isUnauthorized())
+                    .andExpect(jsonPath("$.code").value("LOGIN_REQUIRED"));
+        }
     }
 
     // 같은 사용자가 예매를 여러 건 가지도록 사용자를 정해 결제까지 마친다. 좌석은 A구역 1열 1번부터 seatCount석

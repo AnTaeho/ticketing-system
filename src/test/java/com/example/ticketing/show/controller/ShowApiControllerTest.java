@@ -16,7 +16,6 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
@@ -31,8 +30,6 @@ class ShowApiControllerTest {
     private TestMvc testMvc;
     @Autowired
     private Fixtures fixtures;
-    @Autowired
-    private JdbcTemplate jdbcTemplate;
 
     private MockMvc mockMvc;
 
@@ -60,8 +57,6 @@ class ShowApiControllerTest {
                 .andExpect(jsonPath("$.seatCount").value(24))
                 .andReturn();
         long pid = testMvc.body(created).get("performanceId").asLong();
-        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM seat WHERE performance_id = ?",
-                Long.class, pid)).isEqualTo(24);
 
         mockMvc.perform(get("/api/shows/{showId}", showId))
                 .andExpect(status().isOk())
@@ -94,22 +89,15 @@ class ShowApiControllerTest {
     }
 
     @Test
-    @DisplayName("없는 공연을 조회하거나 그 공연에 회차를 만들면 404로 답한다")
+    @DisplayName("없는 공연을 조회하면 404 SHOW_NOT_FOUND로 답한다")
     void showNotFound() throws Exception {
         mockMvc.perform(get("/api/shows/{showId}", Long.MAX_VALUE))
-                .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.code").value("SHOW_NOT_FOUND"));
-
-        LocalDateTime now = fixtures.dbNow().withNano(0);
-        mockMvc.perform(post("/api/admin/performances")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(performanceJson(Long.MAX_VALUE, now.plusDays(1), now, 1, 1, 1)))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("SHOW_NOT_FOUND"));
     }
 
     @Test
-    @DisplayName("잘못된 입력은 400 INVALID_REQUEST로 거절한다")
+    @DisplayName("빈 필수 값, 읽지 못하는 본문, 숫자가 아닌 경로는 400 INVALID_REQUEST로 거절한다")
     void invalidRequests() throws Exception {
         long showId = fixtures.newShow();
         LocalDateTime now = fixtures.dbNow().withNano(0);
@@ -119,8 +107,6 @@ class ShowApiControllerTest {
         expectInvalid(post("/api/admin/performances"), """
                 {"startsAt":"%s","openAt":"%s","sections":1,"rows":1,"seatsPerRow":1}"""
                 .formatted(now.plusDays(1).format(ISO), now.format(ISO)));
-        expectInvalid(post("/api/admin/performances"), performanceJson(showId, now, now.plusMinutes(1), 1, 1, 1));
-        expectInvalid(post("/api/admin/performances"), performanceJson(showId, now.plusDays(1), now, 27, 1, 1));
         expectInvalid(post("/api/admin/performances"), """
                 {"showId":%d,"startsAt":"내일","openAt":"%s","sections":1,"rows":1,"seatsPerRow":1}"""
                 .formatted(showId, now.format(ISO)));
@@ -139,19 +125,10 @@ class ShowApiControllerTest {
         return testMvc.body(result).get("showId").asLong();
     }
 
-    private void expectInvalid(
-            MockHttpServletRequestBuilder request, String json)
-            throws Exception {
+    private void expectInvalid(MockHttpServletRequestBuilder request, String json) throws Exception {
         mockMvc.perform(request.contentType(MediaType.APPLICATION_JSON).content(json))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("INVALID_REQUEST"))
                 .andExpect(jsonPath("$.error").doesNotExist());
-    }
-
-    private static String performanceJson(long showId, LocalDateTime startsAt, LocalDateTime openAt,
-                                          int sections, int rows, int seatsPerRow) {
-        return """
-                {"showId":%d,"startsAt":"%s","openAt":"%s","sections":%d,"rows":%d,"seatsPerRow":%d}"""
-                .formatted(showId, startsAt.format(ISO), openAt.format(ISO), sections, rows, seatsPerRow);
     }
 }

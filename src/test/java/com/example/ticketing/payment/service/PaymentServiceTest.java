@@ -513,6 +513,19 @@ class PaymentServiceTest {
     }
 
     @Test
+    @DisplayName("남의 결제나 없는 결제를 조회하면 PAYMENT_NOT_FOUND다")
+    void paymentNotFound() {
+        Held held = fixtures.held(1);
+        long paymentId = paymentService.pay(command(held, key())).paymentId();
+        long stranger = fixtures.newUser();
+
+        assertThat(catchApiException(() -> paymentService.getPayment(stranger, paymentId)).getCode())
+                .isEqualTo(ErrorCode.PAYMENT_NOT_FOUND);
+        assertThat(catchApiException(() -> paymentService.getPayment(held.userId(), Long.MAX_VALUE)).getCode())
+                .isEqualTo(ErrorCode.PAYMENT_NOT_FOUND);
+    }
+
+    @Test
     @DisplayName("게이트가 꺼져 있으면 결제는 Redis를 부르지 않는다")
     void gateOffSkipsRedis() {
         SeatGateRedisStore gateStore = mock(SeatGateRedisStore.class);

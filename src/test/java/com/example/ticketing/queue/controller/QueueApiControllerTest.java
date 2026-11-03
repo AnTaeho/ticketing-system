@@ -4,24 +4,21 @@ import static com.example.ticketing.common.web.HttpNames.USER_ID_HEADER;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import com.example.ticketing.common.redis.RedisKeys;
-import com.example.ticketing.seat.repository.SeatMapRedisStore;
 import com.example.ticketing.support.Fixtures;
 import com.example.ticketing.support.IntegrationTest;
 import com.example.ticketing.support.TestMvc;
-import com.example.ticketing.support.TestRedis;
-import java.time.Duration;
-import java.time.LocalDateTime;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.test.web.servlet.MockMvc;
-import tools.jackson.databind.JsonNode;
+import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 
+// 대기열 판정은 QueueServiceTest·QueuePromotionSchedulerTest가 본다. 여기서는 HTTP 연결만 본다
 @IntegrationTest
 class QueueApiControllerTest {
 
@@ -34,10 +31,6 @@ class QueueApiControllerTest {
     private TestMvc testMvc;
     @Autowired
     private Fixtures fixtures;
-    @Autowired
-    private TestRedis testRedis;
-    @Autowired
-    private SeatMapRedisStore seatMapRedisStore;
 
     private MockMvc mockMvc;
 
@@ -47,17 +40,16 @@ class QueueApiControllerTest {
     }
 
     @Test
-    @DisplayName("진입 → 조회 → 재진입 흐름에서 같은 토큰으로 처리열 상태를 돌려준다")
-    void enterAndStatus() throws Exception {
-        long pid = openPerformance();
+    @DisplayName("진입·순서 조회·생존 신호는 200 JSON으로, 떠남 신호는 본문 없는 204로 답한다")
+    void responseShapes() throws Exception {
+        long pid = fixtures.newPerformance(1, 1, 1);
         long userId = fixtures.newUser();
 
-        JsonNode entered = testMvc.body(mockMvc.perform(post(TOKENS, pid).header(USER_ID_HEADER, userId))
+        String token = testMvc.body(mockMvc.perform(post(TOKENS, pid).header(USER_ID_HEADER, userId))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("PROCESSING"))
                 .andExpect(jsonPath("$.token").isString())
-                .andReturn());
-        String token = entered.get("token").asString();
+                .andReturn()).get("token").asString();
         assertThat(token).startsWith(userId + ".");
 
         mockMvc.perform(get(TOKEN, pid, token).header(USER_ID_HEADER, userId))
@@ -65,144 +57,39 @@ class QueueApiControllerTest {
                 .andExpect(jsonPath("$.status").value("PROCESSING"))
                 .andExpect(jsonPath("$.position").value(0))
                 .andExpect(jsonPath("$.estimatedWaitSeconds").value(0));
-
-        mockMvc.perform(post(TOKENS, pid).header(USER_ID_HEADER, userId))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.token").value(token));
-    }
-
-    @Test
-    @DisplayName("처리열이 차 있으면 대기열 1번과 예상 대기 시간을 돌려준다")
-    void waitingFormat() throws Exception {
-        long pid = openPerformance();
-        long now = System.currentTimeMillis();
-        for (int i = 0; i < 200; i++) {
-            testRedis.template().opsForZSet().add(RedisKeys.queueProcessing(pid), "filler." + i, now + 600_000);
-        }
-        long userId = fixtures.newUser();
-
-        String token = testMvc.body(mockMvc.perform(post(TOKENS, pid).header(USER_ID_HEADER, userId))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.status").value("WAITING"))
-                .andReturn()).get("token").asString();
-
-        mockMvc.perform(get(TOKEN, pid, token).header(USER_ID_HEADER, userId))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.status").value("WAITING"))
-                .andExpect(jsonPath("$.position").value(1))
-                .andExpect(jsonPath("$.estimatedWaitSeconds").value(10));
-    }
-
-    @Test
-    @DisplayName("남의 토큰을 조회하면 404, 예매 전 회차에 들어오면 409로 답한다")
-    void errors() throws Exception {
-        long pid = openPerformance();
-        long owner = fixtures.newUser();
-        long stranger = fixtures.newUser();
-        String token = testMvc.body(mockMvc.perform(post(TOKENS, pid).header(USER_ID_HEADER, owner)).andReturn())
-                .get("token").asString();
-
-        mockMvc.perform(get(TOKEN, pid, token).header(USER_ID_HEADER, stranger))
-                .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.code").value("QUEUE_TOKEN_NOT_FOUND"));
-
-        LocalDateTime now = fixtures.dbNow();
-        long notOpen = fixtures.newPerformance(fixtures.newShow(), now.plusHours(1), now.plusDays(1), 1, 1, 1);
-
-        mockMvc.perform(post(TOKENS, notOpen).header(USER_ID_HEADER, owner))
-                .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value("NOT_OPEN"));
-    }
-
-    @Test
-    @DisplayName("매진이면 진입은 409 SOLD_OUT으로, 대기자의 순서 조회는 status SOLD_OUT으로 답한다")
-    void soldOut() throws Exception {
-        long pid = openPerformance();
-        long now = System.currentTimeMillis();
-        for (int i = 0; i < 200; i++) {
-            testRedis.template().opsForZSet().add(RedisKeys.queueProcessing(pid), "filler." + i, now + 600_000);
-        }
-        long waiter = fixtures.newUser();
-        String token = testMvc.body(mockMvc.perform(post(TOKENS, pid).header(USER_ID_HEADER, waiter)).andReturn())
-                .get("token").asString();
-        seatMapRedisStore.putSoldOut(pid, true, Duration.ofSeconds(30));
-
-        mockMvc.perform(get(TOKEN, pid, token).header(USER_ID_HEADER, waiter))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.status").value("SOLD_OUT"))
-                .andExpect(jsonPath("$.position").value(0))
-                .andExpect(jsonPath("$.estimatedWaitSeconds").value(0));
-        mockMvc.perform(post(TOKENS, pid).header(USER_ID_HEADER, fixtures.newUser()))
-                .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value("SOLD_OUT"))
-                .andExpect(jsonPath("$.message").value("모든 자리가 팔렸어요"));
-    }
-
-    @Test
-    @DisplayName("생존 신호는 살아 있으면 남은 시간을, 만료면 403, 남의 토큰이면 404로 답한다")
-    void heartbeat() throws Exception {
-        long pid = openPerformance();
-        long owner = fixtures.newUser();
-        long stranger = fixtures.newUser();
-        String token = testMvc.body(mockMvc.perform(post(TOKENS, pid).header(USER_ID_HEADER, owner)).andReturn())
-                .get("token").asString();
-
-        mockMvc.perform(post(HEARTBEAT, pid, token).header(USER_ID_HEADER, owner))
+        mockMvc.perform(post(HEARTBEAT, pid, token).header(USER_ID_HEADER, userId))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("PROCESSING"))
                 .andExpect(jsonPath("$.expiresInMs").value(120_000));
 
-        mockMvc.perform(post(HEARTBEAT, pid, token).header(USER_ID_HEADER, stranger))
-                .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.code").value("QUEUE_TOKEN_NOT_FOUND"));
-
-        testRedis.template().opsForZSet().add(RedisKeys.queueProcessing(pid), token, System.currentTimeMillis() - 1);
-        mockMvc.perform(post(HEARTBEAT, pid, token).header(USER_ID_HEADER, owner))
-                .andExpect(status().isForbidden())
-                .andExpect(jsonPath("$.code").value("NOT_ADMITTED"));
+        mockMvc.perform(post(LEAVE, pid, token).header(USER_ID_HEADER, userId))
+                .andExpect(status().isNoContent())
+                .andExpect(content().string(""));
+        mockMvc.perform(post(LEAVE, pid, userId + ".no-such-token").header(USER_ID_HEADER, userId))
+                .andExpect(status().isNoContent());
     }
 
     @Test
-    @DisplayName("떠남 신호는 본문 없이 받아 204로 답하고, 남의 토큰이면 404다")
-    void leave() throws Exception {
-        long pid = openPerformance();
+    @DisplayName("남의 토큰으로 순서를 물으면 404 QUEUE_TOKEN_NOT_FOUND로 답한다")
+    void foreignToken() throws Exception {
+        long pid = fixtures.newPerformance(1, 1, 1);
         long owner = fixtures.newUser();
-        long stranger = fixtures.newUser();
         String token = testMvc.body(mockMvc.perform(post(TOKENS, pid).header(USER_ID_HEADER, owner)).andReturn())
                 .get("token").asString();
 
-        mockMvc.perform(post(LEAVE, pid, token).header(USER_ID_HEADER, stranger))
+        mockMvc.perform(get(TOKEN, pid, token).header(USER_ID_HEADER, fixtures.newUser()))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("QUEUE_TOKEN_NOT_FOUND"));
-        long before = System.currentTimeMillis();
-        mockMvc.perform(post(LEAVE, pid, token).header(USER_ID_HEADER, owner))
-                .andExpect(status().isNoContent());
-        long after = System.currentTimeMillis();
-
-        assertThat(testRedis.template().opsForZSet().score(RedisKeys.queueProcessing(pid), token))
-                .isBetween(before + 10_000.0, after + 10_000.0);
-        mockMvc.perform(post(LEAVE, pid, owner + ".no-such-token").header(USER_ID_HEADER, owner))
-                .andExpect(status().isNoContent());
     }
 
     @Test
-    @DisplayName("사용자 식별이 없으면 진입·조회 모두 401 LOGIN_REQUIRED로 답한다")
+    @DisplayName("사용자 식별이 없으면 진입·조회·생존 신호·떠남 모두 401 LOGIN_REQUIRED로 답한다")
     void loginRequired() throws Exception {
-        mockMvc.perform(post(TOKENS, 1L))
-                .andExpect(status().isUnauthorized())
-                .andExpect(jsonPath("$.code").value("LOGIN_REQUIRED"));
-        mockMvc.perform(get(TOKEN, 1L, "1.abc"))
-                .andExpect(status().isUnauthorized())
-                .andExpect(jsonPath("$.code").value("LOGIN_REQUIRED"));
-        mockMvc.perform(post(HEARTBEAT, 1L, "1.abc"))
-                .andExpect(status().isUnauthorized())
-                .andExpect(jsonPath("$.code").value("LOGIN_REQUIRED"));
-        mockMvc.perform(post(LEAVE, 1L, "1.abc"))
-                .andExpect(status().isUnauthorized())
-                .andExpect(jsonPath("$.code").value("LOGIN_REQUIRED"));
-    }
-
-    private long openPerformance() {
-        return fixtures.newPerformance(1, 1, 1);
+        for (MockHttpServletRequestBuilder request : new MockHttpServletRequestBuilder[]{
+                post(TOKENS, 1L), get(TOKEN, 1L, "1.abc"), post(HEARTBEAT, 1L, "1.abc"), post(LEAVE, 1L, "1.abc")}) {
+            mockMvc.perform(request)
+                    .andExpect(status().isUnauthorized())
+                    .andExpect(jsonPath("$.code").value("LOGIN_REQUIRED"));
+        }
     }
 }

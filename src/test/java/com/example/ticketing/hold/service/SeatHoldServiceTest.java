@@ -1,5 +1,6 @@
 package com.example.ticketing.hold.service;
 
+import static com.example.ticketing.support.ApiErrors.catchApiException;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -12,15 +13,20 @@ import static org.mockito.Mockito.when;
 
 import com.example.ticketing.common.error.ApiException;
 import com.example.ticketing.common.error.ErrorCode;
+import com.example.ticketing.common.metrics.Metrics;
 import com.example.ticketing.common.time.DbClock;
 import com.example.ticketing.common.time.TestDbClock;
 import com.example.ticketing.hold.domain.GateResult;
+import com.example.ticketing.hold.domain.HoldStatus;
+import com.example.ticketing.hold.dto.ActiveHoldResult;
 import com.example.ticketing.hold.dto.CreateHoldCommand;
 import com.example.ticketing.hold.dto.CreateHoldResult;
+import com.example.ticketing.hold.dto.HoldDetailResult;
 import com.example.ticketing.hold.dto.HoldPlacement;
 import com.example.ticketing.hold.repository.SeatGateRedisStore;
 import com.example.ticketing.queue.service.QueueService;
 import com.example.ticketing.seat.dto.SeatSelection;
+import com.example.ticketing.support.Counters;
 import com.example.ticketing.support.Fixtures;
 import com.example.ticketing.support.IntegrationTest;
 import com.example.ticketing.support.TestDb;
@@ -50,6 +56,8 @@ class SeatHoldServiceTest {
     private TestServices services;
     @Autowired
     private JdbcTemplate jdbcTemplate;
+    @Autowired
+    private Counters counters;
 
     @Test
     @DisplayName("선점하면 선점과 좌석이 DB 시각 기준 5분 뒤까지 잡힌다")
@@ -202,6 +210,121 @@ class SeatHoldServiceTest {
                 .extracting("code").isEqualTo(ErrorCode.NOT_OPEN);
         // 두 번째 회차는 사전 판정에서 막혀 DB 판정 호출 수가 그대로다
         verify(tx, times(1)).persistHold(anyLong(), any(SeatSelection.class), anyString());
+    }
+
+    @Test
+    @DisplayName("남이 잡은 좌석이 섞이면 SEAT_TAKEN으로 그 좌석을 알려 주고 나머지 좌석도 잡지 않는다")
+    void seatTakenNamesSeat() {
+        long pid = fixtures.newPerformance(1, 1, 4);
+        List<Long> ids = db.seatIds(pid);
+        long userA = fixtures.newUser();
+        long userB = fixtures.newUser();
+        hold(userA, pid, List.of(ids.get(0)));
+
+        ApiException e = catchApiException(() -> hold(userB, pid, List.of(ids.get(0), ids.get(1))));
+
+        assertThat(e.getCode()).isEqualTo(ErrorCode.SEAT_TAKEN);
+        assertThat(e.getDetail()).containsEntry("seatId", ids.get(0));
+        assertThat(db.seatStatus(ids.get(1))).isEqualTo("AVAILABLE");
+    }
+
+    @Test
+    @DisplayName("고른 좌석이 잘못됐으면 DB 판정까지 가지 않고 INVALID_SEAT_SELECTION이다")
+    void invalidSelectionDoesNotReachDb() {
+        long pid = fixtures.newPerformance(1, 1, 6);
+        long otherPid = fixtures.newPerformance(1, 1, 2);
+        List<Long> ids = db.seatIds(pid);
+        long userId = fixtures.newUser();
+        double before = counters.sum(Metrics.HOLD_DB);
+
+        for (List<Long> invalid : List.of(List.of(ids.get(0), db.seatIds(otherPid).get(0)),
+                List.of(ids.get(0), Long.MAX_VALUE), ids.subList(0, 5))) {
+            assertThat(catchApiException(() -> hold(userId, pid, invalid)).getCode())
+                    .isEqualTo(ErrorCode.INVALID_SEAT_SELECTION);
+        }
+
+        assertThat(counters.sum(Metrics.HOLD_DB)).isEqualTo(before);
+        assertThat(db.holdCount(pid)).isZero();
+    }
+
+    @Test
+    @DisplayName("진행 중이 아닌 선점이나 결제 중인 선점을 놓으면 HOLD_NOT_CANCELLABLE로 그 상태를 알려 주고 좌석을 그대로 둔다")
+    void notCancellableCarriesStatus() {
+        long pid = fixtures.newPerformance(1, 1, 4);
+        List<String> states = List.of("PAYING", "EXPIRED", "CONFIRMED", "RELEASED");
+        for (int i = 0; i < states.size(); i++) {
+            String state = states.get(i);
+            long seatId = db.seatIds(pid).get(i);
+            long userId = fixtures.newUser();
+            long holdId = hold(userId, pid, List.of(seatId)).holdId();
+            jdbcTemplate.update("UPDATE seat_hold SET status = ? WHERE id = ?", state, holdId);
+
+            ApiException e = catchApiException(() -> seatHoldService.release(userId, holdId));
+
+            assertThat(e.getCode()).as(state).isEqualTo(ErrorCode.HOLD_NOT_CANCELLABLE);
+            assertThat(e.getDetail()).as(state).containsEntry("status", state);
+            assertThat(db.holdStatus(holdId)).isEqualTo(state);
+            assertThat(db.seatStatus(seatId)).as(state).isEqualTo("HELD");
+        }
+    }
+
+    @Test
+    @DisplayName("남의 선점이나 없는 선점은 조회·놓기 모두 HOLD_NOT_FOUND이고, 놓은 선점은 좌석 없이 RELEASED로 조회된다")
+    void getHold() {
+        long pid = fixtures.newPerformance(1, 1, 2);
+        long owner = fixtures.newUser();
+        long stranger = fixtures.newUser();
+        long holdId = hold(owner, pid, List.of(db.seatIds(pid).get(0))).holdId();
+
+        assertThat(catchApiException(() -> seatHoldService.getHold(stranger, holdId)).getCode())
+                .isEqualTo(ErrorCode.HOLD_NOT_FOUND);
+        assertThat(catchApiException(() -> seatHoldService.release(stranger, holdId)).getCode())
+                .isEqualTo(ErrorCode.HOLD_NOT_FOUND);
+        assertThat(catchApiException(() -> seatHoldService.getHold(owner, Long.MAX_VALUE)).getCode())
+                .isEqualTo(ErrorCode.HOLD_NOT_FOUND);
+        assertThat(db.holdStatus(holdId)).isEqualTo("HELD");
+
+        seatHoldService.release(owner, holdId);
+
+        HoldDetailResult released = seatHoldService.getHold(owner, holdId);
+        assertThat(released.status()).isEqualTo(HoldStatus.RELEASED);
+        assertThat(released.seats()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("내 선점 조회는 그 회차의 내 HELD·PAYING 선점만 돌려주고 없으면 HOLD_NOT_FOUND다")
+    void activeHold() {
+        long pid = fixtures.newPerformance(1, 1, 4);
+        long otherPid = fixtures.newPerformance(1, 1, 2);
+        long owner = fixtures.newUser();
+        long stranger = fixtures.newUser();
+        assertThat(catchApiException(() -> seatHoldService.getActiveHold(owner, pid)).getCode())
+                .isEqualTo(ErrorCode.HOLD_NOT_FOUND);
+
+        long holdId = hold(owner, pid, List.of(db.seatIds(pid).get(0))).holdId();
+
+        LocalDateTime expiresAt = jdbcTemplate.queryForObject(
+                "SELECT expires_at FROM seat_hold WHERE id = ?", LocalDateTime.class, holdId);
+        assertThat(seatHoldService.getActiveHold(owner, pid))
+                .isEqualTo(new ActiveHoldResult(holdId, HoldStatus.HELD, expiresAt));
+        for (long[] userAndPid : new long[][]{{stranger, pid}, {owner, otherPid}}) {
+            assertThat(catchApiException(() -> seatHoldService.getActiveHold(userAndPid[0], userAndPid[1])).getCode())
+                    .isEqualTo(ErrorCode.HOLD_NOT_FOUND);
+        }
+
+        seatHoldService.release(owner, holdId);
+        assertThat(catchApiException(() -> seatHoldService.getActiveHold(owner, pid)).getCode())
+                .isEqualTo(ErrorCode.HOLD_NOT_FOUND);
+
+        long paying = hold(owner, pid, List.of(db.seatIds(pid).get(1))).holdId();
+        jdbcTemplate.update("UPDATE seat_hold SET status = 'PAYING' WHERE id = ?", paying);
+        assertThat(seatHoldService.getActiveHold(owner, pid))
+                .extracting(ActiveHoldResult::holdId, ActiveHoldResult::status)
+                .containsExactly(paying, HoldStatus.PAYING);
+    }
+
+    private CreateHoldResult hold(long userId, long pid, List<Long> seatIds) {
+        return seatHoldService.hold(new CreateHoldCommand(userId, pid, seatIds, fixtures.admit(pid, userId)));
     }
 
     // 처리열·게이트는 통과시키고 DB 판정은 목으로 받아 사전 판정만 본다
