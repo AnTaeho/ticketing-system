@@ -3,7 +3,6 @@ package com.example.ticketing.hold.repository;
 import com.example.ticketing.common.redis.RedisFailures;
 import com.example.ticketing.common.redis.RedisKeys;
 import com.example.ticketing.common.redis.RedisScripts;
-import com.example.ticketing.common.redis.TicketingRedis;
 import com.example.ticketing.hold.domain.GateHold;
 import com.example.ticketing.hold.domain.GateKeyEntry;
 import com.example.ticketing.hold.domain.GateResult;
@@ -30,8 +29,8 @@ public class SeatGateRedisStore {
 
     private final StringRedisTemplate redis;
 
-    public SeatGateRedisStore(TicketingRedis ticketingRedis) {
-        this.redis = ticketingRedis.template();
+    public SeatGateRedisStore(StringRedisTemplate redis) {
+        this.redis = redis;
     }
 
     // seatIds는 오름차순이어야 한다

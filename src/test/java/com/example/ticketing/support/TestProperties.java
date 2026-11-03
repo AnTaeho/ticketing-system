@@ -12,7 +12,6 @@ import com.example.ticketing.common.config.TicketingProperties.Queue;
 public final class TestProperties {
 
     private TicketingProperties.Seed seed;
-    private TicketingProperties.Redis redis;
     private Hold hold;
     private Payment payment;
     private Gate gate;
@@ -29,7 +28,6 @@ public final class TestProperties {
     public static TestProperties from(TicketingProperties p) {
         TestProperties copy = new TestProperties();
         copy.seed = p.seed();
-        copy.redis = p.redis();
         copy.hold = p.hold();
         copy.payment = p.payment();
         copy.gate = p.gate();
@@ -98,6 +96,6 @@ public final class TestProperties {
     }
 
     public TicketingProperties build() {
-        return new TicketingProperties(seed, redis, hold, payment, gate, queue, seatmap, outbox, ops, pg, fakePg);
+        return new TicketingProperties(seed, hold, payment, gate, queue, seatmap, outbox, ops, pg, fakePg);
     }
 }

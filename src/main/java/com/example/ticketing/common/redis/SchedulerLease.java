@@ -14,8 +14,8 @@ public class SchedulerLease {
     private final StringRedisTemplate redis;
     private final String instanceId;
 
-    public SchedulerLease(TicketingRedis ticketingRedis, InstanceId instanceId) {
-        this.redis = ticketingRedis.template();
+    public SchedulerLease(StringRedisTemplate redis, InstanceId instanceId) {
+        this.redis = redis;
         this.instanceId = instanceId.value();
     }
 

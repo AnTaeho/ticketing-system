@@ -7,7 +7,6 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 @ConfigurationProperties("ticketing")
 public record TicketingProperties(
         Seed seed,
-        Redis redis,
         Hold hold,
         Payment payment,
         Gate gate,
@@ -20,9 +19,6 @@ public record TicketingProperties(
 ) {
 
     public record Seed(boolean enabled) {
-    }
-
-    public record Redis(Duration commandTimeout, Duration connectTimeout, int database) {
     }
 
     public record Hold(

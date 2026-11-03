@@ -19,7 +19,7 @@ import org.springframework.test.context.TestPropertySource;
         "ticketing.queue.promote-enabled=false",
         "ticketing.seatmap.snapshot-enabled=false",
         "ticketing.gate.reconcile-enabled=false",
-        "ticketing.redis.database=1",
+        "spring.data.redis.database=1",
         "spring.datasource.url=jdbc:mysql://localhost:3306/ticketing_booking_test"
                 + "?createDatabaseIfNotExist=true&serverTimezone=Asia/Seoul&characterEncoding=UTF-8"
 })

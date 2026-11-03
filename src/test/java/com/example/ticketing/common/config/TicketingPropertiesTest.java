@@ -29,9 +29,6 @@ class TicketingPropertiesTest {
     @DisplayName("설정(ticketing)이 Duration과 숫자로 묶이고 테스트에서는 시드와 스케줄러가 꺼진다")
     void bound() {
         assertThat(properties.seed().enabled()).isFalse();
-        assertThat(properties.redis().commandTimeout()).isEqualTo(Duration.ofMillis(300));
-        assertThat(properties.redis().connectTimeout()).isEqualTo(Duration.ofMillis(500));
-        assertThat(properties.redis().database()).isEqualTo(1);
         assertThat(properties.hold().ttl()).isEqualTo(Duration.ofMinutes(5));
         assertThat(properties.hold().maxSeats()).isEqualTo(4);
         assertThat(properties.payment().payDeadline()).isEqualTo(Duration.ofMinutes(10));

@@ -6,7 +6,6 @@ import com.example.ticketing.booking.service.BookingTransaction;
 import com.example.ticketing.common.config.TicketingProperties;
 import com.example.ticketing.common.redis.InstanceId;
 import com.example.ticketing.common.redis.SchedulerLease;
-import com.example.ticketing.common.redis.TicketingRedis;
 import com.example.ticketing.common.time.DbClock;
 import com.example.ticketing.hold.repository.SeatGateRedisStore;
 import com.example.ticketing.hold.repository.SeatHoldRepository;
@@ -45,6 +44,7 @@ import java.util.Optional;
 import org.springframework.boot.test.context.TestComponent;
 import org.springframework.context.ApplicationContext;
 import org.springframework.core.env.Environment;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import tools.jackson.databind.json.JsonMapper;
 
 // 테스트가 운영 서비스를 new로 조립하는 곳. 컨텍스트 빈을 기본으로 쓰고 바꿀 것만 끼운다. 생성자가 바뀌면 여기만 고친다
@@ -79,15 +79,15 @@ public class TestServices {
         return gateReflector(store, properties, meterRegistry());
     }
 
-    public static SeatGateRedisStore gateStore(TicketingRedis redis) {
+    public static SeatGateRedisStore gateStore(StringRedisTemplate redis) {
         return new SeatGateRedisStore(redis);
     }
 
-    public static QueueRedisStore queueStore(TicketingRedis redis) {
+    public static QueueRedisStore queueStore(StringRedisTemplate redis) {
         return new QueueRedisStore(redis);
     }
 
-    public static SeatMapRedisStore seatMapStore(TicketingRedis redis) {
+    public static SeatMapRedisStore seatMapStore(StringRedisTemplate redis) {
         return new SeatMapRedisStore(redis);
     }
 
@@ -129,12 +129,12 @@ public class TestServices {
         };
     }
 
-    public SchedulerLease lease(TicketingRedis redis) {
+    public SchedulerLease lease(StringRedisTemplate redis) {
         return new SchedulerLease(redis, new InstanceId());
     }
 
     public SchedulerLease newLease() {
-        return lease(bean(TicketingRedis.class));
+        return lease(bean(StringRedisTemplate.class));
     }
 
     public GateKeyReconcileSchedulerBuilder gateKeyReconcileScheduler() {

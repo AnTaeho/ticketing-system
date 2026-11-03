@@ -1,8 +1,5 @@
 package com.example.ticketing.support;
 
-import com.example.ticketing.common.config.TicketingProperties;
-import com.example.ticketing.common.redis.TestTicketingRedis;
-import com.example.ticketing.common.redis.TicketingRedis;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.net.ServerSocket;
@@ -11,6 +8,8 @@ import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import org.springframework.boot.test.context.TestComponent;
+import org.springframework.data.redis.connection.RedisStandaloneConfiguration;
+import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
 import org.springframework.data.redis.core.Cursor;
 import org.springframework.data.redis.core.ScanOptions;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -19,17 +18,15 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 @TestComponent
 public class TestRedis {
 
-    private final TicketingRedis ticketingRedis;
-    private final TicketingProperties properties;
-    private final List<TicketingRedis> deadConnections = new CopyOnWriteArrayList<>();
+    private final StringRedisTemplate redis;
+    private final List<LettuceConnectionFactory> deadConnections = new CopyOnWriteArrayList<>();
 
-    public TestRedis(TicketingRedis ticketingRedis, TicketingProperties properties) {
-        this.ticketingRedis = ticketingRedis;
-        this.properties = properties;
+    public TestRedis(StringRedisTemplate redis) {
+        this.redis = redis;
     }
 
     public StringRedisTemplate template() {
-        return ticketingRedis.template();
+        return redis;
     }
 
     // 남은 수명(ms). 키가 없으면 -2, 수명이 없으면 -1
@@ -60,15 +57,19 @@ public class TestRedis {
         }
     }
 
-    // 닫힌 포트로 만든 연결이라 모든 명령이 Redis 장애로 실패한다. 테스트가 끝나면 닫는다
-    public TicketingRedis dead() {
-        TicketingRedis dead = TestTicketingRedis.connectTo("localhost", closedPort(), properties);
+    // 운영 연결과 같은 설정으로 닫힌 포트에 붙여 모든 명령이 Redis 장애로 실패한다. 테스트가 끝나면 닫는다
+    public StringRedisTemplate dead() {
+        LettuceConnectionFactory live = (LettuceConnectionFactory) redis.getConnectionFactory();
+        LettuceConnectionFactory dead = new LettuceConnectionFactory(
+                new RedisStandaloneConfiguration("localhost", closedPort()), live.getClientConfiguration());
+        dead.afterPropertiesSet();
+        dead.start();
         deadConnections.add(dead);
-        return dead;
+        return new StringRedisTemplate(dead);
     }
 
     void cleanUp() {
-        for (TicketingRedis dead : deadConnections) {
+        for (LettuceConnectionFactory dead : deadConnections) {
             dead.destroy();
         }
         deadConnections.clear();

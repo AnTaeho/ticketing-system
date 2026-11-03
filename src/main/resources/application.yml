@@ -16,6 +16,12 @@ spring:
       pool:
         size: 6                # 예매 @Scheduled 6개
 
+  data:
+    redis:
+      timeout: 300ms           # 명령 타임아웃. 장애 때 요청을 오래 붙잡지 않고 DB 판정으로 넘긴다
+      connect-timeout: 500ms
+      database: 0              # 테스트는 1을 써서 로컬 앱 키와 섞이지 않게 한다
+
 management:
   endpoints:
     web:
@@ -31,15 +37,11 @@ management:
           DEGRADED: 200
   health:
     redis:
-      enabled: false           # 기본 연결은 타임아웃이 없어 장애 때 60초 붙잡는다. 예매 연결로 보는 bookingRedis가 대신한다
+      enabled: false           # 기본 항목은 장애 때 DOWN(503)이라 서버가 빠진다. DEGRADED로 답하는 bookingRedis가 대신한다
 
 ticketing:
   seed:
     enabled: true              # @Profile("local")에서만 의미. 예매 테스트는 false
-  redis:
-    command-timeout: 300ms
-    connect-timeout: 500ms
-    database: 0                # 예매 키만 쓰는 Redis DB 번호. 테스트는 1을 써서 로컬 앱 키와 섞이지 않게 한다
   hold:
     ttl: 5m
     max-seats: 4
