@@ -1,12 +1,13 @@
 package com.example.ticketing.booking.service;
 
-import com.example.ticketing.booking.domain.BookingRow;
-import com.example.ticketing.booking.domain.BookingSeatRow;
+import static java.util.stream.Collectors.groupingBy;
+import static java.util.stream.Collectors.mapping;
+import static java.util.stream.Collectors.toList;
+
 import com.example.ticketing.booking.dto.BookingResult;
 import com.example.ticketing.booking.dto.BookingSeatResult;
-import com.example.ticketing.booking.repository.BookingJdbcRepository;
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
+import com.example.ticketing.booking.repository.BookingRepository;
+import com.example.ticketing.booking.repository.BookingSeatRepository;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -18,25 +19,26 @@ import org.springframework.stereotype.Component;
 @RequiredArgsConstructor
 public class BookingReader {
 
-    private final BookingJdbcRepository bookingJdbcRepository;
+    private final BookingRepository bookingRepository;
+    private final BookingSeatRepository bookingSeatRepository;
 
     // 최신순
     public List<BookingResult> findByUser(long userId) {
-        return withSeats(bookingJdbcRepository.findByUser(userId));
+        return withSeats(bookingRepository.findResults(userId));
     }
 
     public Optional<BookingResult> findOne(long userId, long bookingId) {
-        return withSeats(bookingJdbcRepository.findOne(userId, bookingId).stream().toList()).stream().findFirst();
+        return bookingRepository.findResult(userId, bookingId).map(result -> withSeats(List.of(result)).get(0));
     }
 
-    private List<BookingResult> withSeats(List<BookingRow> rows) {
-        if (rows.isEmpty()) {
+    private List<BookingResult> withSeats(List<BookingResult> results) {
+        if (results.isEmpty()) {
             return List.of();
         }
-        Map<Long, List<BookingSeatResult>> seats = new LinkedHashMap<>();
-        for (BookingSeatRow seat : bookingJdbcRepository.findSeats(rows.stream().map(BookingRow::id).toList())) {
-            seats.computeIfAbsent(seat.bookingId(), id -> new ArrayList<>()).add(BookingSeatResult.from(seat));
-        }
-        return rows.stream().map(row -> BookingResult.from(row, seats.getOrDefault(row.id(), List.of()))).toList();
+        Map<Long, List<BookingSeatResult>> seats = bookingSeatRepository
+                .findByBookingIds(results.stream().map(BookingResult::bookingId).toList()).stream()
+                .collect(groupingBy(seat -> seat.getId().getBookingId(), mapping(BookingSeatResult::from, toList())));
+        return results.stream().map(result -> result.withSeats(seats.getOrDefault(result.bookingId(), List.of())))
+                .toList();
     }
 }

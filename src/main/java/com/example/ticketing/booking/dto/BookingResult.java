@@ -1,6 +1,5 @@
 package com.example.ticketing.booking.dto;
 
-import com.example.ticketing.booking.domain.BookingRow;
 import com.example.ticketing.booking.domain.BookingStatus;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -22,10 +21,17 @@ public record BookingResult(
         boolean cancellable
 ) {
 
-    public static BookingResult from(BookingRow row, List<BookingSeatResult> seats) {
-        return new BookingResult(row.id(), row.bookingNumber(), row.status(), row.createdAt(), row.cancelledAt(),
-                row.totalAmount(), row.title(), row.venueName(), row.startsAt(), List.copyOf(seats),
-                row.notification(), RefundStatus.of(row.status(), row.paymentRefunded()),
-                row.status() == BookingStatus.CONFIRMED && row.notStarted());
+    // BookingRepository의 JPQL이 부른다. 좌석은 withSeats로 붙인다
+    public BookingResult(long bookingId, String bookingNumber, BookingStatus status, LocalDateTime createdAt,
+                         LocalDateTime cancelledAt, int totalAmount, String showTitle, String venueName,
+                         LocalDateTime startsAt, boolean notStarted, boolean paymentRefunded, String notification) {
+        this(bookingId, bookingNumber, status, createdAt, cancelledAt, totalAmount, showTitle, venueName, startsAt,
+                List.of(), notification, RefundStatus.of(status, paymentRefunded),
+                status == BookingStatus.CONFIRMED && notStarted);
+    }
+
+    public BookingResult withSeats(List<BookingSeatResult> seats) {
+        return new BookingResult(bookingId, bookingNumber, status, createdAt, cancelledAt, totalAmount, showTitle,
+                venueName, startsAt, List.copyOf(seats), notification, refund, cancellable);
     }
 }

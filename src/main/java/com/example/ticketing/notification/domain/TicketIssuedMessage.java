@@ -14,11 +14,11 @@ public final class TicketIssuedMessage {
     private TicketIssuedMessage() {
     }
 
-    public static String of(IssuedBookingRow booking, List<IssuedSeatRow> seats) {
-        IssuedSeatRow first = seats.get(0);
+    public static String of(IssuedTicket ticket, List<IssuedSeat> seats) {
+        IssuedSeat first = seats.get(0);
         String others = seats.size() > 1 ? " 외 " + (seats.size() - 1) + "석" : "";
         return "「%s」 %s %s구역 %d열 %d번%s 예매가 확정됐어요. 예매번호 %s".formatted(
-                Texts.abbreviate(booking.title(), MAX_TITLE), booking.startsAt().format(STARTS_AT), first.section(),
-                first.rowNo(), first.seatNo(), others, booking.bookingNumber());
+                Texts.abbreviate(ticket.title(), MAX_TITLE), ticket.startsAt().format(STARTS_AT), first.section(),
+                first.rowNo(), first.seatNo(), others, ticket.bookingNumber());
     }
 }

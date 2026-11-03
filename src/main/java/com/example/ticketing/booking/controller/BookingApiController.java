@@ -1,7 +1,7 @@
 package com.example.ticketing.booking.controller;
 
-import com.example.ticketing.booking.dto.BookingResponse;
-import com.example.ticketing.booking.dto.CancelResponse;
+import com.example.ticketing.booking.dto.BookingResult;
+import com.example.ticketing.booking.dto.CancelResult;
 import com.example.ticketing.booking.service.BookingService;
 import com.example.ticketing.common.web.CurrentUser;
 import java.util.List;
@@ -18,17 +18,17 @@ public class BookingApiController {
     private final BookingService bookingService;
 
     @GetMapping("/api/bookings")
-    public List<BookingResponse> list(@CurrentUser Long userId) {
-        return bookingService.list(userId).stream().map(BookingResponse::from).toList();
+    public List<BookingResult> list(@CurrentUser Long userId) {
+        return bookingService.list(userId);
     }
 
     @GetMapping("/api/bookings/{bookingId}")
-    public BookingResponse detail(@CurrentUser Long userId, @PathVariable long bookingId) {
-        return BookingResponse.from(bookingService.detail(userId, bookingId));
+    public BookingResult detail(@CurrentUser Long userId, @PathVariable long bookingId) {
+        return bookingService.detail(userId, bookingId);
     }
 
     @PostMapping("/api/bookings/{bookingId}/cancel")
-    public CancelResponse cancel(@CurrentUser Long userId, @PathVariable long bookingId) {
-        return CancelResponse.from(bookingService.cancel(userId, bookingId));
+    public CancelResult cancel(@CurrentUser Long userId, @PathVariable long bookingId) {
+        return bookingService.cancel(userId, bookingId);
     }
 }

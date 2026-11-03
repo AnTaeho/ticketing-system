@@ -3,7 +3,6 @@ package com.example.ticketing;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.example.ticketing.booking.domain.BookingStatus;
-import com.example.ticketing.booking.repository.BookingJdbcRepository;
 import com.example.ticketing.booking.repository.BookingRepository;
 import com.example.ticketing.booking.repository.BookingSeatRepository;
 import com.example.ticketing.hold.domain.HoldStatus;
@@ -53,12 +52,8 @@ class SqlStatusLiteralTest {
         assertLiterals(sqlOf(PaymentRepository.class), PaymentStatus.class);
         assertLiterals(sqlOf(PaymentJdbcRepository.class), PaymentStatus.class);
         assertLiterals(sqlOf(BookingRepository.class), BookingStatus.class);
-        // booking_seat 복사는 seat 테이블의 SOLD를 읽고, 예매 조회는 별칭 bp로 결제 상태를 읽는다
+        // booking_seat 복사는 seat 테이블의 SOLD를 읽는다
         assertLiterals(sqlOf(BookingSeatRepository.class), SeatStatus.class);
-        assertEnumNames(literals(sqlOf(BookingJdbcRepository.class), Pattern.compile("\\bbp\\.status" + STATUS_LIST)),
-                PaymentStatus.class);
-        assertThat(literals(sqlOf(BookingJdbcRepository.class), Pattern.compile("(?<!bp\\.)\\bstatus" + STATUS_LIST)))
-                .as("BookingJdbcRepository의 별칭 없는 상태 비교").isEmpty();
         assertLiterals(sqlOf(OutboxTaskJdbcRepository.class), OutboxTaskStatus.class);
     }
 

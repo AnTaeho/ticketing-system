@@ -1,11 +1,9 @@
 package com.example.ticketing.booking.service;
 
 import com.example.ticketing.booking.domain.Booking;
-import com.example.ticketing.booking.domain.BookingPayment;
 import com.example.ticketing.booking.domain.BookingStatus;
 import com.example.ticketing.booking.dto.BookingCancellation;
 import com.example.ticketing.booking.dto.RefundStatus;
-import com.example.ticketing.booking.repository.BookingJdbcRepository;
 import com.example.ticketing.booking.repository.BookingRepository;
 import com.example.ticketing.common.error.ApiException;
 import com.example.ticketing.common.error.ErrorCode;
@@ -31,7 +29,6 @@ import org.springframework.transaction.annotation.Transactional;
 public class BookingTransaction {
 
     private final BookingRepository bookingRepository;
-    private final BookingJdbcRepository bookingJdbcRepository;
     private final SeatHoldRepository seatHoldRepository;
     private final SeatRepository seatRepository;
     private final PerformanceRepository performanceRepository;
@@ -43,14 +40,16 @@ public class BookingTransaction {
         Booking booking = bookingRepository.lockByIdAndUserId(bookingId, userId)
                 .orElseThrow(() -> new ApiException(ErrorCode.BOOKING_NOT_FOUND,
                         Map.of("bookingId", bookingId)));
-        BookingPayment payment = bookingJdbcRepository.findPayment(booking.getPaymentId())
-                .orElseThrow(() -> new IllegalStateException("예매 " + bookingId + "의 결제가 없다"));
         if (booking.getStatus() == BookingStatus.CANCELLED) {
-            return BookingCancellation.alreadyCancelled(RefundStatus.of(BookingStatus.CANCELLED, payment.refunded()));
+            boolean refunded = bookingRepository.findPaymentRefunded(booking.getPaymentId())
+                    .orElseThrow(() -> new IllegalStateException("예매 " + bookingId + "의 결제가 없다"));
+            return BookingCancellation.alreadyCancelled(RefundStatus.of(BookingStatus.CANCELLED, refunded));
         }
         if (performanceRepository.countStarted(booking.getPerformanceId()) > 0) {
             throw new ApiException(ErrorCode.CANCEL_NOT_ALLOWED, Map.of("bookingId", bookingId));
         }
+        String orderId = bookingRepository.findPaymentOrderId(booking.getPaymentId())
+                .orElseThrow(() -> new IllegalStateException("예매 " + bookingId + "의 결제가 없다"));
 
         RowCounts.requireExactly(bookingRepository.confirmedToCancelled(bookingId), 1, "booking CANCELLED");
         SeatHold hold = seatHoldRepository.findById(booking.getHoldId())
@@ -58,8 +57,8 @@ public class BookingTransaction {
         // 게이트 키를 지울 좌석 ID는 hold_id를 비우기 전에 읽어 둔다
         List<Long> seatIds = seatRepository.lockSoldSeatIds(hold.getId());
         RowCounts.requireExactly(seatRepository.soldToAvailable(hold.getId()), seatIds.size(), "seat AVAILABLE");
-        outboxWriter.write(OutboxTaskType.REFUND_REQUESTED, payment.paymentId(),
-                new RefundRequestedPayload(payment.paymentId(), payment.orderId()));
+        outboxWriter.write(OutboxTaskType.REFUND_REQUESTED, booking.getPaymentId(),
+                new RefundRequestedPayload(booking.getPaymentId(), orderId));
         return BookingCancellation.cancelled(
                 new GateHold(booking.getUserId(), booking.getPerformanceId(), hold.getHoldToken(), seatIds));
     }
