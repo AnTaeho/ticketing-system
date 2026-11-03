@@ -9,7 +9,6 @@ import com.example.ticketing.common.redis.SchedulerLease;
 import com.example.ticketing.common.redis.TicketingRedis;
 import com.example.ticketing.common.time.DbClock;
 import com.example.ticketing.hold.repository.SeatGateRedisStore;
-import com.example.ticketing.hold.repository.SeatHoldJdbcRepository;
 import com.example.ticketing.hold.repository.SeatHoldRepository;
 import com.example.ticketing.hold.service.GateKeyReconcileScheduler;
 import com.example.ticketing.hold.service.HoldExpiryScheduler;
@@ -32,7 +31,7 @@ import com.example.ticketing.payment.service.PaymentTransaction;
 import com.example.ticketing.queue.repository.QueueRedisStore;
 import com.example.ticketing.queue.service.QueuePromotionScheduler;
 import com.example.ticketing.queue.service.QueueService;
-import com.example.ticketing.seat.repository.SeatJdbcRepository;
+import com.example.ticketing.seat.repository.SeatRepository;
 import com.example.ticketing.seat.repository.SeatMapRedisStore;
 import com.example.ticketing.seat.service.SeatCatalog;
 import com.example.ticketing.seat.service.SeatMapBuilder;
@@ -46,7 +45,6 @@ import java.util.Optional;
 import org.springframework.boot.test.context.TestComponent;
 import org.springframework.context.ApplicationContext;
 import org.springframework.core.env.Environment;
-import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import tools.jackson.databind.json.JsonMapper;
 
 // 테스트가 운영 서비스를 new로 조립하는 곳. 컨텍스트 빈을 기본으로 쓰고 바꿀 것만 끼운다. 생성자가 바뀌면 여기만 고친다
@@ -108,12 +106,12 @@ public class TestServices {
 
     // 운영 카탈로그는 예매 중 회차 목록을 10초 묶어 두므로 방금 만든 회차가 빠질 수 있다. 캐시 없는 새 카탈로그다
     public SeatCatalog freshCatalog() {
-        return new SeatCatalog(bean(SeatJdbcRepository.class), contextProperties(), System::nanoTime);
+        return new SeatCatalog(bean(SeatRepository.class), contextProperties(), System::nanoTime);
     }
 
     // 예매 중 회차 목록을 넘긴 값으로 고정한다
     public SeatCatalog catalogOf(List<Long> openIds) {
-        return new SeatCatalog(bean(SeatJdbcRepository.class), contextProperties(), System::nanoTime) {
+        return new SeatCatalog(bean(SeatRepository.class), contextProperties(), System::nanoTime) {
             @Override
             public List<Long> openPerformanceIds() {
                 return openIds;
@@ -123,7 +121,7 @@ public class TestServices {
 
     // DB로 고른 예매 중 회차 중에서 넘긴 회차만 남긴다. 다른 테스트가 만든 회차를 건드리지 않게 한다
     public SeatCatalog openCatalogAmong(Collection<Long> performanceIds) {
-        return new SeatCatalog(bean(SeatJdbcRepository.class), contextProperties(), System::nanoTime) {
+        return new SeatCatalog(bean(SeatRepository.class), contextProperties(), System::nanoTime) {
             @Override
             public List<Long> openPerformanceIds() {
                 return super.openPerformanceIds().stream().filter(performanceIds::contains).toList();
@@ -150,7 +148,7 @@ public class TestServices {
 
     // 동시 요청이 single-flight 안에서 겹치도록 빌드를 늦춘다
     public SeatMapBuilder slowSeatMapBuilder(long delayMs) {
-        return new SeatMapBuilder(bean(SeatJdbcRepository.class), bean(JsonMapper.class), Clock.systemDefaultZone()) {
+        return new SeatMapBuilder(bean(SeatRepository.class), bean(JsonMapper.class), Clock.systemDefaultZone()) {
             @Override
             public Optional<String> build(long performanceId) {
                 try {
@@ -263,7 +261,7 @@ public class TestServices {
             SeatGateRedisStore gate = gateStore != null ? gateStore : bean(SeatGateRedisStore.class);
             return new SeatHoldService(bean(SeatCatalog.class),
                     transaction != null ? transaction : bean(SeatHoldTransaction.class),
-                    bean(SeatHoldRepository.class), bean(SeatHoldJdbcRepository.class),
+                    bean(SeatHoldRepository.class),
                     dbClock != null ? dbClock : bean(DbClock.class), gate, gateReflector(gate, resolved),
                     queueService != null ? queueService : bean(QueueService.class),
                     new HoldMetrics(meterRegistry()), System::nanoTime, resolved);
@@ -309,7 +307,7 @@ public class TestServices {
 
         private SchedulerLease lease;
         private SeatGateRedisStore gateStore;
-        private NamedParameterJdbcTemplate jdbc;
+        private SeatHoldRepository holds;
         private SeatCatalog catalog;
 
         public GateKeyReconcileSchedulerBuilder lease(SchedulerLease lease) {
@@ -323,8 +321,8 @@ public class TestServices {
         }
 
         // 대사의 DB 조회에 끼어들 때 쓴다
-        public GateKeyReconcileSchedulerBuilder jdbc(NamedParameterJdbcTemplate jdbc) {
-            this.jdbc = jdbc;
+        public GateKeyReconcileSchedulerBuilder holds(SeatHoldRepository holds) {
+            this.holds = holds;
             return this;
         }
 
@@ -336,7 +334,7 @@ public class TestServices {
         public GateKeyReconcileScheduler build() {
             return new GateKeyReconcileScheduler(lease != null ? lease : bean(SchedulerLease.class),
                     gateStore != null ? gateStore : bean(SeatGateRedisStore.class),
-                    jdbc != null ? new SeatHoldJdbcRepository(jdbc) : bean(SeatHoldJdbcRepository.class),
+                    holds != null ? holds : bean(SeatHoldRepository.class),
                     catalog != null ? catalog : bean(SeatCatalog.class), System::nanoTime, contextProperties(),
                     meterRegistry());
         }

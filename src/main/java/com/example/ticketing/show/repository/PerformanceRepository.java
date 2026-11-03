@@ -12,17 +12,13 @@ public interface PerformanceRepository extends JpaRepository<Performance, Long> 
     List<Performance> findByShowIdOrderByStartsAtAscIdAsc(Long showId);
 
     // 서버 시계나 SeatCatalog 캐시 대신 DB 시각으로 회차 시작 여부를 본다
-    @Query(value = "SELECT COUNT(*) FROM performance WHERE id = :id AND starts_at <= NOW(6)", nativeQuery = true)
+    @Query("select count(p) from Performance p where p.id = :id and p.startsAt <= current_timestamp")
     long countStarted(@Param("id") long id);
 
     // 공연마다 아직 시작하지 않은 가장 이른 회차. 같은 시각 회차가 여럿이면 모두 돌려준다
-    @Query(value = """
-            SELECT p.* FROM performance p
-            JOIN (SELECT show_id, MIN(starts_at) AS first_starts_at
-                    FROM performance
-                   WHERE starts_at > :now
-                   GROUP BY show_id) n
-              ON n.show_id = p.show_id AND n.first_starts_at = p.starts_at
-            """, nativeQuery = true)
+    @Query("""
+            select p from Performance p
+             where p.startsAt = (select min(n.startsAt) from Performance n
+                                  where n.showId = p.showId and n.startsAt > :now)""")
     List<Performance> findNextPerformances(@Param("now") LocalDateTime now);
 }

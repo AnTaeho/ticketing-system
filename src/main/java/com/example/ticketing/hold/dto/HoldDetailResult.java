@@ -14,14 +14,13 @@ public record HoldDetailResult(
         LocalDateTime expiresAt,
         LocalDateTime payDeadline,
         LocalDateTime serverNow,
-        List<HoldSeatResult> seats,
+        List<SeatInfo> seats,
         int totalAmount,
         Long paymentId
 ) {
 
     public static HoldDetailResult from(SeatHold hold, List<SeatInfo> seats, Long paymentId, LocalDateTime serverNow) {
         return new HoldDetailResult(hold.getId(), hold.getPerformanceId(), hold.getStatus(), hold.getExpiresAt(),
-                hold.getPayDeadline(), serverNow, seats.stream().map(HoldSeatResult::from).toList(),
-                hold.getTotalAmount(), paymentId);
+                hold.getPayDeadline(), serverNow, List.copyOf(seats), hold.getTotalAmount(), paymentId);
     }
 }

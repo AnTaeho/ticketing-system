@@ -2,8 +2,8 @@ package com.example.ticketing.queue.controller;
 
 import com.example.ticketing.common.web.CurrentUser;
 import com.example.ticketing.queue.dto.QueueEnterResponse;
-import com.example.ticketing.queue.dto.QueueHeartbeatResponse;
-import com.example.ticketing.queue.dto.QueueStatusResponse;
+import com.example.ticketing.queue.dto.QueueHeartbeatResult;
+import com.example.ticketing.queue.dto.QueueStatusResult;
 import com.example.ticketing.queue.service.QueueService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -25,15 +25,15 @@ public class QueueApiController {
     }
 
     @GetMapping("/api/performances/{performanceId}/queue/tokens/{queueToken}")
-    public QueueStatusResponse status(@CurrentUser Long userId, @PathVariable long performanceId,
-                                      @PathVariable String queueToken) {
-        return QueueStatusResponse.from(queueService.status(userId, performanceId, queueToken));
+    public QueueStatusResult status(@CurrentUser Long userId, @PathVariable long performanceId,
+                                    @PathVariable String queueToken) {
+        return queueService.status(userId, performanceId, queueToken);
     }
 
     @PostMapping("/api/performances/{performanceId}/queue/tokens/{queueToken}/heartbeat")
-    public QueueHeartbeatResponse heartbeat(@CurrentUser Long userId, @PathVariable long performanceId,
-                                            @PathVariable String queueToken) {
-        return QueueHeartbeatResponse.from(queueService.heartbeat(userId, performanceId, queueToken));
+    public QueueHeartbeatResult heartbeat(@CurrentUser Long userId, @PathVariable long performanceId,
+                                          @PathVariable String queueToken) {
+        return queueService.heartbeat(userId, performanceId, queueToken);
     }
 
     // 화면이 떠나며 sendBeacon으로 보낸다. 응답을 읽지 않으므로 줄였는지와 상관없이 204다

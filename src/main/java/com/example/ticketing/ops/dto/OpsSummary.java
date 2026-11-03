@@ -23,10 +23,6 @@ public record OpsSummary(
         Map<String, CounterView> counters
 ) {
 
-    public record OpsPerformance(long performanceId, String showTitle, String venueName, LocalDateTime startsAt,
-                                 LocalDateTime openAt, LocalDateTime gateCloseAt) {
-    }
-
     public record Attention(List<FailedTask> failedTasks, List<RefundingHold> refundingHolds,
                             List<StalePayment> stalePayments) {
     }

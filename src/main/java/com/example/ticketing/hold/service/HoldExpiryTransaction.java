@@ -4,10 +4,11 @@ import com.example.ticketing.hold.domain.ClaimedHold;
 import com.example.ticketing.hold.dto.HoldExpiry;
 import com.example.ticketing.hold.repository.SeatHoldJdbcRepository;
 import com.example.ticketing.hold.repository.SeatHoldRepository;
-import com.example.ticketing.seat.repository.SeatJdbcRepository;
 import com.example.ticketing.seat.repository.SeatRepository;
+import com.example.ticketing.seat.domain.HeldSeat;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Isolation;
@@ -19,7 +20,6 @@ import org.springframework.transaction.annotation.Transactional;
 public class HoldExpiryTransaction {
 
     private final SeatHoldJdbcRepository seatHoldJdbcRepository;
-    private final SeatJdbcRepository seatJdbcRepository;
     private final SeatHoldRepository seatHoldRepository;
     private final SeatRepository seatRepository;
 
@@ -30,7 +30,9 @@ public class HoldExpiryTransaction {
             return List.of();
         }
         List<Long> ids = claimed.stream().map(ClaimedHold::holdId).toList();
-        Map<Long, List<Long>> seatsByHold = seatJdbcRepository.findHeldSeatIdsByHold(ids);
+        Map<Long, List<Long>> seatsByHold = seatRepository.findHeldSeats(ids).stream()
+                .collect(Collectors.groupingBy(HeldSeat::holdId,
+                        Collectors.mapping(HeldSeat::seatId, Collectors.toList())));
 
         seatHoldRepository.heldToExpired(ids);
         seatRepository.heldToAvailableOfHolds(ids);

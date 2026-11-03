@@ -1,9 +1,9 @@
 package com.example.ticketing.show.controller;
 
 import com.example.ticketing.show.dto.CreatePerformanceRequest;
-import com.example.ticketing.show.dto.CreatePerformanceResponse;
+import com.example.ticketing.show.dto.CreatePerformanceResult;
 import com.example.ticketing.show.dto.CreateShowRequest;
-import com.example.ticketing.show.dto.CreateShowResponse;
+import com.example.ticketing.show.dto.CreateShowResult;
 import com.example.ticketing.show.service.ShowAdminService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -25,13 +25,13 @@ public class ShowAdminApiController {
 
     @PostMapping("/shows")
     @ResponseStatus(HttpStatus.CREATED)
-    public CreateShowResponse createShow(@Valid @RequestBody CreateShowRequest request) {
-        return CreateShowResponse.from(showAdminService.createShow(request.toCommand()));
+    public CreateShowResult createShow(@Valid @RequestBody CreateShowRequest request) {
+        return showAdminService.createShow(request.toCommand());
     }
 
     @PostMapping("/performances")
     @ResponseStatus(HttpStatus.CREATED)
-    public CreatePerformanceResponse createPerformance(@Valid @RequestBody CreatePerformanceRequest request) {
-        return CreatePerformanceResponse.from(showAdminService.createPerformance(request.toCommand()));
+    public CreatePerformanceResult createPerformance(@Valid @RequestBody CreatePerformanceRequest request) {
+        return showAdminService.createPerformance(request.toCommand());
     }
 }

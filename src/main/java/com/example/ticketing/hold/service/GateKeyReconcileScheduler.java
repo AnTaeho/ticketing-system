@@ -12,7 +12,7 @@ import com.example.ticketing.common.redis.RedisUnavailableException;
 import com.example.ticketing.common.redis.SchedulerLease;
 import com.example.ticketing.hold.domain.GateKeyEntry;
 import com.example.ticketing.hold.repository.SeatGateRedisStore;
-import com.example.ticketing.hold.repository.SeatHoldJdbcRepository;
+import com.example.ticketing.hold.repository.SeatHoldRepository;
 import com.example.ticketing.seat.service.SeatCatalog;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -24,6 +24,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Function;
 import java.util.function.LongSupplier;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -38,10 +39,12 @@ public class GateKeyReconcileScheduler {
 
     static final String LEASE = "gate-reconcile";
     static final Duration FRESH_WINDOW = Duration.ofSeconds(10);
+    // IN 목록 하나에 넣는 토큰 수
+    private static final int IN_CHUNK = 500;
 
     private final SchedulerLease lease;
     private final SeatGateRedisStore gateStore;
-    private final SeatHoldJdbcRepository seatHoldJdbcRepository;
+    private final SeatHoldRepository seatHoldRepository;
     private final SeatCatalog seatCatalog;
     private final ThrottledWarn redisWarn;
     private final Duration leaseTtl;
@@ -51,12 +54,12 @@ public class GateKeyReconcileScheduler {
     private final Counter skippedFresh;
 
     public GateKeyReconcileScheduler(SchedulerLease lease, SeatGateRedisStore gateStore,
-                                     SeatHoldJdbcRepository seatHoldJdbcRepository, SeatCatalog seatCatalog,
+                                     SeatHoldRepository seatHoldRepository, SeatCatalog seatCatalog,
                                      LongSupplier nanoClock, TicketingProperties properties,
                                      MeterRegistry meterRegistry) {
         this.lease = lease;
         this.gateStore = gateStore;
-        this.seatHoldJdbcRepository = seatHoldJdbcRepository;
+        this.seatHoldRepository = seatHoldRepository;
         this.seatCatalog = seatCatalog;
         this.redisWarn = new ThrottledWarn(log, nanoClock);
         this.leaseTtl = Duration.ofMillis(properties.gate().reconcileScanMs() * 2);
@@ -123,7 +126,7 @@ public class GateKeyReconcileScheduler {
         }
         // 좌석 행은 hold 하나만 가리키므로 좌석 키마다 살아 있는 토큰은 하나다
         Map<String, String> liveTokenByKey = new HashMap<>();
-        seatHoldJdbcRepository.findLiveGateSeats(performanceId, tokens(keys))
+        inChunks(tokens(keys), chunk -> seatHoldRepository.findLiveGateSeats(performanceId, chunk))
                 .forEach(seat -> liveTokenByKey.put(RedisKeys.seat(performanceId, seat.seatId()), seat.holdToken()));
         return keys.stream().filter(key -> !key.holdToken().equals(liveTokenByKey.get(key.name()))).toList();
     }
@@ -132,7 +135,8 @@ public class GateKeyReconcileScheduler {
         if (keys.isEmpty()) {
             return List.of();
         }
-        Set<String> live = new HashSet<>(seatHoldJdbcRepository.findLiveUserHoldTokens(performanceId, tokens(keys)));
+        Set<String> live = new HashSet<>(
+                inChunks(tokens(keys), chunk -> seatHoldRepository.findLiveUserHoldTokens(performanceId, chunk)));
         return keys.stream().filter(key -> !live.contains(key.holdToken())).toList();
     }
 
@@ -145,6 +149,14 @@ public class GateKeyReconcileScheduler {
             removed += gateStore.releaseIfOwned(entry.getKey(), entry.getValue());
         }
         return removed;
+    }
+
+    private static <T> List<T> inChunks(List<String> tokens, Function<List<String>, List<T>> query) {
+        List<T> results = new ArrayList<>();
+        for (int from = 0; from < tokens.size(); from += IN_CHUNK) {
+            results.addAll(query.apply(tokens.subList(from, Math.min(from + IN_CHUNK, tokens.size()))));
+        }
+        return results;
     }
 
     private static List<String> tokens(List<GateKeyEntry> keys) {

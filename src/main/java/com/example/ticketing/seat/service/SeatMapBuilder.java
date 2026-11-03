@@ -2,12 +2,12 @@ package com.example.ticketing.seat.service;
 
 import com.example.ticketing.common.metrics.Metrics;
 import com.example.ticketing.common.metrics.Metrics.Tag;
-import com.example.ticketing.seat.domain.SeatMapRow;
+import com.example.ticketing.seat.domain.SeatMapSeat;
 import com.example.ticketing.seat.domain.SeatMapSnapshot;
 import com.example.ticketing.seat.domain.SeatMapSnapshot.Row;
 import com.example.ticketing.seat.domain.SeatMapSnapshot.SeatCell;
 import com.example.ticketing.seat.domain.SeatMapSnapshot.Section;
-import com.example.ticketing.seat.repository.SeatJdbcRepository;
+import com.example.ticketing.seat.repository.SeatRepository;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Clock;
@@ -23,7 +23,7 @@ import tools.jackson.databind.json.JsonMapper;
 @RequiredArgsConstructor
 public class SeatMapBuilder {
 
-    private final SeatJdbcRepository seatJdbcRepository;
+    private final SeatRepository seatRepository;
     private final JsonMapper jsonMapper;
     private final Clock clock;
 
@@ -34,7 +34,7 @@ public class SeatMapBuilder {
 
     public Optional<SeatMapSnapshot> snapshot(long performanceId) {
         List<Section> sections = new ArrayList<>();
-        for (SeatMapRow seat : seatJdbcRepository.findSeatMapRows(performanceId)) {
+        for (SeatMapSeat seat : seatRepository.findSeatMap(performanceId)) {
             Section lastSection = sections.isEmpty() ? null : sections.get(sections.size() - 1);
             if (lastSection == null || !lastSection.section().equals(seat.section())) {
                 lastSection = new Section(seat.section(), new ArrayList<>());
@@ -46,7 +46,7 @@ public class SeatMapBuilder {
                 lastRow = new Row(seat.rowNo(), new ArrayList<>());
                 rows.add(lastRow);
             }
-            lastRow.seats().add(new SeatCell(seat.id(), seat.seatNo(), seat.grade(), seat.price(),
+            lastRow.seats().add(new SeatCell(seat.id(), seat.seatNo(), seat.grade().name(), seat.price(),
                     SeatMapSnapshot.code(seat.status())));
         }
         if (sections.isEmpty()) {

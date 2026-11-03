@@ -2,7 +2,6 @@ package com.example.ticketing.user.controller;
 
 import com.example.ticketing.common.web.HttpNames;
 import com.example.ticketing.user.dto.DemoLoginRequest;
-import com.example.ticketing.user.dto.DemoLoginResponse;
 import com.example.ticketing.user.dto.DemoLoginResult;
 import com.example.ticketing.user.service.DemoLoginService;
 import lombok.RequiredArgsConstructor;
@@ -21,7 +20,7 @@ public class DemoLoginApiController {
 
     // 닉네임 검사는 앞뒤 공백을 지운 뒤 글자 수로 해야 해서 Bean Validation 대신 서비스가 한다
     @PostMapping("/api/demo/login")
-    public ResponseEntity<DemoLoginResponse> login(@RequestBody DemoLoginRequest request) {
+    public ResponseEntity<DemoLoginResult> login(@RequestBody DemoLoginRequest request) {
         DemoLoginResult result = demoLoginService.login(request.nickname());
         ResponseCookie cookie = ResponseCookie.from(HttpNames.USER_ID_COOKIE,
                         String.valueOf(result.userId()))
@@ -31,6 +30,6 @@ public class DemoLoginApiController {
                 .build();
         return ResponseEntity.ok()
                 .header(HttpHeaders.SET_COOKIE, cookie.toString())
-                .body(DemoLoginResponse.from(result));
+                .body(result);
     }
 }

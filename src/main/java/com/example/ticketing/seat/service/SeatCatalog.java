@@ -6,7 +6,7 @@ import com.example.ticketing.common.error.ErrorCode;
 import com.example.ticketing.seat.domain.PerformanceInfo;
 import com.example.ticketing.seat.domain.SeatInfo;
 import com.example.ticketing.seat.dto.SeatSelection;
-import com.example.ticketing.seat.repository.SeatJdbcRepository;
+import com.example.ticketing.seat.repository.SeatRepository;
 import com.example.ticketing.show.domain.PerformanceState;
 import java.time.Duration;
 import java.time.LocalDateTime;
@@ -26,7 +26,7 @@ public class SeatCatalog {
 
     private static final long OPEN_IDS_TTL_NANOS = Duration.ofSeconds(10).toNanos();
 
-    private final SeatJdbcRepository seatJdbcRepository;
+    private final SeatRepository seatRepository;
     private final int maxSeats;
     private final LongSupplier nanoClock;
 
@@ -34,9 +34,9 @@ public class SeatCatalog {
     private final Object openIdsLock = new Object();
     private volatile OpenIds openIds;
 
-    public SeatCatalog(SeatJdbcRepository seatJdbcRepository, TicketingProperties properties,
+    public SeatCatalog(SeatRepository seatRepository, TicketingProperties properties,
                        LongSupplier nanoClock) {
-        this.seatJdbcRepository = seatJdbcRepository;
+        this.seatRepository = seatRepository;
         this.maxSeats = properties.hold().maxSeats();
         this.nanoClock = nanoClock;
     }
@@ -46,7 +46,8 @@ public class SeatCatalog {
         if (cached != null) {
             return cached;
         }
-        PerformanceInfo loaded = seatJdbcRepository.findPerformanceWithSeats(performanceId)
+        PerformanceInfo loaded = seatRepository.findPerformanceInfo(performanceId)
+                .map(info -> info.withSeats(seatRepository.findSeatInfos(performanceId)))
                 .orElseThrow(() -> new ApiException(ErrorCode.PERFORMANCE_NOT_FOUND,
                         Map.of("performanceId", performanceId)));
         PerformanceInfo previous = performances.putIfAbsent(performanceId, loaded);
@@ -84,7 +85,7 @@ public class SeatCatalog {
     // 지금 이 hold를 가리키는 좌석. 풀리거나 남이 가져간 좌석은 빠지고, 위치·가격은 카탈로그에서 채운다
     public List<SeatInfo> seatsOfHold(long performanceId, long holdId) {
         Map<Long, SeatInfo> seats = performance(performanceId).seats();
-        return seatJdbcRepository.findSeatIdsOfHold(performanceId, holdId).stream().map(seats::get).toList();
+        return seatRepository.findSeatIdsOfHold(performanceId, holdId).stream().map(seats::get).toList();
     }
 
     // 스케줄러가 매 주기 부르므로 10초 묶어 둔다
@@ -98,7 +99,7 @@ public class SeatCatalog {
             if (current != null && current.isFresh(nanoClock.getAsLong())) {
                 return current.ids();
             }
-            List<Long> ids = seatJdbcRepository.findOpenPerformanceIds();
+            List<Long> ids = seatRepository.findOpenPerformanceIds();
             openIds = new OpenIds(List.copyOf(ids), nanoClock.getAsLong());
             return openIds.ids();
         }

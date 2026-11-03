@@ -25,12 +25,12 @@ com.example.ticketing
 | `controller` | `*Controller`, 컨트롤러 전용 변환기 | 같은 기능의 `service`·`dto`, `common` |
 | `dto` | `*Request`, `*Command`, `*Result`, `*Response`, 흐름 결과 record | 같은 기능의 `domain`, 다른 기능의 `domain` 값·enum, `common` |
 | `service` | `*Service`, `*Transaction`, `*Reader`, `*Scheduler`, `*Handler` | 같은 기능의 `repository`·`domain`·`dto`·`client`, 다른 기능의 `service`·`dto`, `common` |
-| `repository` | `*Repository`(JPA), `*JdbcRepository`(JDBC), `*RedisStore`(Redis) | 같은 기능의 `domain`, `common` |
+| `repository` | `*Repository`(JPA), `*JdbcRepository`(JDBC), `*RedisStore`(Redis) | 같은 기능의 `domain`·`dto`, 다른 기능의 `domain` enum, `common` |
 | `domain` | 엔티티, 상태 enum, 값 record, 순수 규칙 | `common`, 다른 기능의 `domain` 값·enum (엔티티는 제외) |
 | `client` | 외부 시스템 클라이언트와 그 결과 타입 | `common` |
 
 - 다른 기능의 `controller`나 `repository`를 직접 부르지 않는다. 필요하면 그 기능의 `service`를 부른다.
-- 테이블의 쓰기는 그 테이블을 가진 기능만 한다. 다른 기능의 테이블을 읽기만 할 때는, 서비스 호출이 순환을 만들면 자기 `*JdbcRepository`의 읽기 SQL로 읽어도 된다.
+- 테이블의 쓰기는 그 테이블을 가진 기능만 한다. 다른 기능의 테이블은 자기 `*Repository`의 JPQL에서 그 엔티티로 읽기만 한다.
 - 예외: hold·payment·booking의 `*Transaction`은 한 트랜잭션 안에서 락 순서를 지키려고 좌석·회차·사용자 repository로 직접 행을 잠그고 상태를 바꾼다. 트랜잭션 밖의 조회는 이 예외에 들지 않는다.
 - 의존은 한 방향이다: `payment → booking`, `payment·booking → hold → seat → show`, `payment·booking·notification → outbox`. 거꾸로 부르지 않는다.
 - `outbox`는 작업 큐(기록, 집기, 결과 반영)만 맡고 다른 기능을 모른다. 작업 처리는 그 작업을 가진 기능이 `OutboxHandler`로 구현한다(환불은 `payment`, 발권 알림은 `notification`).
@@ -41,18 +41,21 @@ com.example.ticketing
 
 | 접미사 | 하는 일 | 하지 않는 일 |
 |---|---|---|
-| `*Controller` | HTTP 요청을 `*Command`로 바꾸고, `*Result`를 `*Response`로 바꾼다. 상태 코드를 고른다 | 판정, SQL, Redis |
+| `*Controller` | HTTP 요청을 `*Command`로 바꾸고, `*Result`를 내보낸다. 상태 코드를 고른다 | 판정, SQL, Redis |
 | `*Service` | 한 유스케이스의 흐름을 짠다. 트랜잭션을 열지 않는다(관리 API의 단순 생성만 예외). 커밋 뒤 Redis 반영과 외부 호출을 여기서 한다 | SQL |
 | `*Transaction` | 쓰기 트랜잭션 한 단위. 락, 조건부 UPDATE, 같은 트랜잭션의 Outbox 기록 | 외부 호출, Redis |
 | `*Reader` | 읽기 전용 조회와 조립 | 쓰기 |
 | `*Scheduler` | 주기 실행의 진입점. 집고, 건마다 위임하고, 실패를 기록한다. `@Scheduled` 메서드 이름은 `run()`이다. 건마다의 판정이 한 화면에 들면 여기에 둔다 | 트랜잭션, 길어진 판정 |
 | `*Reflector` | 커밋 뒤 Redis 게이트 반영. 게이트 스위치와 반영 실패 기록을 맡는다 | DB |
 | `*Writer` | 같은 트랜잭션 안에서 기록만 한다(`OutboxWriter`) | 커밋 |
-| `*Repository` | JPA. 단건 저장·조회와 native 조건부 UPDATE | 여러 테이블 조립 |
-| `*JdbcRepository` | `NamedParameterJdbcTemplate`. `SKIP LOCKED` 집기, 다건·조인 조회, 대량 INSERT | 업무 판정 |
+| `*Repository` | JPA. 저장, 파생 메서드·JPQL 조회, native 조건부 UPDATE·행 잠금 | 업무 판정 |
+| `*JdbcRepository` | `NamedParameterJdbcTemplate`. `SKIP LOCKED` 집기, DB 시각 기간 계산, 대량 INSERT. 행은 `DataClassRowMapper`로 받는다 | 업무 판정, 손으로 짠 RowMapper |
 | `*RedisStore` | Redis 읽기·쓰기와 Lua 실행. Redis 장애는 `RedisUnavailableException`으로 바꿔 던진다 | 장애 정책 |
 | `*Client` | 외부 시스템 호출. 실패를 결과 값으로 돌려준다 | 재시도 정책 |
 
+- 한 테이블 조회는 파생 메서드나 엔티티로 한다. 여러 테이블을 엮는 읽기는 JPQL `select new <Result>(...)` 하나로 받고, 엔티티 연관 없이 `join X x on x.id = a.xId`로 엮는다.
+- 트랜잭션 안의 조회와 행이 많은 조회는 엔티티 대신 스칼라나 `select new` DTO로 받는다.
+- native SQL은 조건부 상태 전이, `FOR UPDATE` 행 잠금, `SKIP LOCKED` 집기, `NOW(6)`에 기간을 더하는 계산, 대량 INSERT에만 쓴다.
 - 메서드 이름은 하는 일을 그대로 쓴다. `boolean`은 이름 그대로의 뜻일 때만 돌려주고, 갈래가 셋 이상이거나 "모름"이 섞이면 enum을 돌려준다.
 - 상태 전이 메서드는 repository와 `*Transaction` 모두 `출발To도착`(`heldToPaying`, `payingToConfirmed`)으로 짓는다.
 - 표에 없는 service 도우미(`*Issuer`, `*Builder`, `*Metrics`)는 이름이 하는 일을 그대로 말하게 짓는다.
@@ -67,11 +70,12 @@ com.example.ticketing
 | HTTP → Controller | `*Request` (Bean Validation, `toCommand()`) | `dto` |
 | Controller → Service | `*Command` (값이 둘 이상일 때. id 하나는 그대로 넘긴다) | `dto` |
 | Service → Controller | `*Result` | `dto` |
-| Controller → HTTP | `*Response` (`from(result)`) | `dto` |
+| Controller → HTTP | `*Result`를 그대로. 모양이 다를 때만 `*Response` (`from(result)`) | `dto` |
 | `*Transaction` → `*Service` | 결과를 뜻하는 이름의 record (예: `HoldPlacement`, `PaymentConclusion`) | `dto` |
 | Outbox 작업 | 작업 종류별 payload record. 쓰는 기능과 처리하는 기능이 함께 보므로 둘 다 의존하는 곳에 둔다 | `outbox/dto` |
 
 - 엔티티는 `service` 밖으로 나가지 않는다. 엔티티에서 DTO를 만들 때는 `*Result.from(entity)` 한 곳에서만 한다.
+- 필드를 옮겨 담기만 하는 record(`*Result`와 같은 모양의 `*Row`·`*Response`)는 두지 않는다.
 - `Map`은 오류 `detail`에만 쓴다. JSON을 문자열 키로 읽고 쓰지 않는다.
 - 같은 값은 같은 이름으로 부른다. (대기열 토큰은 어디서나 `queueToken`)
 
@@ -86,7 +90,7 @@ com.example.ticketing
 
 ## 5. 시간
 
-- 만료·마감 판정은 SQL `NOW(6)`이다. "지금 + 기간"은 SQL에서 바인드한 기간으로 계산한다. 마이크로초 기간 값은 `SqlIntervals.micros`로 만든다.
+- 만료·마감 판정은 DB 시각이다. native는 `NOW(6)`, JPQL은 `current_timestamp`(MySQL에서 `current_timestamp(6)`)로 비교한다. "지금 + 기간"은 SQL에서 바인드한 기간으로 계산한다. 마이크로초 기간 값은 `SqlIntervals.micros`로 만든다.
 - 자바에서 업무 시각이 필요하면 `DbClock`에서 받는다. 경과 시간(캐시 신선도, 간격)은 주입한 `LongSupplier` 나노 시계로 잰다. `System.currentTimeMillis()`·`nanoTime()`을 직접 부르지 않는다.
 
 ## 6. Redis

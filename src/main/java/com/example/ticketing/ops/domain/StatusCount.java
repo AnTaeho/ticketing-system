@@ -1,4 +1,5 @@
 package com.example.ticketing.ops.domain;
 
-public record StatusCount(String status, long count) {
+// status는 그 테이블의 상태 enum이다
+public record StatusCount(Enum<?> status, long count) {
 }

@@ -1,8 +1,11 @@
 package com.example.ticketing.hold.repository;
 
+import com.example.ticketing.hold.domain.LiveGateSeat;
 import com.example.ticketing.hold.domain.SeatHold;
+import com.example.ticketing.hold.dto.ActiveHoldResult;
 import java.time.LocalDateTime;
 import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
@@ -15,18 +18,39 @@ public interface SeatHoldRepository extends JpaRepository<SeatHold, Long> {
 
     Optional<SeatHold> findByIdAndUserId(Long id, Long userId);
 
-    @Query(value = """
-            SELECT COUNT(*) FROM seat_hold
-             WHERE user_id = :userId AND performance_id = :performanceId
-               AND status IN ('HELD', 'PAYING')""", nativeQuery = true)
+    @Query("""
+            select count(h) from SeatHold h
+             where h.userId = :userId and h.performanceId = :performanceId and h.status in (HELD, PAYING)""")
     long countActive(@Param("userId") long userId, @Param("performanceId") long performanceId);
 
-    @Query(value = """
-            SELECT * FROM seat_hold
-             WHERE user_id = :userId AND performance_id = :performanceId
-               AND status IN ('HELD', 'PAYING')
-             ORDER BY id DESC LIMIT 1""", nativeQuery = true)
-    Optional<SeatHold> findActive(@Param("userId") long userId, @Param("performanceId") long performanceId);
+    @Query("""
+            select new com.example.ticketing.hold.dto.ActiveHoldResult(h.id, h.status, h.expiresAt)
+              from SeatHold h
+             where h.userId = :userId and h.performanceId = :performanceId and h.status in (HELD, PAYING)
+             order by h.id desc
+             limit 1""")
+    Optional<ActiveHoldResult> findActive(@Param("userId") long userId, @Param("performanceId") long performanceId);
+
+    // 결제 테이블은 읽기만 한다. 결제 기능이 hold 기능을 부르므로 결제 서비스를 부르면 순환이 된다
+    @Query("select p.id from Payment p where p.holdId = :holdId")
+    Optional<Long> findPaymentIdByHoldId(@Param("holdId") long holdId);
+
+    // 좌석 행이 이 토큰의 hold를 가리키는 HELD·SOLD 좌석
+    @Query("""
+            select new com.example.ticketing.hold.domain.LiveGateSeat(h.holdToken, s.id)
+              from SeatHold h
+              join Seat s on s.holdId = h.id
+             where h.performanceId = :performanceId and h.holdToken in :tokens
+               and s.performanceId = :performanceId and s.status in (HELD, SOLD)""")
+    List<LiveGateSeat> findLiveGateSeats(@Param("performanceId") long performanceId,
+                                         @Param("tokens") Collection<String> tokens);
+
+    // HELD·PAYING hold의 토큰만 userhold 키가 살아 있다
+    @Query("""
+            select h.holdToken from SeatHold h
+             where h.performanceId = :performanceId and h.holdToken in :tokens and h.status in (HELD, PAYING)""")
+    List<String> findLiveUserHoldTokens(@Param("performanceId") long performanceId,
+                                        @Param("tokens") Collection<String> tokens);
 
     @Query(value = "SELECT * FROM seat_hold WHERE id = :id AND user_id = :userId FOR UPDATE", nativeQuery = true)
     Optional<SeatHold> lockByIdAndUserId(@Param("id") long id, @Param("userId") long userId);

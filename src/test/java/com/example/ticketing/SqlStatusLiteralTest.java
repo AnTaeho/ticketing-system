@@ -5,18 +5,17 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.example.ticketing.booking.domain.BookingStatus;
 import com.example.ticketing.booking.repository.BookingRepository;
 import com.example.ticketing.booking.repository.BookingSeatRepository;
+import com.example.ticketing.fakepg.domain.FakePgStatus;
+import com.example.ticketing.fakepg.repository.FakePgOrderRepository;
 import com.example.ticketing.hold.domain.HoldStatus;
 import com.example.ticketing.hold.repository.SeatHoldJdbcRepository;
 import com.example.ticketing.hold.repository.SeatHoldRepository;
-import com.example.ticketing.ops.repository.OpsJdbcRepository;
 import com.example.ticketing.outbox.domain.OutboxTaskStatus;
-import com.example.ticketing.outbox.domain.OutboxTaskType;
 import com.example.ticketing.outbox.repository.OutboxTaskJdbcRepository;
 import com.example.ticketing.payment.domain.PaymentStatus;
 import com.example.ticketing.payment.repository.PaymentJdbcRepository;
 import com.example.ticketing.payment.repository.PaymentRepository;
 import com.example.ticketing.seat.domain.SeatStatus;
-import com.example.ticketing.seat.repository.SeatJdbcRepository;
 import com.example.ticketing.seat.repository.SeatRepository;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
@@ -31,7 +30,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 
-// SQL 문자열의 상태 리터럴은 컴파일러가 enum과 맞춰 주지 않으므로 여기서 묶는다
+// native SQL의 상태 리터럴은 컴파일러가 enum과 맞춰 주지 않으므로 여기서 묶는다. JPQL의 enum 이름은 Hibernate가 기동 때 검사한다
 class SqlStatusLiteralTest {
 
     private static final String STATUS_LIST = "\\s*(?:=|IN)\\s*\\(?\\s*('[A-Z_]+'(?:\\s*,\\s*'[A-Z_]+')*)";
@@ -40,34 +39,18 @@ class SqlStatusLiteralTest {
     private static final Pattern LITERAL = Pattern.compile("'([A-Z_]+)'");
 
     @Test
-    @DisplayName("저장소 SQL의 상태 리터럴은 모두 그 테이블 상태 enum의 이름이다")
+    @DisplayName("저장소 native SQL의 상태 리터럴은 모두 그 테이블 상태 enum의 이름이다")
     void statusLiteralsAreEnumNames() {
         assertLiterals(sqlOf(SeatHoldRepository.class), HoldStatus.class);
-        // 게이트 키 대사는 별칭 s로 좌석 상태를 읽는다
-        List<String> holdJdbc = sqlOf(SeatHoldJdbcRepository.class);
-        assertEnumNames(literals(holdJdbc, Pattern.compile("(?<!s\\.)\\bstatus" + STATUS_LIST)), HoldStatus.class);
-        assertEnumNames(literals(holdJdbc, Pattern.compile("\\bs\\.status" + STATUS_LIST)), SeatStatus.class);
+        assertLiterals(sqlOf(SeatHoldJdbcRepository.class), HoldStatus.class);
         assertLiterals(sqlOf(SeatRepository.class), SeatStatus.class);
-        assertLiterals(sqlOf(SeatJdbcRepository.class), SeatStatus.class);
         assertLiterals(sqlOf(PaymentRepository.class), PaymentStatus.class);
         assertLiterals(sqlOf(PaymentJdbcRepository.class), PaymentStatus.class);
         assertLiterals(sqlOf(BookingRepository.class), BookingStatus.class);
         // booking_seat 복사는 seat 테이블의 SOLD를 읽는다
         assertLiterals(sqlOf(BookingSeatRepository.class), SeatStatus.class);
         assertLiterals(sqlOf(OutboxTaskJdbcRepository.class), OutboxTaskStatus.class);
-    }
-
-    @Test
-    @DisplayName("운영 집계 SQL의 상태·작업 종류 리터럴은 별칭이 가리키는 테이블의 enum 이름이다")
-    void opsLiteralsAreEnumNames() {
-        List<String> sqls = sqlOf(OpsJdbcRepository.class);
-
-        assertEnumNames(literals(sqls, Pattern.compile("\\bbp\\.status" + STATUS_LIST)), PaymentStatus.class);
-        assertEnumNames(literals(sqls, Pattern.compile("\\bh\\.status" + STATUS_LIST)), HoldStatus.class);
-        assertEnumNames(literals(sqls, Pattern.compile("\\bo\\.status" + STATUS_LIST)), OutboxTaskStatus.class);
-        assertEnumNames(literals(sqls, Pattern.compile("\\bo\\.task_type" + STATUS_LIST)), OutboxTaskType.class);
-        assertThat(literals(sqls, Pattern.compile("(?<![a-z]\\.)\\bstatus" + STATUS_LIST)))
-                .as("OpsJdbcRepository의 별칭 없는 상태 비교").isEmpty();
+        assertLiterals(sqlOf(FakePgOrderRepository.class), FakePgStatus.class);
     }
 
     @Test
@@ -77,7 +60,6 @@ class SqlStatusLiteralTest {
                 .toList();
         List<String> sqls = new ArrayList<>(sqlOf(PaymentRepository.class));
         sqls.addAll(sqlOf(PaymentJdbcRepository.class));
-        sqls.addAll(sqlOf(OpsJdbcRepository.class));
         List<List<String>> inLists = new ArrayList<>();
         for (String sql : sqls) {
             Matcher clause = IN_LIST.matcher(sql);
@@ -132,7 +114,7 @@ class SqlStatusLiteralTest {
         return literals;
     }
 
-    // JPA 저장소는 @Query 값을, JDBC 저장소는 static SQL 상수를 읽는다
+    // JPA 저장소는 @Query 값(JPQL 포함, JPQL에는 따옴표 리터럴이 없다)을, JDBC 저장소는 static SQL 상수를 읽는다
     private static List<String> sqlOf(Class<?> repository) {
         List<String> sqls = new ArrayList<>();
         for (Method method : repository.getDeclaredMethods()) {

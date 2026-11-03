@@ -4,24 +4,25 @@ import com.example.ticketing.booking.domain.BookingStatus;
 import com.example.ticketing.common.config.TicketingProperties;
 import com.example.ticketing.common.error.ApiException;
 import com.example.ticketing.common.error.ErrorCode;
-import com.example.ticketing.common.jdbc.SqlIntervals;
 import com.example.ticketing.common.log.ThrottledWarn;
 import com.example.ticketing.common.redis.RedisFailures;
 import com.example.ticketing.common.redis.RedisUnavailableException;
+import com.example.ticketing.common.time.DbClock;
 import com.example.ticketing.hold.domain.HoldStatus;
-import com.example.ticketing.ops.domain.OpsPerformanceRow;
 import com.example.ticketing.ops.domain.StatusCount;
+import com.example.ticketing.ops.dto.OpsPerformance;
 import com.example.ticketing.ops.dto.OpsSummary;
 import com.example.ticketing.ops.dto.OpsSummary.Attention;
 import com.example.ticketing.ops.dto.OpsSummary.GateKeys;
-import com.example.ticketing.ops.dto.OpsSummary.OpsPerformance;
 import com.example.ticketing.ops.dto.OpsSummary.Queue;
-import com.example.ticketing.ops.repository.OpsJdbcRepository;
+import com.example.ticketing.ops.repository.OpsRepository;
 import com.example.ticketing.ops.repository.OpsRedisStore;
 import com.example.ticketing.outbox.domain.OutboxTaskStatus;
 import com.example.ticketing.outbox.domain.OutboxTaskType;
 import com.example.ticketing.payment.domain.PaymentStatus;
 import com.example.ticketing.seat.domain.SeatStatus;
+import java.time.Duration;
+import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -37,35 +38,42 @@ public class OpsSummaryService {
 
     private static final int LIST_LIMIT = 20;
 
-    private final OpsJdbcRepository opsJdbcRepository;
+    private static final List<PaymentStatus> OPEN_PAYMENTS = Arrays.stream(PaymentStatus.values())
+            .filter(PaymentStatus::isOpen).toList();
+
+    private final OpsRepository opsRepository;
     private final OpsRedisStore opsRedisStore;
     private final OpsMetricsReader metricsReader;
+    private final DbClock dbClock;
     private final ThrottledWarn redisWarn;
-    private final long stalePaymentMicros;
+    private final Duration stalePaymentAfter;
 
-    public OpsSummaryService(OpsJdbcRepository opsJdbcRepository, OpsRedisStore opsRedisStore,
-                             OpsMetricsReader metricsReader, LongSupplier nanoClock, TicketingProperties properties) {
-        this.opsJdbcRepository = opsJdbcRepository;
+    public OpsSummaryService(OpsRepository opsRepository, OpsRedisStore opsRedisStore, OpsMetricsReader metricsReader,
+                             DbClock dbClock, LongSupplier nanoClock, TicketingProperties properties) {
+        this.opsRepository = opsRepository;
         this.opsRedisStore = opsRedisStore;
         this.metricsReader = metricsReader;
+        this.dbClock = dbClock;
         this.redisWarn = new ThrottledWarn(log, nanoClock);
-        this.stalePaymentMicros = SqlIntervals.micros(properties.ops().stalePaymentAfter());
+        this.stalePaymentAfter = properties.ops().stalePaymentAfter();
     }
 
+    // 집계 시각은 DB 시각이고, 오래된 결제도 이 시각을 기준으로 고른다
     public OpsSummary summarize(long performanceId) {
-        OpsPerformanceRow performance = opsJdbcRepository.findPerformance(performanceId)
+        OpsPerformance performance = opsRepository.findPerformance(performanceId)
                 .orElseThrow(() -> new ApiException(ErrorCode.PERFORMANCE_NOT_FOUND,
                         Map.of("performanceId", performanceId)));
+        LocalDateTime dbNow = dbClock.now();
 
-        Map<String, Long> seats = counts(SeatStatus.values(), opsJdbcRepository.countSeats(performanceId));
-        Map<String, Long> holds = counts(HoldStatus.values(), opsJdbcRepository.countHolds(performanceId));
-        Map<String, Long> payments = counts(PaymentStatus.values(), opsJdbcRepository.countPayments(performanceId));
-        Map<String, Long> bookings = counts(BookingStatus.values(), opsJdbcRepository.countBookings(performanceId));
+        Map<String, Long> seats = counts(SeatStatus.values(), opsRepository.countSeats(performanceId));
+        Map<String, Long> holds = counts(HoldStatus.values(), opsRepository.countHolds(performanceId));
+        Map<String, Long> payments = counts(PaymentStatus.values(), opsRepository.countPayments(performanceId));
+        Map<String, Long> bookings = counts(BookingStatus.values(), opsRepository.countBookings(performanceId));
         Map<String, Map<String, Long>> outbox = outbox(performanceId);
-        Attention attention = attention(performanceId);
+        Attention attention = attention(performanceId, dbNow);
         RedisPart redis = readRedis(performanceId);
 
-        return new OpsSummary(performance.dbNow(), info(performance), seats, holds, payments, bookings, outbox,
+        return new OpsSummary(dbNow, performance, seats, holds, payments, bookings, outbox,
                 attention, redis.available(), redis.queue(), redis.gateKeys(), metricsReader.counterValues());
     }
 
@@ -74,16 +82,17 @@ public class OpsSummaryService {
         for (OutboxTaskType type : OutboxTaskType.values()) {
             counts.put(type.name(), zeroes(OutboxTaskStatus.values()));
         }
-        opsJdbcRepository.countOutboxTasks(performanceId).forEach(row -> counts
-                .computeIfAbsent(row.taskType(), type -> zeroes(OutboxTaskStatus.values()))
-                .put(row.status(), row.count()));
+        opsRepository.countOutboxTasks(performanceId).forEach(row -> counts
+                .computeIfAbsent(row.taskType().name(), type -> zeroes(OutboxTaskStatus.values()))
+                .put(row.status().name(), row.count()));
         return counts;
     }
 
-    private Attention attention(long performanceId) {
-        return new Attention(opsJdbcRepository.findFailedTasks(performanceId, LIST_LIMIT),
-                opsJdbcRepository.findRefundingHolds(performanceId, LIST_LIMIT),
-                opsJdbcRepository.findStalePayments(performanceId, stalePaymentMicros, LIST_LIMIT));
+    private Attention attention(long performanceId, LocalDateTime dbNow) {
+        return new Attention(opsRepository.findFailedTasks(performanceId, LIST_LIMIT),
+                opsRepository.findRefundingHolds(performanceId, LIST_LIMIT),
+                opsRepository.findStalePayments(performanceId, OPEN_PAYMENTS, dbNow.minus(stalePaymentAfter),
+                        LIST_LIMIT));
     }
 
     // 한 명령이라도 실패하면 Redis 칸 전체를 비운다. 연결이 죽었으면 나머지도 타임아웃까지 기다리게 되므로
@@ -100,14 +109,9 @@ public class OpsSummaryService {
         }
     }
 
-    private static OpsPerformance info(OpsPerformanceRow row) {
-        return new OpsPerformance(row.performanceId(), row.showTitle(), row.venueName(), row.startsAt(),
-                row.openAt(), row.gateCloseAt());
-    }
-
     private static Map<String, Long> counts(Enum<?>[] states, List<StatusCount> rows) {
         Map<String, Long> counts = zeroes(states);
-        rows.forEach(row -> counts.put(row.status(), row.count()));
+        rows.forEach(row -> counts.put(row.status().name(), row.count()));
         return counts;
     }
 

@@ -11,6 +11,7 @@ import com.example.ticketing.common.redis.RedisKeys;
 import com.example.ticketing.hold.dto.CreateHoldCommand;
 import com.example.ticketing.hold.dto.CreateHoldResult;
 import com.example.ticketing.hold.repository.SeatGateRedisStore;
+import com.example.ticketing.hold.repository.SeatHoldRepository;
 import com.example.ticketing.payment.client.PgResult;
 import com.example.ticketing.payment.dto.PayCommand;
 import com.example.ticketing.payment.dto.PaymentOutcome;
@@ -27,6 +28,7 @@ import com.example.ticketing.support.TestDb;
 import com.example.ticketing.support.TestProperties;
 import com.example.ticketing.support.TestRedis;
 import com.example.ticketing.support.TestServices;
+import java.lang.reflect.InvocationTargetException;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -43,9 +45,6 @@ import org.springframework.context.annotation.Import;
 import org.springframework.dao.TransientDataAccessResourceException;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.core.RowCallbackHandler;
-import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
-import org.springframework.jdbc.core.namedparam.SqlParameterSource;
 
 // 대사 빈은 테스트에서 꺼져 있어 new로 만들고 대상 메서드를 직접 부른다. 막 생긴 키로 보이지 않게 키 TTL을 당겨 둔다
 @IntegrationTest
@@ -56,6 +55,8 @@ class GateKeyReconcileSchedulerTest {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
+    @Autowired
+    private SeatHoldRepository seatHoldRepository;
     @Autowired
     private TicketingProperties properties;
     @Autowired
@@ -200,8 +201,8 @@ class GateKeyReconcileSchedulerTest {
 
         // 대사가 키를 읽은 뒤 DB를 보기 전에 B의 선점 키가 같은 이름으로 들어온 상황
         Removed removed = reconcile(services.gateKeyReconcileScheduler()
-                .jdbc(hooked((sql, queriedPid) -> {
-                    if (sql.contains("JOIN seat s")) {
+                .holds(hooked((query, queriedPid) -> {
+                    if (query.equals("findLiveGateSeats")) {
                         setAged(raced, tokenB);
                     }
                 }))
@@ -273,16 +274,16 @@ class GateKeyReconcileSchedulerTest {
         String key = RedisKeys.seat(pid, db.seatIds(pid).get(0));
         setAged(key, UUID.randomUUID().toString());
         AtomicInteger seatQueries = new AtomicInteger();
-        NamedParameterJdbcTemplate slow = hooked((sql, queriedPid) -> {
-            if (sql.contains("JOIN seat s")) {
+        SeatHoldRepository slow = hooked((query, queriedPid) -> {
+            if (query.equals("findLiveGateSeats")) {
                 seatQueries.incrementAndGet();
                 sleep(300);
             }
         });
         List<GateKeyReconcileScheduler> instances = List.of(
-                services.gateKeyReconcileScheduler().lease(services.newLease()).jdbc(slow)
+                services.gateKeyReconcileScheduler().lease(services.newLease()).holds(slow)
                         .catalog(services.catalogOf(List.of(pid))).build(),
-                services.gateKeyReconcileScheduler().lease(services.newLease()).jdbc(slow)
+                services.gateKeyReconcileScheduler().lease(services.newLease()).holds(slow)
                         .catalog(services.catalogOf(List.of(pid))).build());
 
         Results<Void> results = Concurrently.of(instances.size()).within(Duration.ofSeconds(10))
@@ -320,13 +321,13 @@ class GateKeyReconcileSchedulerTest {
         String healthyKey = RedisKeys.seat(healthy, db.seatIds(healthy).get(0));
         setAged(brokenKey, UUID.randomUUID().toString());
         setAged(healthyKey, UUID.randomUUID().toString());
-        NamedParameterJdbcTemplate failing = hooked((sql, queriedPid) -> {
+        SeatHoldRepository failing = hooked((query, queriedPid) -> {
             if (queriedPid == broken) {
                 throw new TransientDataAccessResourceException("boom");
             }
         });
 
-        services.gateKeyReconcileScheduler().jdbc(failing).catalog(services.catalogOf(List.of(broken, healthy)))
+        services.gateKeyReconcileScheduler().holds(failing).catalog(services.catalogOf(List.of(broken, healthy)))
                 .build().reconcileAll();
 
         assertThat(redis.hasKey(brokenKey)).isTrue();
@@ -361,20 +362,18 @@ class GateKeyReconcileSchedulerTest {
     }
 
     // 대사의 DB 조회 직전에 끼어들 지점. 두 번째 인자는 조회하는 회차 ID다
-    private NamedParameterJdbcTemplate hooked(BiConsumer<String, Long> beforeQuery) {
-        return new NamedParameterJdbcTemplate(jdbcTemplate) {
-            @Override
-            public void query(String sql, SqlParameterSource params, RowCallbackHandler rch) {
-                beforeQuery.accept(sql, (Long) params.getValue("pid"));
-                super.query(sql, params, rch);
+    // 대사의 조회(메서드 이름, 회차) 앞에 끼어들고 실제 저장소로 넘긴다
+    private SeatHoldRepository hooked(BiConsumer<String, Long> beforeQuery) {
+        return mock(SeatHoldRepository.class, invocation -> {
+            if (invocation.getArguments().length > 0 && invocation.getArgument(0) instanceof Long pid) {
+                beforeQuery.accept(invocation.getMethod().getName(), pid);
             }
-
-            @Override
-            public <T> List<T> queryForList(String sql, SqlParameterSource params, Class<T> elementType) {
-                beforeQuery.accept(sql, (Long) params.getValue("pid"));
-                return super.queryForList(sql, params, elementType);
+            try {
+                return invocation.getMethod().invoke(seatHoldRepository, invocation.getArguments());
+            } catch (InvocationTargetException e) {
+                throw e.getCause();
             }
-        };
+        });
     }
 
     private SeatHoldService gateOffService() {

@@ -10,11 +10,14 @@ import com.example.ticketing.common.metrics.Metrics;
 import com.example.ticketing.common.metrics.Metrics.OutboxResult;
 import com.example.ticketing.common.metrics.Metrics.Tag;
 import com.example.ticketing.common.redis.RedisKeys;
+import com.example.ticketing.common.time.DbClock;
 import com.example.ticketing.ops.domain.FailedTask;
 import com.example.ticketing.ops.domain.StalePayment;
 import com.example.ticketing.ops.dto.OpsSummary;
-import com.example.ticketing.ops.repository.OpsJdbcRepository;
+import com.example.ticketing.ops.repository.OpsRepository;
 import com.example.ticketing.ops.repository.OpsRedisStore;
+import com.example.ticketing.outbox.domain.OutboxTaskType;
+import com.example.ticketing.payment.domain.PaymentStatus;
 import com.example.ticketing.support.Fixtures;
 import com.example.ticketing.support.IntegrationTest;
 import com.example.ticketing.support.TestDb;
@@ -32,7 +35,6 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.jdbc.support.KeyHolder;
 
@@ -52,6 +54,10 @@ class OpsSummaryServiceTest {
     private JdbcTemplate jdbcTemplate;
     @Autowired
     private TicketingProperties properties;
+    @Autowired
+    private OpsRepository opsRepository;
+    @Autowired
+    private DbClock dbClock;
 
     private final List<Long> holds = new ArrayList<>();
     private final List<Long> payments = new ArrayList<>();
@@ -102,7 +108,7 @@ class OpsSummaryServiceTest {
 
         assertThat(summary.attention().failedTasks()).extracting(FailedTask::id).containsExactly(s.failedTask);
         FailedTask failed = summary.attention().failedTasks().get(0);
-        assertThat(failed.type()).isEqualTo("REFUND_REQUESTED");
+        assertThat(failed.type()).isEqualTo(OutboxTaskType.REFUND_REQUESTED);
         assertThat(failed.aggregateId()).isEqualTo(s.cancelledPayment);
         assertThat(failed.attempt()).isEqualTo(5);
         assertThat(failed.lastError()).isEqualTo("PG 취소 UNKNOWN");
@@ -115,7 +121,7 @@ class OpsSummaryServiceTest {
         // 막 시작한 REQUESTED는 오래된 결제가 아니다
         assertThat(summary.attention().stalePayments()).extracting(StalePayment::paymentId)
                 .containsExactly(s.stalePayment);
-        assertThat(summary.attention().stalePayments().get(0).status()).isEqualTo("UNKNOWN");
+        assertThat(summary.attention().stalePayments().get(0).status()).isEqualTo(PaymentStatus.UNKNOWN);
         assertThat(summary.attention().stalePayments().get(0).lastError()).isEqualTo("PG 응답 시간 초과");
 
         assertThat(summary.redisAvailable()).isTrue();
@@ -142,9 +148,8 @@ class OpsSummaryServiceTest {
         meters.counter(Metrics.HOLD_GATE, Tag.RESULT, "seat_taken").increment();
         meters.counter(Metrics.HOLD_EXPIRED).increment(2);
         meters.counter(Metrics.OUTBOX_TASK, Tag.TYPE, "TICKET_ISSUED", Tag.RESULT, OutboxResult.DONE).increment(4);
-        OpsSummaryService broken = new OpsSummaryService(
-                new OpsJdbcRepository(new NamedParameterJdbcTemplate(jdbcTemplate)),
-                new OpsRedisStore(testRedis.dead()), new OpsMetricsReader(meters), System::nanoTime, properties);
+        OpsSummaryService broken = new OpsSummaryService(opsRepository, new OpsRedisStore(testRedis.dead()),
+                new OpsMetricsReader(meters), dbClock, System::nanoTime, properties);
 
         OpsSummary summary = broken.summarize(s.pid);
 

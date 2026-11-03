@@ -1,10 +1,10 @@
 package com.example.ticketing.hold.controller;
 
 import com.example.ticketing.common.web.CurrentUser;
-import com.example.ticketing.hold.dto.ActiveHoldResponse;
+import com.example.ticketing.hold.dto.ActiveHoldResult;
 import com.example.ticketing.hold.dto.CreateHoldRequest;
-import com.example.ticketing.hold.dto.CreateHoldResponse;
-import com.example.ticketing.hold.dto.HoldDetailResponse;
+import com.example.ticketing.hold.dto.CreateHoldResult;
+import com.example.ticketing.hold.dto.HoldDetailResult;
 import com.example.ticketing.hold.service.SeatHoldService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -24,19 +24,19 @@ public class HoldApiController {
 
     @PostMapping("/api/performances/{performanceId}/holds")
     @ResponseStatus(HttpStatus.CREATED)
-    public CreateHoldResponse hold(@CurrentUser Long userId, @PathVariable long performanceId,
-                                   @RequestBody CreateHoldRequest request) {
-        return CreateHoldResponse.from(seatHoldService.hold(request.toCommand(userId, performanceId)));
+    public CreateHoldResult hold(@CurrentUser Long userId, @PathVariable long performanceId,
+                                 @RequestBody CreateHoldRequest request) {
+        return seatHoldService.hold(request.toCommand(userId, performanceId));
     }
 
     @GetMapping("/api/performances/{performanceId}/holds/mine")
-    public ActiveHoldResponse mine(@CurrentUser Long userId, @PathVariable long performanceId) {
-        return ActiveHoldResponse.from(seatHoldService.getActiveHold(userId, performanceId));
+    public ActiveHoldResult mine(@CurrentUser Long userId, @PathVariable long performanceId) {
+        return seatHoldService.getActiveHold(userId, performanceId);
     }
 
     @GetMapping("/api/holds/{holdId}")
-    public HoldDetailResponse get(@CurrentUser Long userId, @PathVariable long holdId) {
-        return HoldDetailResponse.from(seatHoldService.getHold(userId, holdId));
+    public HoldDetailResult get(@CurrentUser Long userId, @PathVariable long holdId) {
+        return seatHoldService.getHold(userId, holdId);
     }
 
     @DeleteMapping("/api/holds/{holdId}")

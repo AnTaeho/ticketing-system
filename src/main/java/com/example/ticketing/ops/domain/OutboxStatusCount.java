@@ -1,4 +1,7 @@
 package com.example.ticketing.ops.domain;
 
-public record OutboxStatusCount(String taskType, String status, long count) {
+import com.example.ticketing.outbox.domain.OutboxTaskStatus;
+import com.example.ticketing.outbox.domain.OutboxTaskType;
+
+public record OutboxStatusCount(OutboxTaskType taskType, OutboxTaskStatus status, long count) {
 }

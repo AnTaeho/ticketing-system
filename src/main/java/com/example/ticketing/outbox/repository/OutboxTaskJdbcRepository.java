@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import lombok.RequiredArgsConstructor;
+import org.springframework.jdbc.core.DataClassRowMapper;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
@@ -65,9 +66,7 @@ public class OutboxTaskJdbcRepository {
     // 트랜잭션 밖의 SKIP LOCKED는 락이 바로 풀려 서버끼리 같은 행을 집으므로 표시와 같은 트랜잭션에서만 부른다
     @Transactional(propagation = Propagation.MANDATORY)
     public List<DueOutboxTask> claimDue(int batch) {
-        return jdbcTemplate.query(CLAIM_DUE_SQL, Map.of("batch", batch),
-                (rs, i) -> new DueOutboxTask(rs.getLong("id"), rs.getString("task_type"), rs.getLong("aggregate_id"),
-                        rs.getString("payload"), rs.getInt("attempt")));
+        return jdbcTemplate.query(CLAIM_DUE_SQL, Map.of("batch", batch), new DataClassRowMapper<>(DueOutboxTask.class));
     }
 
     @Transactional(propagation = Propagation.MANDATORY)
