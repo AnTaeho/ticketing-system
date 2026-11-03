@@ -9,6 +9,7 @@ import org.springframework.web.bind.support.WebDataBinderFactory;
 import org.springframework.web.context.request.NativeWebRequest;
 import org.springframework.web.method.support.HandlerMethodArgumentResolver;
 import org.springframework.web.method.support.ModelAndViewContainer;
+import org.springframework.web.util.WebUtils;
 
 public class CurrentUserArgumentResolver implements HandlerMethodArgumentResolver {
 
@@ -27,12 +28,9 @@ public class CurrentUserArgumentResolver implements HandlerMethodArgumentResolve
             return parseUserId(header);
         }
         HttpServletRequest request = webRequest.getNativeRequest(HttpServletRequest.class);
-        if (request != null && request.getCookies() != null) {
-            for (Cookie cookie : request.getCookies()) {
-                if (HttpNames.USER_ID_COOKIE.equals(cookie.getName())) {
-                    return parseUserId(cookie.getValue());
-                }
-            }
+        Cookie cookie = request != null ? WebUtils.getCookie(request, HttpNames.USER_ID_COOKIE) : null;
+        if (cookie != null) {
+            return parseUserId(cookie.getValue());
         }
         throw new ApiException(ErrorCode.LOGIN_REQUIRED);
     }

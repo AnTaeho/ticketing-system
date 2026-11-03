@@ -7,7 +7,6 @@ import com.example.ticketing.common.config.TicketingProperties;
 import com.example.ticketing.common.error.ApiException;
 import com.example.ticketing.common.error.ErrorCode;
 import com.example.ticketing.common.jdbc.RowCounts;
-import com.example.ticketing.common.jdbc.SqlIntervals;
 import com.example.ticketing.common.text.Texts;
 import com.example.ticketing.common.time.DbClock;
 import com.example.ticketing.hold.domain.GateHold;
@@ -36,6 +35,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
@@ -72,7 +72,7 @@ public class PaymentTransaction {
         this.clock = clock;
         this.payDeadline = properties.payment().payDeadline();
         this.requestedRecheckAfter = properties.payment().requestedRecheckAfter();
-        this.unknownRecheckMicros = SqlIntervals.micros(properties.payment().unknownRecheckAfter());
+        this.unknownRecheckMicros = TimeUnit.MICROSECONDS.convert(properties.payment().unknownRecheckAfter());
     }
 
     // hold 행 락이 같은 hold의 결제 시작을 줄 세운다. READ_COMMITTED라 기다린 동안 커밋된 결제가 락 뒤의 findByHoldId에서 보인다
@@ -177,10 +177,10 @@ public class PaymentTransaction {
     // 좌석을 결제 마감까지 붙잡는다. 만료 경계에서 진 쪽은 HOLD_EXPIRED다
     private void heldToPaying(SeatHold hold, LocalDateTime deadline) {
         long holdId = hold.getId();
-        if (!RowCounts.changedOne(seatHoldRepository.heldToPaying(holdId, deadline))) {
+        if (seatHoldRepository.heldToPaying(holdId, deadline) != 1) {
             throw new ApiException(ErrorCode.HOLD_EXPIRED, Map.of("holdId", holdId));
         }
-        if (!RowCounts.changedExactly(seatRepository.extendHeldUntil(holdId, deadline), hold.getSeatCount())) {
+        if (seatRepository.extendHeldUntil(holdId, deadline) != hold.getSeatCount()) {
             throw new ApiException(ErrorCode.SEAT_STATE_CHANGED, Map.of("holdId", holdId));
         }
     }
