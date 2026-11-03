@@ -5,6 +5,7 @@ import com.example.ticketing.outbox.domain.OutboxTaskStatus;
 import jakarta.persistence.LockModeType;
 import jakarta.persistence.QueryHint;
 import java.time.LocalDateTime;
+import java.util.Collection;
 import java.util.List;
 import org.springframework.data.domain.Limit;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -29,6 +30,13 @@ public interface OutboxTaskRepository extends JpaRepository<OutboxTask, Long> {
                 or (o.status = PROCESSING and o.lockedUntil < current_timestamp)
              order by o.id""")
     List<OutboxTask> findDueForUpdate(Limit limit);
+
+    // findDueForUpdate로 잠근 작업을 한 문장으로 PROCESSING 표시한다
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("""
+            update OutboxTask o set o.status = PROCESSING, o.lockedUntil = :lockedUntil, o.updatedAt = current_timestamp
+             where o.id in :ids""")
+    int dueToProcessing(@Param("ids") Collection<Long> ids, @Param("lockedUntil") LocalDateTime lockedUntil);
 
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("""

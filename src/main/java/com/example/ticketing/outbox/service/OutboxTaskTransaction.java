@@ -1,6 +1,7 @@
 package com.example.ticketing.outbox.service;
 
 import com.example.ticketing.common.config.TicketingProperties;
+import com.example.ticketing.common.jdbc.RowCounts;
 import com.example.ticketing.common.text.Texts;
 import com.example.ticketing.common.time.DbClock;
 import com.example.ticketing.outbox.domain.OutboxTask;
@@ -38,7 +39,7 @@ public class OutboxTaskTransaction {
         this.maxBackoffSeconds = properties.outbox().maxBackoff().toSeconds();
     }
 
-    // 집은 행은 잠겨 있으므로 엔티티로 PROCESSING을 표시하고 커밋 때 쓴다
+    // 집은 행은 잠겨 있으므로 행마다 UPDATE하지 않고 한 문장으로 PROCESSING을 표시한다
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public List<ClaimedOutboxTask> claim(int batch) {
         List<OutboxTask> due = repository.findDueForUpdate(Limit.of(batch));
@@ -46,8 +47,9 @@ public class OutboxTaskTransaction {
             return List.of();
         }
         LocalDateTime lockedUntil = dbClock.now().plus(lockDuration);
-        due.forEach(task -> task.claim(lockedUntil));
-        return due.stream().map(ClaimedOutboxTask::from).toList();
+        List<Long> ids = due.stream().map(OutboxTask::getId).toList();
+        RowCounts.requireExactly(repository.dueToProcessing(ids, lockedUntil), ids.size(), "outbox PROCESSING");
+        return due.stream().map(task -> ClaimedOutboxTask.of(task, lockedUntil)).toList();
     }
 
     // false면 그 사이 잠금이 지나 다른 워커가 다시 집었다. 결과는 그쪽이 쓴다

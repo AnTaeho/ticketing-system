@@ -8,8 +8,8 @@ import java.time.LocalDateTime;
 public record ClaimedOutboxTask(long id, OutboxTaskType taskType, long aggregateId, String payload, int attempt,
                                 LocalDateTime lockedUntil) {
 
-    public static ClaimedOutboxTask from(OutboxTask task) {
+    public static ClaimedOutboxTask of(OutboxTask task, LocalDateTime lockedUntil) {
         return new ClaimedOutboxTask(task.getId(), task.getTaskType(), task.getAggregateId(), task.getPayload(),
-                task.getAttempt(), task.getLockedUntil());
+                task.getAttempt(), lockedUntil);
     }
 }
