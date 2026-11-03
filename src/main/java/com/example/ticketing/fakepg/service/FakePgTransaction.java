@@ -1,6 +1,8 @@
 package com.example.ticketing.fakepg.service;
 
+import com.example.ticketing.fakepg.domain.FakePgOrder;
 import com.example.ticketing.fakepg.repository.FakePgOrderRepository;
+import java.time.Duration;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Isolation;
@@ -15,12 +17,13 @@ public class FakePgTransaction {
 
     private final FakePgOrderRepository repository;
 
-    public int insertProcessing(String orderId, int amount) {
-        return repository.insertProcessing(orderId, amount);
+    // 같은 주문이 이미 있으면 DataIntegrityViolationException이다
+    public void insertProcessing(String orderId, int amount) {
+        repository.saveAndFlush(FakePgOrder.processing(orderId, amount));
     }
 
-    public int insertCancelled(String orderId) {
-        return repository.insertCancelled(orderId);
+    public void insertCancelled(String orderId) {
+        repository.saveAndFlush(FakePgOrder.tombstone(orderId));
     }
 
     public int processingToApproved(String orderId, String pgTxId) {
@@ -31,8 +34,8 @@ public class FakePgTransaction {
         return repository.processingToDeclined(orderId);
     }
 
-    public int staleProcessingToDeclined(String orderId, long staleMicros) {
-        return repository.staleProcessingToDeclined(orderId, staleMicros);
+    public int staleProcessingToDeclined(String orderId, Duration staleAfter) {
+        return repository.staleProcessingToDeclined(orderId, staleAfter.toNanos());
     }
 
     public int approvedToCancelled(String orderId) {

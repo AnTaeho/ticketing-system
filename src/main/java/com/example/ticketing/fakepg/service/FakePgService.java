@@ -10,7 +10,6 @@ import com.example.ticketing.fakepg.repository.FakePgOrderRepository;
 import java.time.Duration;
 import java.util.Optional;
 import java.util.UUID;
-import java.util.concurrent.TimeUnit;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 
@@ -28,7 +27,7 @@ public class FakePgService {
     private final FakePgOrderRepository repository;
     private final FakePgDecider decider;
     private final FakePgSleeper sleeper;
-    private final long staleMicros;
+    private final Duration staleAfter;
 
     public FakePgService(FakePgTransaction transaction, FakePgOrderRepository repository, FakePgDecider decider,
                          FakePgSleeper sleeper, TicketingProperties properties) {
@@ -36,7 +35,7 @@ public class FakePgService {
         this.repository = repository;
         this.decider = decider;
         this.sleeper = sleeper;
-        this.staleMicros = TimeUnit.MICROSECONDS.convert(properties.fakePg().slowDelay().plus(STALE_MARGIN));
+        this.staleAfter = properties.fakePg().slowDelay().plus(STALE_MARGIN);
     }
 
     public FakePgReply approve(String orderId, int amount, FakePgScenario scenario) {
@@ -95,7 +94,7 @@ public class FakePgService {
         if (row.isEmpty() || row.get().getStatus() != FakePgStatus.PROCESSING) {
             return row;
         }
-        int updated = transaction.staleProcessingToDeclined(orderId, staleMicros);
+        int updated = transaction.staleProcessingToDeclined(orderId, staleAfter);
         return updated == 1 ? repository.findById(orderId) : row;
     }
 
