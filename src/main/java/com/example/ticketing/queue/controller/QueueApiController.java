@@ -1,7 +1,7 @@
 package com.example.ticketing.queue.controller;
 
 import com.example.ticketing.common.web.CurrentUser;
-import com.example.ticketing.queue.dto.QueueEnterResponse;
+import com.example.ticketing.queue.dto.QueueEnterResult;
 import com.example.ticketing.queue.dto.QueueHeartbeatResult;
 import com.example.ticketing.queue.dto.QueueStatusResult;
 import com.example.ticketing.queue.service.QueueService;
@@ -20,8 +20,8 @@ public class QueueApiController {
     private final QueueService queueService;
 
     @PostMapping("/api/performances/{performanceId}/queue/tokens")
-    public QueueEnterResponse enter(@CurrentUser Long userId, @PathVariable long performanceId) {
-        return QueueEnterResponse.from(queueService.enter(userId, performanceId));
+    public QueueEnterResult enter(@CurrentUser Long userId, @PathVariable long performanceId) {
+        return queueService.enter(userId, performanceId);
     }
 
     @GetMapping("/api/performances/{performanceId}/queue/tokens/{queueToken}")

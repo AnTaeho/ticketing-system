@@ -9,8 +9,6 @@ import com.example.ticketing.common.metrics.Metrics.ReflectOp;
 import com.example.ticketing.common.metrics.Metrics.Tag;
 import com.example.ticketing.common.redis.RedisFailures;
 import com.example.ticketing.common.redis.RedisUnavailableException;
-import com.example.ticketing.queue.domain.QueueEntry;
-import com.example.ticketing.queue.domain.QueuePlacement;
 import com.example.ticketing.queue.dto.QueueEnterResult;
 import com.example.ticketing.queue.dto.QueueHeartbeatResult;
 import com.example.ticketing.queue.dto.QueueStatusResult;
@@ -77,9 +75,8 @@ public class QueueService {
             if (seatMap.isSoldOut(performanceId)) {
                 throw new ApiException(ErrorCode.SOLD_OUT, Map.of("performanceId", performanceId));
             }
-            QueuePlacement placed = store.enter(new QueueEntry(userId, performanceId, queueToken, now,
-                    now + admissionWindowMs, capacity, waitingTtlMs));
-            return new QueueEnterResult(placed.queueToken(), placed.status());
+            return store.enter(userId, performanceId, queueToken, now, now + admissionWindowMs, capacity,
+                    waitingTtlMs);
         } catch (RedisUnavailableException e) {
             throw unavailable("enter", performanceId, e);
         }
