@@ -56,6 +56,7 @@ com.example.ticketing
 - 한 테이블 조회는 파생 메서드나 엔티티로 한다. 여러 테이블을 엮는 읽기는 JPQL `select new <Result>(...)` 하나로 받고, 엔티티 연관 없이 `join X x on x.id = a.xId`로 엮는다.
 - 트랜잭션 안의 조회와 행이 많은 조회는 엔티티 대신 스칼라나 `select new` DTO로 받는다.
 - native SQL은 조건부 상태 전이, `FOR UPDATE` 행 잠금, `SKIP LOCKED` 집기, `NOW(6)`에 기간을 더하는 계산, 대량 INSERT에만 쓴다.
+- 엔티티 PK 컬럼은 다른 테이블이 그 행을 가리킬 때 쓰는 이름(`hold_id`, `payment_id`)으로 짓고, 자바 필드는 `id`로 둔다.
 - 메서드 이름은 하는 일을 그대로 쓴다. `boolean`은 이름 그대로의 뜻일 때만 돌려주고, 갈래가 셋 이상이거나 "모름"이 섞이면 enum을 돌려준다.
 - 상태 전이 메서드는 repository와 `*Transaction` 모두 `출발To도착`(`heldToPaying`, `payingToConfirmed`)으로 짓는다.
 - 표에 없는 service 도우미(`*Issuer`, `*Builder`, `*Metrics`)는 이름이 하는 일을 그대로 말하게 짓는다.
