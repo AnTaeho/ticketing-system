@@ -69,10 +69,6 @@ public class PaymentService {
         return successOrThrow(settlement.result());
     }
 
-    public PaymentResult getPayment(long userId, long paymentId) {
-        return paymentReader.find(userId, paymentId);
-    }
-
     // 조회·락으로 막지 못한 경합이 유니크 제약에 걸리면 새 트랜잭션으로 다시 읽어 같은 결과를 돌려준다
     private PaymentStart startOrRecover(PayCommand command) {
         long userId = command.userId();

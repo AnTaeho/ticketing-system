@@ -16,10 +16,10 @@ public class PaymentGateReflector {
 
     // 이번 호출이 좌석을 바꿨을 때만 반영한다
     public void reflect(PaymentSettlement settlement) {
-        settlement.gateReflection().ifPresent(reflection -> {
+        settlement.changedGate().ifPresent(changed -> {
             switch (settlement.result().outcome()) {
-                case CONFIRMED -> gate.confirm(reflection.gate(), reflection.gateCloseAt());
-                case SEAT_LOST, DECLINED, CANCELLED -> gate.release(reflection.gate());
+                case CONFIRMED -> gate.confirm(changed, settlement.gateCloseAt());
+                case SEAT_LOST, DECLINED, CANCELLED -> gate.release(changed);
                 default -> {
                 }
             }

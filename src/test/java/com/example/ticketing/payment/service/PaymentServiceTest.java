@@ -59,6 +59,8 @@ class PaymentServiceTest {
     @Autowired
     private PaymentService paymentService;
     @Autowired
+    private PaymentReader paymentReader;
+    @Autowired
     private PaymentTransaction paymentTransaction;
     @Autowired
     private PaymentRepository paymentRepository;
@@ -441,7 +443,7 @@ class PaymentServiceTest {
 
         assertThat(first.changedSeats()).isTrue();
         assertThat(first.result().outcome()).isEqualTo(PaymentOutcome.CANCELLED);
-        GateHold released = first.gateReflection().orElseThrow().gate();
+        GateHold released = first.changedGate().orElseThrow();
         assertThat(released.seatIds()).containsExactlyElementsOf(held.seatIds());
         assertThat(released.holdToken()).isEqualTo(held.holdToken());
         assertThat(second.changedSeats()).isFalse();
@@ -512,9 +514,9 @@ class PaymentServiceTest {
         long paymentId = paymentService.pay(command(held, key())).paymentId();
         long stranger = fixtures.newUser();
 
-        assertThat(catchApiException(() -> paymentService.getPayment(stranger, paymentId)).getCode())
+        assertThat(catchApiException(() -> paymentReader.find(stranger, paymentId)).getCode())
                 .isEqualTo(ErrorCode.PAYMENT_NOT_FOUND);
-        assertThat(catchApiException(() -> paymentService.getPayment(held.userId(), Long.MAX_VALUE)).getCode())
+        assertThat(catchApiException(() -> paymentReader.find(held.userId(), Long.MAX_VALUE)).getCode())
                 .isEqualTo(ErrorCode.PAYMENT_NOT_FOUND);
     }
 
