@@ -74,7 +74,7 @@ public class SeatHoldService {
         SeatSelection selection = seatCatalog.validateSeats(command.performanceId(), command.seatIds());
         GateHold gateHold = new GateHold(command.userId(), command.performanceId(), UUID.randomUUID().toString(),
                 selection.seatIds());
-        if (checkAdmission(command) == Check.UNCHECKED) {
+        if (!checkAdmission(command)) {
             // Redis가 죽은 걸 이미 봤으니 게이트는 부르지 않는다
             if (gateReflector.enabled()) {
                 metrics.gateError();
@@ -83,7 +83,7 @@ public class SeatHoldService {
             }
             return holdWithoutRedis(command, selection, gateHold, false);
         }
-        if (passGate(gateHold) == Check.UNCHECKED) {
+        if (!passGate(gateHold)) {
             return holdWithoutRedis(command, selection, gateHold, true);
         }
         return persist(command, selection, gateHold, gateReflector.enabled());
@@ -109,7 +109,8 @@ public class SeatHoldService {
         gateReflector.release(seatHoldTransaction.heldToReleased(userId, holdId));
     }
 
-    private Check checkAdmission(CreateHoldCommand command) {
+    // false면 Redis 장애로 확인하지 못해 DB 판정으로 넘긴다. passGate도 같다
+    private boolean checkAdmission(CreateHoldCommand command) {
         String queueToken = command.queueToken();
         if (queueToken == null || queueToken.isBlank()) {
             throw new ApiException(ErrorCode.NOT_ADMITTED);
@@ -119,19 +120,19 @@ public class SeatHoldService {
             admitted = queueService.isAdmitted(command.userId(), command.performanceId(), queueToken);
         } catch (RedisUnavailableException e) {
             warnRedisFailure("queue_check", command.performanceId(), e);
-            return Check.UNCHECKED;
+            return false;
         }
         if (!admitted) {
             throw new ApiException(ErrorCode.NOT_ADMITTED);
         }
-        return Check.PASSED;
+        return true;
     }
 
     // 게이트 OFF면 Redis를 부르지 않는다. 거절이면 DB에 닿지 않고 409로 끝난다
-    private Check passGate(GateHold gateHold) {
+    private boolean passGate(GateHold gateHold) {
         if (!gateReflector.enabled()) {
             metrics.gateSkipped();
-            return Check.PASSED;
+            return true;
         }
         GateResult result;
         try {
@@ -139,7 +140,7 @@ public class SeatHoldService {
         } catch (RedisUnavailableException e) {
             metrics.gateError();
             warnRedisFailure("gate", gateHold.performanceId(), e);
-            return Check.UNCHECKED;
+            return false;
         }
         metrics.gate(result.type());
         switch (result.type()) {
@@ -149,7 +150,7 @@ public class SeatHoldService {
             case SEAT_TAKEN -> throw new ApiException(ErrorCode.SEAT_TAKEN, Map.of("seatId", result.seatId()));
             case COOLDOWN -> throw new ApiException(ErrorCode.COOLDOWN, Map.of("seatId", result.seatId()));
         }
-        return Check.PASSED;
+        return true;
     }
 
     // Redis 없이 DB가 판정한다(1인 1선점도 DB가 지키고 쿨다운은 꺼진다). 동시 수는 세마포어로 묶고 자리가 없으면 기다리지 않는다
@@ -199,11 +200,5 @@ public class SeatHoldService {
     private void warnRedisFailure(String op, long performanceId, RedisUnavailableException e) {
         redisWarn.warn("[hold] Redis 실패 op={} performanceId={} cause={}", op, performanceId,
                 RedisFailures.describe(e));
-    }
-
-    // UNCHECKED: Redis 장애로 확인하지 못해 DB 판정으로 넘긴다
-    private enum Check {
-        PASSED,
-        UNCHECKED
     }
 }
