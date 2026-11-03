@@ -13,7 +13,6 @@ public record TicketingProperties(
         Queue queue,
         Seatmap seatmap,
         Outbox outbox,
-        Ops ops,
         Pg pg,
         FakePg fakePg
 ) {
@@ -88,9 +87,6 @@ public record TicketingProperties(
     ) {
     }
 
-    public record Ops(Duration stalePaymentAfter) {
-    }
-
     public record Pg(String baseUrl, Duration connectTimeout, Duration readTimeout) {
     }
 
@@ -99,8 +95,7 @@ public record TicketingProperties(
             Duration delayMax,
             double declineRate,
             double slowRate,
-            Duration slowDelay,
-            Duration staleMargin
+            Duration slowDelay
     ) {
     }
 }

@@ -16,7 +16,7 @@ import org.junit.jupiter.api.Test;
 class FakePgDeciderTest {
 
     private static final TicketingProperties.FakePg CONFIG = new TicketingProperties.FakePg(
-            Duration.ofMillis(200), Duration.ofMillis(1200), 0.1, 0.05, Duration.ofSeconds(5), Duration.ofSeconds(30));
+            Duration.ofMillis(200), Duration.ofMillis(1200), 0.1, 0.05, Duration.ofSeconds(5));
 
     @Test
     @DisplayName("시나리오를 주면 느린 시나리오만 정해진 지연 뒤에 결론낸다")

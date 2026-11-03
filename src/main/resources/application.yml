@@ -84,8 +84,6 @@ ticketing:
     lock-duration: 60s
     max-attempts: 5
     max-backoff: 60s           # 재시도 간격은 2^attempt초이고 이 값에서 멈춘다
-  ops:
-    stale-payment-after: 30s   # 운영 화면에 오래 걸리는 결제로 올리는 기준
   pg:
     base-url: ""               # 비우면 http://localhost:${local.server.port}/fake-pg
     connect-timeout: 500ms
@@ -96,4 +94,3 @@ ticketing:
     decline-rate: 0.1
     slow-rate: 0.05
     slow-delay: 5s
-    stale-margin: 30s          # 가장 느린 응답보다 이만큼 더 PROCESSING이면 승인 시간 초과로 거절한다

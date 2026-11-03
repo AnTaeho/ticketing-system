@@ -1,7 +1,6 @@
 package com.example.ticketing.ops.service;
 
 import com.example.ticketing.booking.domain.BookingStatus;
-import com.example.ticketing.common.config.TicketingProperties;
 import com.example.ticketing.common.error.ApiException;
 import com.example.ticketing.common.error.ErrorCode;
 import com.example.ticketing.common.log.ThrottledWarn;
@@ -37,6 +36,8 @@ import org.springframework.stereotype.Service;
 public class OpsSummaryService {
 
     private static final int LIST_LIMIT = 20;
+    // 운영 화면에 오래 걸리는 결제로 올리는 기준
+    static final Duration STALE_PAYMENT_AFTER = Duration.ofSeconds(30);
 
     private static final List<PaymentStatus> OPEN_PAYMENTS = Arrays.stream(PaymentStatus.values())
             .filter(PaymentStatus::isOpen).toList();
@@ -46,16 +47,14 @@ public class OpsSummaryService {
     private final OpsMetricsReader metricsReader;
     private final DbClock dbClock;
     private final ThrottledWarn redisWarn;
-    private final Duration stalePaymentAfter;
 
     public OpsSummaryService(OpsRepository opsRepository, OpsRedisStore opsRedisStore, OpsMetricsReader metricsReader,
-                             DbClock dbClock, LongSupplier nanoClock, TicketingProperties properties) {
+                             DbClock dbClock, LongSupplier nanoClock) {
         this.opsRepository = opsRepository;
         this.opsRedisStore = opsRedisStore;
         this.metricsReader = metricsReader;
         this.dbClock = dbClock;
         this.redisWarn = new ThrottledWarn(log, nanoClock);
-        this.stalePaymentAfter = properties.ops().stalePaymentAfter();
     }
 
     // 집계 시각은 DB 시각이고, 오래된 결제도 이 시각을 기준으로 고른다
@@ -91,7 +90,7 @@ public class OpsSummaryService {
     private Attention attention(long performanceId, LocalDateTime dbNow) {
         return new Attention(opsRepository.findFailedTasks(performanceId, LIST_LIMIT),
                 opsRepository.findRefundingHolds(performanceId, LIST_LIMIT),
-                opsRepository.findStalePayments(performanceId, OPEN_PAYMENTS, dbNow.minus(stalePaymentAfter),
+                opsRepository.findStalePayments(performanceId, OPEN_PAYMENTS, dbNow.minus(STALE_PAYMENT_AFTER),
                         LIST_LIMIT));
     }
 

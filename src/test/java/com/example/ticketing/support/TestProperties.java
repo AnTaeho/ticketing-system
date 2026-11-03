@@ -24,7 +24,7 @@ public final class TestProperties {
     // 컨텍스트 없는 단위 테스트용. 쓰는 묶음만 채운다
     public static TestProperties empty() {
         return new TestProperties(
-                new TicketingProperties(null, null, null, null, null, null, null, null, null, null));
+                new TicketingProperties(null, null, null, null, null, null, null, null, null));
     }
 
     public TestProperties hold(Hold hold) {
@@ -77,7 +77,7 @@ public final class TestProperties {
     }
 
     private TestProperties with(Hold hold, Payment payment, Gate gate, Queue queue, Outbox outbox, Pg pg) {
-        p = new TicketingProperties(p.seed(), hold, payment, gate, queue, p.seatmap(), outbox, p.ops(), pg, p.fakePg());
+        p = new TicketingProperties(p.seed(), hold, payment, gate, queue, p.seatmap(), outbox, pg, p.fakePg());
         return this;
     }
 }

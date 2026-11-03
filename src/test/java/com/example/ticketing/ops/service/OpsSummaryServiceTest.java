@@ -3,7 +3,6 @@ package com.example.ticketing.ops.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.example.ticketing.common.config.TicketingProperties;
 import com.example.ticketing.common.error.ApiException;
 import com.example.ticketing.common.error.ErrorCode;
 import com.example.ticketing.common.metrics.Metrics;
@@ -52,8 +51,6 @@ class OpsSummaryServiceTest {
     private TestRedis testRedis;
     @Autowired
     private JdbcTemplate jdbcTemplate;
-    @Autowired
-    private TicketingProperties properties;
     @Autowired
     private OpsRepository opsRepository;
     @Autowired
@@ -149,7 +146,7 @@ class OpsSummaryServiceTest {
         meters.counter(Metrics.HOLD_EXPIRED).increment(2);
         meters.counter(Metrics.OUTBOX_TASK, Tag.TYPE, "TICKET_ISSUED", Tag.RESULT, OutboxResult.DONE).increment(4);
         OpsSummaryService broken = new OpsSummaryService(opsRepository, new OpsRedisStore(testRedis.dead()),
-                new OpsMetricsReader(meters), dbClock, System::nanoTime, properties);
+                new OpsMetricsReader(meters), dbClock, System::nanoTime);
 
         OpsSummary summary = broken.summarize(s.pid);
 
