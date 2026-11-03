@@ -6,7 +6,6 @@ import com.example.ticketing.hold.domain.SeatHold;
 import com.example.ticketing.hold.dto.ActiveHoldResult;
 import jakarta.persistence.LockModeType;
 import jakarta.persistence.QueryHint;
-import java.time.LocalDateTime;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
@@ -78,44 +77,6 @@ public interface SeatHoldRepository extends JpaRepository<SeatHold, Long> {
              where h.status = HELD and h.expiresAt < current_timestamp
              order by h.id""")
     List<ClaimedHold> claimExpired(Limit limit);
-
-    @Modifying(clearAutomatically = true, flushAutomatically = true)
-    @Query(value = """
-            UPDATE seat_hold SET status = 'RELEASED', updated_at = NOW(6)
-             WHERE hold_id = :id AND status = 'HELD'""", nativeQuery = true)
-    int heldToReleased(@Param("id") long id);
-
-    @Modifying(clearAutomatically = true, flushAutomatically = true)
-    @Query(value = """
-            UPDATE seat_hold SET status = 'PAYING', pay_deadline = :payDeadline, updated_at = NOW(6)
-             WHERE hold_id = :id AND status = 'HELD' AND expires_at > NOW(6)""", nativeQuery = true)
-    int heldToPaying(@Param("id") long id, @Param("payDeadline") LocalDateTime payDeadline);
-
-    @Modifying(clearAutomatically = true, flushAutomatically = true)
-    @Query(value = """
-            UPDATE seat_hold SET status = 'CONFIRMED', updated_at = NOW(6)
-             WHERE hold_id = :id AND status = 'PAYING'""", nativeQuery = true)
-    int payingToConfirmed(@Param("id") long id);
-
-    @Modifying(clearAutomatically = true, flushAutomatically = true)
-    @Query(value = """
-            UPDATE seat_hold SET status = 'REFUNDING', updated_at = NOW(6)
-             WHERE hold_id = :id AND status = 'PAYING'""", nativeQuery = true)
-    int payingToRefunding(@Param("id") long id);
-
-    // PG 거절·망취소 확정 때만 부른다. 사용자 취소(HELD → RELEASED)는 heldToReleased
-    @Modifying(clearAutomatically = true, flushAutomatically = true)
-    @Query(value = """
-            UPDATE seat_hold SET status = 'RELEASED', updated_at = NOW(6)
-             WHERE hold_id = :id AND status = 'PAYING'""", nativeQuery = true)
-    int payingToReleased(@Param("id") long id);
-
-    // 좌석 상실로 환불하던 hold를 환불 확정 뒤 닫는다. 예매 취소의 환불은 hold가 CONFIRMED라 대상이 아니다
-    @Modifying(clearAutomatically = true, flushAutomatically = true)
-    @Query(value = """
-            UPDATE seat_hold SET status = 'RELEASED', updated_at = NOW(6)
-             WHERE hold_id = :id AND status = 'REFUNDING'""", nativeQuery = true)
-    int refundingToReleased(@Param("id") long id);
 
     // 결제 중(PAYING)은 대상이 아니다. 결제 대사가 결론을 낸다
     @Modifying(clearAutomatically = true, flushAutomatically = true)

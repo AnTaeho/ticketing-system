@@ -2,7 +2,6 @@ package com.example.ticketing;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.example.ticketing.booking.domain.BookingStatus;
 import com.example.ticketing.booking.repository.BookingRepository;
 import com.example.ticketing.booking.repository.BookingSeatRepository;
 import com.example.ticketing.fakepg.domain.FakePgStatus;
@@ -44,7 +43,6 @@ class SqlStatusLiteralTest {
         assertLiterals(sqlOf(SeatHoldRepository.class), HoldStatus.class);
         assertLiterals(sqlOf(SeatRepository.class), SeatStatus.class);
         assertLiterals(sqlOf(PaymentRepository.class), PaymentStatus.class);
-        assertLiterals(sqlOf(BookingRepository.class), BookingStatus.class);
         // booking_seat 복사는 seat 테이블의 SOLD를 읽는다
         assertLiterals(sqlOf(BookingSeatRepository.class), SeatStatus.class);
         assertLiterals(sqlOf(OutboxTaskJdbcRepository.class), OutboxTaskStatus.class);

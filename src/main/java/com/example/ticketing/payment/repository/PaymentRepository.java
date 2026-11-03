@@ -31,6 +31,11 @@ public interface PaymentRepository extends JpaRepository<Payment, Long> {
     @Query("select p.holdId from Payment p where p.id = :id")
     Optional<Long> findHoldIdById(@Param("id") long id);
 
+    // hold를 잠근 뒤에만 부른다. 락 순서는 seat_hold → booking_payment → seat이다
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select p from Payment p where p.id = :id")
+    Optional<Payment> lockById(@Param("id") long id);
+
     // 잠금 시간 -2는 Hibernate에서 FOR UPDATE SKIP LOCKED다. 트랜잭션 밖에서는 락이 바로 풀려 서버끼리 같은 행을 집으므로 미루기와 같은 트랜잭션에서만 부른다
     // HQL은 Duration 파라미터를 시각에 더하지 못해 기간을 나노초로 넘기고 nanosecond 단위로 더한다
     @Transactional(propagation = Propagation.MANDATORY)
@@ -50,34 +55,6 @@ public interface PaymentRepository extends JpaRepository<Payment, Long> {
             update Payment p set p.nextCheckAt = current_timestamp + (:leaseNanos) nanosecond, p.updatedAt = current_timestamp
              where p.id in :ids""")
     int lease(@Param("ids") Collection<Long> ids, @Param("leaseNanos") long leaseNanos);
-
-    @Modifying(clearAutomatically = true, flushAutomatically = true)
-    @Query(value = """
-            UPDATE booking_payment
-               SET status = 'APPROVED', pg_tx_id = :pgTxId, next_check_at = NULL, updated_at = NOW(6)
-             WHERE payment_id = :id AND status IN ('REQUESTED', 'UNKNOWN')""", nativeQuery = true)
-    int openToApproved(@Param("id") long id, @Param("pgTxId") String pgTxId);
-
-    @Modifying(clearAutomatically = true, flushAutomatically = true)
-    @Query(value = """
-            UPDATE booking_payment
-               SET status = 'DECLINED', next_check_at = NULL, updated_at = NOW(6)
-             WHERE payment_id = :id AND status IN ('REQUESTED', 'UNKNOWN')""", nativeQuery = true)
-    int openToDeclined(@Param("id") long id);
-
-    @Modifying(clearAutomatically = true, flushAutomatically = true)
-    @Query(value = """
-            UPDATE booking_payment
-               SET status = 'CANCELLED', next_check_at = NULL, updated_at = NOW(6)
-             WHERE payment_id = :id AND status IN ('REQUESTED', 'UNKNOWN')""", nativeQuery = true)
-    int openToCancelled(@Param("id") long id);
-
-    // 승인된 결제의 환불이 PG에서 확정됐을 때만 부른다
-    @Modifying(clearAutomatically = true, flushAutomatically = true)
-    @Query(value = """
-            UPDATE booking_payment SET status = 'CANCELLED', updated_at = NOW(6)
-             WHERE payment_id = :id AND status = 'APPROVED'""", nativeQuery = true)
-    int approvedToCancelled(@Param("id") long id);
 
     // 대사가 다음 확인 시각을 정한다. 넘긴 오류가 없으면 이전 last_error를 둔다
     @Modifying(clearAutomatically = true, flushAutomatically = true)

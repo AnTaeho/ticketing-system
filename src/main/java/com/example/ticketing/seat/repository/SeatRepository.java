@@ -74,9 +74,10 @@ public interface SeatRepository extends JpaRepository<Seat, Long> {
             + "where s.holdId in :holdIds and s.status = HELD order by s.id")
     List<HeldSeat> findHeldSeats(@Param("holdIds") Collection<Long> holdIds);
 
+    // 락 순서대로 id 오름차순으로 잠근다
     @Lock(LockModeType.PESSIMISTIC_WRITE)
-    @Query("select s.id from Seat s where s.holdId = :holdId and s.status = HELD order by s.id")
-    List<Long> lockHeldSeatIds(@Param("holdId") long holdId);
+    @Query("select s from Seat s where s.holdId = :holdId and s.status = HELD order by s.id")
+    List<Seat> lockHeldSeats(@Param("holdId") long holdId);
 
     // 결제 중 좌석을 남이 가져가지 못하게 held_until을 결제 마감까지 늘린다
     @Modifying(clearAutomatically = true, flushAutomatically = true)
@@ -84,12 +85,6 @@ public interface SeatRepository extends JpaRepository<Seat, Long> {
             UPDATE seat SET held_until = :heldUntil
              WHERE hold_id = :holdId AND status = 'HELD'""", nativeQuery = true)
     int extendHeldUntil(@Param("holdId") long holdId, @Param("heldUntil") LocalDateTime heldUntil);
-
-    @Modifying(clearAutomatically = true, flushAutomatically = true)
-    @Query(value = """
-            UPDATE seat SET status = 'SOLD', held_until = NULL
-             WHERE hold_id = :holdId AND status = 'HELD'""", nativeQuery = true)
-    int heldToSold(@Param("holdId") long holdId);
 
     // hold_id 조건 덕분에 남이 이미 가져간 좌석은 건드리지 않는다
     @Modifying(clearAutomatically = true, flushAutomatically = true)
@@ -105,13 +100,6 @@ public interface SeatRepository extends JpaRepository<Seat, Long> {
     int heldToAvailableOfHolds(@Param("holdIds") Collection<Long> holdIds);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
-    @Query("select s.id from Seat s where s.holdId = :holdId and s.status = SOLD order by s.id")
-    List<Long> lockSoldSeatIds(@Param("holdId") long holdId);
-
-    // 예매 취소 때만 부른다. hold_id를 비워 다른 사용자가 다시 잡을 수 있게 한다
-    @Modifying(clearAutomatically = true, flushAutomatically = true)
-    @Query(value = """
-            UPDATE seat SET status = 'AVAILABLE', hold_id = NULL, held_until = NULL
-             WHERE hold_id = :holdId AND status = 'SOLD'""", nativeQuery = true)
-    int soldToAvailable(@Param("holdId") long holdId);
+    @Query("select s from Seat s where s.holdId = :holdId and s.status = SOLD order by s.id")
+    List<Seat> lockSoldSeats(@Param("holdId") long holdId);
 }

@@ -6,7 +6,6 @@ import com.example.ticketing.booking.service.BookingIssuer;
 import com.example.ticketing.common.config.TicketingProperties;
 import com.example.ticketing.common.error.ApiException;
 import com.example.ticketing.common.error.ErrorCode;
-import com.example.ticketing.common.jdbc.RowCounts;
 import com.example.ticketing.common.text.Texts;
 import com.example.ticketing.common.time.DbClock;
 import com.example.ticketing.hold.domain.GateHold;
@@ -25,6 +24,7 @@ import com.example.ticketing.payment.dto.PaymentStart;
 import com.example.ticketing.payment.dto.PaymentStart.Existing;
 import com.example.ticketing.payment.dto.PaymentStart.Started;
 import com.example.ticketing.payment.repository.PaymentRepository;
+import com.example.ticketing.seat.domain.Seat;
 import com.example.ticketing.seat.repository.SeatRepository;
 import com.example.ticketing.seat.service.SeatCatalog;
 import java.time.Clock;
@@ -40,7 +40,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
-// 락 순서: seat_hold → seat. 이 안에서는 PG·Redis를 부르지 않는다
+// 락 순서: seat_hold → booking_payment → seat(id 오름차순). 잠근 행은 엔티티 메서드로 바꾼다. 이 안에서는 PG·Redis를 부르지 않는다
 @Component
 public class PaymentTransaction {
 
@@ -92,10 +92,10 @@ public class PaymentTransaction {
                     paymentReader.resultOf(sameHold.get(), hold));
         }
 
-        requirePayable(hold);
         LocalDateTime now = dbClock.now();
+        requirePayable(hold, now);
         LocalDateTime deadline = now.plus(payDeadline);
-        heldToPaying(hold, deadline);
+        heldToPaying(hold, deadline, now);
         List<Long> seatIds = seatRepository.findHeldSeatIds(holdId);
 
         String orderId = UUID.randomUUID().toString().replace("-", "");
@@ -113,15 +113,16 @@ public class PaymentTransaction {
         }
         SeatHold hold = locked.hold();
         long holdId = hold.getId();
-        List<Long> seatIds = seatRepository.lockHeldSeatIds(holdId);
+        List<Seat> seats = seatRepository.lockHeldSeats(holdId);
+        List<Long> seatIds = idsOf(seats);
         LocalDateTime now = dbClock.now();
-        if (seatIds.size() != hold.getSeatCount()) {
-            return payingToRefunding(locked, pgTxId, seatIds);
+        if (seats.size() != hold.getSeatCount()) {
+            return payingToRefunding(locked, pgTxId, seats);
         }
 
-        RowCounts.requireExactly(seatRepository.heldToSold(holdId), seatIds.size(), "seat SOLD");
-        RowCounts.requireExactly(seatHoldRepository.payingToConfirmed(holdId), 1, "hold CONFIRMED");
-        RowCounts.requireExactly(paymentRepository.openToApproved(paymentId, pgTxId), 1, "payment APPROVED");
+        seats.forEach(Seat::heldToSold);
+        hold.payingToConfirmed();
+        locked.payment().openToApproved(pgTxId);
         IssuedBooking booking = bookingIssuer.issue(new IssueBookingCommand(hold.getUserId(),
                 hold.getPerformanceId(), holdId, paymentId, hold.getTotalAmount(), seatIds.size(), now));
         // 서버와 DB의 시간대가 달라도 맞도록 DB 시각 기준 남은 시간으로 바꾼다
@@ -152,15 +153,21 @@ public class PaymentTransaction {
         return PaymentSettlement.seatsUnchanged(paymentReader.resultOf(payment));
     }
 
-    // PG 환불 확정 뒤 RefundRequestedHandler가 부른다. 다시 불려도 조건부 전이라 두 번째는 바꾸는 행이 없다
+    // PG 환불 확정 뒤 RefundRequestedHandler가 부른다. 다시 불려도 락 뒤 상태를 보고 두 번째는 아무것도 바꾸지 않는다
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public void approvedToCancelled(long paymentId) {
-        long holdId = paymentRepository.findHoldIdById(paymentId).orElseThrow(() -> paymentNotFound(paymentId));
-        seatHoldRepository.refundingToReleased(holdId);
-        paymentRepository.approvedToCancelled(paymentId);
+        Locked locked = lock(paymentId);
+        // 예매 취소의 환불은 hold가 CONFIRMED라 hold를 그대로 둔다
+        if (locked.hold().getStatus() == HoldStatus.REFUNDING) {
+            locked.hold().refundingToReleased();
+        }
+        if (locked.payment().getStatus() == PaymentStatus.APPROVED) {
+            locked.payment().approvedToCancelled();
+        }
     }
 
-    private static void requirePayable(SeatHold hold) {
+    // 만료 판정은 DB 시각이다. 만료 스케줄러는 이 hold 행을 잠근 동안 집지 못한다
+    private static void requirePayable(SeatHold hold, LocalDateTime dbNow) {
         long holdId = hold.getId();
         if (hold.getStatus() == HoldStatus.EXPIRED) {
             throw new ApiException(ErrorCode.HOLD_EXPIRED, Map.of("holdId", holdId));
@@ -169,28 +176,29 @@ public class PaymentTransaction {
             throw new ApiException(ErrorCode.HOLD_NOT_PAYABLE,
                     Map.of("holdId", holdId, "status", hold.getStatus().name()));
         }
-    }
-
-    // 좌석을 결제 마감까지 붙잡는다. 만료 시각은 조건부 UPDATE가 DB 시각으로 판정한다
-    private void heldToPaying(SeatHold hold, LocalDateTime deadline) {
-        long holdId = hold.getId();
-        if (seatHoldRepository.heldToPaying(holdId, deadline) != 1) {
+        if (hold.isExpiredAt(dbNow)) {
             throw new ApiException(ErrorCode.HOLD_EXPIRED, Map.of("holdId", holdId));
         }
+    }
+
+    // 좌석을 결제 마감까지 붙잡는다. 좌석은 잠그지 않아 기한이 지난 좌석을 남이 잡을 수 있으므로 조건부 UPDATE의 행 수로 본다
+    private void heldToPaying(SeatHold hold, LocalDateTime deadline, LocalDateTime dbNow) {
+        long holdId = hold.getId();
+        hold.heldToPaying(deadline, dbNow);
         if (seatRepository.extendHeldUntil(holdId, deadline) != hold.getSeatCount()) {
             throw new ApiException(ErrorCode.SEAT_STATE_CHANGED, Map.of("holdId", holdId));
         }
     }
 
     // 결제 마감이 지나 남이 좌석을 가져갔다. 돈은 받았으므로 남은 좌석을 풀고 환불을 맡긴다
-    private PaymentSettlement payingToRefunding(Locked locked, String pgTxId, List<Long> seatIds) {
+    private PaymentSettlement payingToRefunding(Locked locked, String pgTxId, List<Seat> seats) {
         SeatHold hold = locked.hold();
         Payment payment = locked.payment();
-        long holdId = hold.getId();
         long paymentId = payment.getId();
-        RowCounts.requireExactly(seatRepository.heldToAvailable(holdId), seatIds.size(), "seat AVAILABLE");
-        RowCounts.requireExactly(seatHoldRepository.payingToRefunding(holdId), 1, "hold REFUNDING");
-        RowCounts.requireExactly(paymentRepository.openToApproved(paymentId, pgTxId), 1, "payment APPROVED");
+        List<Long> seatIds = idsOf(seats);
+        seats.forEach(Seat::heldToAvailable);
+        hold.payingToRefunding();
+        payment.openToApproved(pgTxId);
         outboxWriter.write(OutboxTaskType.REFUND_REQUESTED, paymentId,
                 new RefundRequestedPayload(paymentId, payment.getOrderId()));
         return PaymentSettlement.seatsChanged(new PaymentResult(paymentId, PaymentOutcome.SEAT_LOST,
@@ -203,26 +211,30 @@ public class PaymentTransaction {
         if (!locked.paying()) {
             return PaymentSettlement.seatsUnchanged(paymentReader.resultOf(locked.payment(), hold));
         }
-        long holdId = hold.getId();
-        List<Long> seatIds = seatRepository.lockHeldSeatIds(holdId);
-        RowCounts.requireExactly(seatRepository.heldToAvailable(holdId), seatIds.size(), "seat AVAILABLE");
-        RowCounts.requireExactly(seatHoldRepository.payingToReleased(holdId), 1, "hold RELEASED");
-        int updated = target == PaymentStatus.DECLINED
-                ? paymentRepository.openToDeclined(paymentId)
-                : paymentRepository.openToCancelled(paymentId);
-        RowCounts.requireExactly(updated, 1, "payment " + target);
+        List<Seat> seats = seatRepository.lockHeldSeats(hold.getId());
+        seats.forEach(Seat::heldToAvailable);
+        hold.payingToReleased();
+        if (target == PaymentStatus.DECLINED) {
+            locked.payment().openToDeclined();
+        } else {
+            locked.payment().openToCancelled();
+        }
         return PaymentSettlement.seatsChanged(new PaymentResult(paymentId,
                 PaymentOutcome.of(target, HoldStatus.RELEASED), target, HoldStatus.RELEASED, null, null),
-                gateOf(hold, seatIds), null);
+                gateOf(hold, idsOf(seats)), null);
     }
 
-    // 결제 엔티티를 읽기 전에 hold를 먼저 잠가야 락 뒤의 최신 결제 상태를 본다
+    // 결제 엔티티를 읽기 전에 hold를 먼저 잠근다. 결과 모름 전이는 hold를 잠그지 않으므로 결제 행도 잠가 락 뒤의 최신 상태를 본다
     private Locked lock(long paymentId) {
         long holdId = paymentRepository.findHoldIdById(paymentId).orElseThrow(() -> paymentNotFound(paymentId));
         SeatHold hold = seatHoldRepository.lockById(holdId)
                 .orElseThrow(() -> new IllegalStateException("결제 " + paymentId + "의 hold " + holdId + "가 없다"));
-        Payment payment = paymentRepository.findById(paymentId).orElseThrow(() -> paymentNotFound(paymentId));
+        Payment payment = paymentRepository.lockById(paymentId).orElseThrow(() -> paymentNotFound(paymentId));
         return new Locked(hold, payment);
+    }
+
+    private static List<Long> idsOf(List<Seat> seats) {
+        return seats.stream().map(Seat::getId).toList();
     }
 
     private static GateHold gateOf(SeatHold hold, List<Long> seatIds) {

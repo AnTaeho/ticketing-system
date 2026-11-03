@@ -21,7 +21,7 @@ import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.annotation.LastModifiedDate;
 import org.springframework.data.jpa.domain.support.AuditingEntityListener;
 
-// 상태 전이는 PaymentRepository의 조건부 UPDATE로만 한다
+// 상태 전이 메서드는 hold와 이 결제 행을 비관적 락으로 잠근 트랜잭션에서만 부른다. 잠그지 않고 다투는 전이(결과 모름, 대사 일정)는 PaymentRepository의 조건부 UPDATE다
 @Entity
 @Getter
 @EntityListeners(AuditingEntityListener.class)
@@ -93,5 +93,39 @@ public class Payment {
         payment.status = PaymentStatus.REQUESTED;
         payment.nextCheckAt = nextCheckAt;
         return payment;
+    }
+
+    public void openToApproved(String pgTxId) {
+        settle(PaymentStatus.APPROVED);
+        this.pgTxId = pgTxId;
+    }
+
+    public void openToDeclined() {
+        settle(PaymentStatus.DECLINED);
+    }
+
+    public void openToCancelled() {
+        settle(PaymentStatus.CANCELLED);
+    }
+
+    // 승인된 결제의 환불이 PG에서 확정됐을 때만 부른다
+    public void approvedToCancelled() {
+        if (status != PaymentStatus.APPROVED) {
+            throw invalidMove(PaymentStatus.CANCELLED);
+        }
+        status = PaymentStatus.CANCELLED;
+    }
+
+    // 결론이 나면 대사 대상에서 빠진다
+    private void settle(PaymentStatus to) {
+        if (!status.isOpen()) {
+            throw invalidMove(to);
+        }
+        status = to;
+        nextCheckAt = null;
+    }
+
+    private IllegalStateException invalidMove(PaymentStatus to) {
+        return new IllegalStateException("결제 " + id + "는 " + status + "라 " + to + "로 바꿀 수 없다");
     }
 }

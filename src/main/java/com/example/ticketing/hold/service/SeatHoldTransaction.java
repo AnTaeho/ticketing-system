@@ -5,6 +5,7 @@ import com.example.ticketing.common.error.ApiException;
 import com.example.ticketing.common.error.ErrorCode;
 import com.example.ticketing.common.time.DbClock;
 import com.example.ticketing.hold.domain.GateHold;
+import com.example.ticketing.hold.domain.HoldStatus;
 import com.example.ticketing.hold.domain.SeatHold;
 import com.example.ticketing.hold.dto.HoldPlacement;
 import com.example.ticketing.hold.repository.SeatHoldRepository;
@@ -72,10 +73,12 @@ public class SeatHoldTransaction {
     public GateHold heldToReleased(long userId, long holdId) {
         SeatHold hold = seatHoldRepository.lockByIdAndUserId(holdId, userId)
                 .orElseThrow(() -> new ApiException(ErrorCode.HOLD_NOT_FOUND, Map.of("holdId", holdId)));
-        if (seatHoldRepository.heldToReleased(holdId) != 1) {
+        if (hold.getStatus() != HoldStatus.HELD) {
             throw new ApiException(ErrorCode.HOLD_NOT_CANCELLABLE,
                     Map.of("holdId", holdId, "status", hold.getStatus().name()));
         }
+        hold.heldToReleased();
+        // 좌석은 잠그지 않아 기한이 지난 좌석을 남이 잡을 수 있으므로 hold_id 조건부 UPDATE로 푼다
         List<Long> seatIds = seatRepository.findHeldSeatIds(holdId);
         seatRepository.heldToAvailable(holdId);
         return new GateHold(userId, hold.getPerformanceId(), hold.getHoldToken(), seatIds);

@@ -7,7 +7,6 @@ import java.util.List;
 import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
-import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -47,10 +46,4 @@ public interface BookingRepository extends JpaRepository<Booking, Long> {
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select b from Booking b where b.id = :id and b.userId = :userId")
     Optional<Booking> lockByIdAndUserId(@Param("id") long id, @Param("userId") long userId);
-
-    @Modifying(clearAutomatically = true, flushAutomatically = true)
-    @Query(value = """
-            UPDATE booking SET status = 'CANCELLED', cancelled_at = NOW(6)
-             WHERE booking_id = :id AND status = 'CONFIRMED'""", nativeQuery = true)
-    int confirmedToCancelled(@Param("id") long id);
 }

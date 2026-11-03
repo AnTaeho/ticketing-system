@@ -80,4 +80,13 @@ public class Booking {
         booking.status = BookingStatus.CONFIRMED;
         return booking;
     }
+
+    // 이 행을 비관적 락으로 잠근 트랜잭션에서만 부른다. 취소 시각은 DB 시각이다
+    public void confirmedToCancelled(LocalDateTime dbNow) {
+        if (status != BookingStatus.CONFIRMED) {
+            throw new IllegalStateException("예매 " + id + "는 " + status + "라 취소할 수 없다");
+        }
+        status = BookingStatus.CANCELLED;
+        cancelledAt = dbNow;
+    }
 }

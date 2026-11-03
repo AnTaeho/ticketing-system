@@ -21,7 +21,7 @@ import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.annotation.LastModifiedDate;
 import org.springframework.data.jpa.domain.support.AuditingEntityListener;
 
-// 상태 전이는 SeatHoldRepository의 조건부 UPDATE로만 한다
+// 상태 전이 메서드는 이 행을 비관적 락으로 잠근 트랜잭션에서만 부른다. 잠그지 않는 만료는 SeatHoldRepository의 조건부 UPDATE다
 @Entity
 @Getter
 @EntityListeners(AuditingEntityListener.class)
@@ -85,5 +85,47 @@ public class SeatHold {
         hold.totalAmount = totalAmount;
         hold.expiresAt = expiresAt;
         return hold;
+    }
+
+    // 만료 판정은 DB 시각으로 한다
+    public boolean isExpiredAt(LocalDateTime dbNow) {
+        return !expiresAt.isAfter(dbNow);
+    }
+
+    public void heldToReleased() {
+        moveTo(HoldStatus.HELD, HoldStatus.RELEASED);
+    }
+
+    public void heldToPaying(LocalDateTime payDeadline, LocalDateTime dbNow) {
+        if (isExpiredAt(dbNow)) {
+            throw new IllegalStateException("hold " + id + "는 " + expiresAt + "에 만료돼 결제로 넘길 수 없다");
+        }
+        moveTo(HoldStatus.HELD, HoldStatus.PAYING);
+        this.payDeadline = payDeadline;
+    }
+
+    public void payingToConfirmed() {
+        moveTo(HoldStatus.PAYING, HoldStatus.CONFIRMED);
+    }
+
+    public void payingToRefunding() {
+        moveTo(HoldStatus.PAYING, HoldStatus.REFUNDING);
+    }
+
+    // PG 거절·망취소 확정 때만 부른다. 사용자 취소(HELD → RELEASED)는 heldToReleased
+    public void payingToReleased() {
+        moveTo(HoldStatus.PAYING, HoldStatus.RELEASED);
+    }
+
+    // 좌석 상실로 환불하던 hold를 환불 확정 뒤 닫는다
+    public void refundingToReleased() {
+        moveTo(HoldStatus.REFUNDING, HoldStatus.RELEASED);
+    }
+
+    private void moveTo(HoldStatus from, HoldStatus to) {
+        if (status != from) {
+            throw new IllegalStateException("hold " + id + "는 " + status + "라 " + from + " → " + to + "로 바꿀 수 없다");
+        }
+        status = to;
     }
 }
