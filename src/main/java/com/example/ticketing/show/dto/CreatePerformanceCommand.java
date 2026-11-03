@@ -4,12 +4,12 @@ import java.time.LocalDateTime;
 
 // gateCloseAt이 null이면 서비스가 기본값을 정한다
 public record CreatePerformanceCommand(
-        Long showId,
+        long showId,
         LocalDateTime startsAt,
         LocalDateTime openAt,
         LocalDateTime gateCloseAt,
-        Integer sections,
-        Integer rows,
-        Integer seatsPerRow
+        int sections,
+        int rows,
+        int seatsPerRow
 ) {
 }
