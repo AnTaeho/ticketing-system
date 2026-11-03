@@ -62,7 +62,7 @@
   }
 
   function tick() {
-    var now = bk.serverNow();
+    var now = Date.now();
     var due = false;
     state.countdowns.forEach(function (c) {
       var left = c.openAt - now;
