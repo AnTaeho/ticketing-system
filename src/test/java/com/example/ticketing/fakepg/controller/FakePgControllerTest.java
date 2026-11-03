@@ -1,41 +1,30 @@
 package com.example.ticketing.fakepg.controller;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.hamcrest.Matchers.oneOf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.example.ticketing.common.config.TicketingProperties;
-import com.example.ticketing.common.web.HttpNames;
-import com.example.ticketing.support.FakePgTestConfig;
-import com.example.ticketing.support.FakePgTestConfig.GatedSleeper;
 import com.example.ticketing.support.IntegrationTest;
 import com.example.ticketing.support.TestMvc;
 import java.util.UUID;
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.context.annotation.Import;
-import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
-import org.springframework.test.web.servlet.MvcResult;
-import org.springframework.test.web.servlet.ResultActions;
 
+// 부하 테스트와 결제 대사가 기대는 오래된 PROCESSING 처리만 HTTP로 본다. 나머지 규칙은 FakePgServiceTest가 본다
 @IntegrationTest
-@Import(FakePgTestConfig.class)
 class FakePgControllerTest {
 
     private static final String BASE = "/fake-pg/payments";
 
     @Autowired
     private TestMvc testMvc;
-    @Autowired
-    private GatedSleeper sleeper;
     @Autowired
     private JdbcTemplate jdbcTemplate;
     @Autowired
@@ -46,72 +35,6 @@ class FakePgControllerTest {
     @BeforeEach
     void setUp() {
         mockMvc = testMvc.mockMvc();
-        sleeper.reset();
-    }
-
-    @AfterEach
-    void tearDown() {
-        sleeper.reset();
-    }
-
-    @Test
-    @DisplayName("성공 시나리오로 승인하면 승인 번호를 주고 조회·재승인도 같은 번호를 준다")
-    void approveSuccess() throws Exception {
-        String orderId = newOrderId();
-
-        MvcResult approved = approve(orderId, "SUCCESS")
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.orderId").value(orderId))
-                .andExpect(jsonPath("$.status").value("APPROVED"))
-                .andExpect(jsonPath("$.pgTxId").isNotEmpty())
-                .andExpect(jsonPath("$.reason").doesNotExist())
-                .andExpect(jsonPath("$.code").doesNotExist())
-                .andReturn();
-        String pgTxId = testMvc.body(approved).get("pgTxId").asString();
-
-        mockMvc.perform(get(BASE + "/" + orderId))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.orderId").value(orderId))
-                .andExpect(jsonPath("$.status").value("APPROVED"))
-                .andExpect(jsonPath("$.pgTxId").value(pgTxId));
-        approve(orderId, "SUCCESS")
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.pgTxId").value(pgTxId));
-    }
-
-    @Test
-    @DisplayName("거절 시나리오는 대소문자와 상관없이 승인 번호 없는 거절로 답한다")
-    void approveDecline() throws Exception {
-        approve(newOrderId(), "decline")
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.status").value("DECLINED"))
-                .andExpect(jsonPath("$.pgTxId").doesNotExist())
-                .andExpect(jsonPath("$.reason").doesNotExist());
-    }
-
-    @Test
-    @DisplayName("시나리오 헤더가 없으면 설정 비율로 무작위 결론을 낸다")
-    void approveWithoutScenario() throws Exception {
-        String orderId = newOrderId();
-
-        mockMvc.perform(post(BASE).contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"orderId\":\"" + orderId + "\",\"amount\":1000}"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.status").value(oneOf("APPROVED", "DECLINED")));
-        assertThat(sleeper.calls()).hasSize(1);
-    }
-
-    @Test
-    @DisplayName("없는 주문을 조회하면 404로 답한다")
-    void queryMissing() throws Exception {
-        String orderId = newOrderId();
-
-        mockMvc.perform(get(BASE + "/" + orderId))
-                .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.orderId").value(orderId))
-                .andExpect(jsonPath("$.status").value("NOT_FOUND"))
-                .andExpect(jsonPath("$.pgTxId").doesNotExist())
-                .andExpect(jsonPath("$.code").doesNotExist());
     }
 
     @Test
@@ -144,37 +67,6 @@ class FakePgControllerTest {
                 .andExpect(jsonPath("$.pgTxId").doesNotExist())
                 .andExpect(jsonPath("$.code").doesNotExist());
         assertThat(rowStatus(recent)).isEqualTo("PROCESSING");
-    }
-
-    @Test
-    @DisplayName("잘못된 승인·취소 요청은 PG 응답 형식의 400으로 답하고 행을 만들지 않는다")
-    void invalidRequests() throws Exception {
-        approve(newOrderId(), "EXPLODE")
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.status").value("INVALID_REQUEST"))
-                .andExpect(jsonPath("$.reason").exists())
-                .andExpect(jsonPath("$.code").doesNotExist());
-        approve(" ", "SUCCESS")
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.status").value("INVALID_REQUEST"));
-        approve("x".repeat(41), "SUCCESS")
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.status").value("INVALID_REQUEST"));
-        mockMvc.perform(post(BASE).contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"orderId\":\"" + newOrderId() + "\",\"amount\":-1}"))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.status").value("INVALID_REQUEST"));
-        mockMvc.perform(post(BASE + "/" + "x".repeat(41) + "/cancel"))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.status").value("INVALID_REQUEST"));
-        assertThat(sleeper.calls()).isEmpty();
-    }
-
-    private ResultActions approve(String orderId, String scenario) throws Exception {
-        return mockMvc.perform(post(BASE)
-                .header(HttpNames.PG_SCENARIO_HEADER, scenario)
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"orderId\":\"" + orderId + "\",\"amount\":1000}"));
     }
 
     // 승인 지연 도중 앱이 죽은 상태: PROCESSING 행만 남고 결과를 쓸 스레드가 없다

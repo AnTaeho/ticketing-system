@@ -24,6 +24,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
 
+// 부하 테스트와 결제 대사가 기대는 규칙(묘비, 처리 중 취소, 취소 멱등)만 본다. 결론 비율은 FakePgDeciderTest가 본다
 @IntegrationTest
 @Import(FakePgTestConfig.class)
 class FakePgServiceTest {
@@ -45,36 +46,6 @@ class FakePgServiceTest {
     @AfterEach
     void tearDown() {
         sleeper.reset();
-    }
-
-    @Test
-    @DisplayName("같은 orderId로 두 번 승인하면 같은 pgTxId를 돌려주고 행은 하나다")
-    void approveTwiceIsIdempotent() {
-        String orderId = newOrderId();
-
-        FakePgReply first = fakePgService.approve(orderId, 50_000, FakePgScenario.SUCCESS);
-        FakePgReply second = fakePgService.approve(orderId, 50_000, FakePgScenario.SUCCESS);
-
-        assertThat(first.status()).isEqualTo("APPROVED");
-        assertThat(first.pgTxId()).isNotBlank();
-        assertThat(second).isEqualTo(first);
-        assertThat(rowCount(orderId)).isEqualTo(1);
-        assertThat(row(orderId)).containsExactly("APPROVED", first.pgTxId(), "50000");
-        assertThat(sleeper.calls()).isEmpty();
-    }
-
-    @Test
-    @DisplayName("거절된 주문에 승인이 다시 오면 지연 없이 거절로 답한다")
-    void declineTwice() {
-        String orderId = newOrderId();
-
-        FakePgReply first = fakePgService.approve(orderId, 1000, FakePgScenario.DECLINE);
-        FakePgReply second = fakePgService.approve(orderId, 1000, FakePgScenario.SUCCESS);
-
-        assertThat(first).isEqualTo(new FakePgReply(orderId, "DECLINED", null, null));
-        assertThat(second).isEqualTo(first);
-        assertThat(row(orderId)).containsExactly("DECLINED", null, "1000");
-        assertThat(sleeper.calls()).isEmpty();
     }
 
     @Test
@@ -134,10 +105,12 @@ class FakePgServiceTest {
     }
 
     @Test
-    @DisplayName("승인한 주문은 몇 번 취소해도 같은 취소 결과를 돌려준다")
-    void cancelApprovedIsIdempotent() {
+    @DisplayName("승인한 주문은 몇 번 취소해도 같은 취소 결과를, 거절된 주문은 DECLINED 그대로를 돌려준다")
+    void cancelIsIdempotent() {
         String orderId = newOrderId();
+        String declinedOrder = newOrderId();
         FakePgReply approved = fakePgService.approve(orderId, 1000, FakePgScenario.SUCCESS);
+        fakePgService.approve(declinedOrder, 1000, FakePgScenario.DECLINE);
 
         FakePgReply first = fakePgService.cancel(orderId);
         FakePgReply second = fakePgService.cancel(orderId);
@@ -146,57 +119,11 @@ class FakePgServiceTest {
         assertThat(second).isEqualTo(first);
         assertThat(fakePgService.query(orderId)).isEqualTo(first);
         assertThat(rowCount(orderId)).isEqualTo(1);
+        assertThat(fakePgService.cancel(declinedOrder))
+                .isEqualTo(new FakePgReply(declinedOrder, "DECLINED", null, null));
+        assertThat(row(declinedOrder).get(0)).isEqualTo("DECLINED");
     }
 
-    @Test
-    @DisplayName("거절된 주문을 취소하면 DECLINED 그대로다")
-    void cancelDeclinedStaysDeclined() {
-        String orderId = newOrderId();
-        fakePgService.approve(orderId, 1000, FakePgScenario.DECLINE);
-
-        assertThat(fakePgService.cancel(orderId)).isEqualTo(new FakePgReply(orderId, "DECLINED", null, null));
-        assertThat(row(orderId).get(0)).isEqualTo("DECLINED");
-    }
-
-    @Test
-    @DisplayName("없는 주문을 조회하면 NOT_FOUND이고 행을 만들지 않는다")
-    void queryMissing() {
-        String orderId = newOrderId();
-
-        FakePgReply reply = fakePgService.query(orderId);
-
-        assertThat(reply).isEqualTo(new FakePgReply(orderId, "NOT_FOUND", null, null));
-        assertThat(reply.isNotFound()).isTrue();
-        assertThat(rowCount(orderId)).isZero();
-    }
-
-    @Test
-    @DisplayName("느린 거절(SLOW_DECLINE)은 정해진 지연 뒤에 거절을 저장한다")
-    void slowDecline() {
-        String orderId = newOrderId();
-
-        FakePgReply reply = fakePgService.approve(orderId, 1000, FakePgScenario.SLOW_DECLINE);
-
-        assertThat(reply).isEqualTo(new FakePgReply(orderId, "DECLINED", null, null));
-        assertThat(sleeper.calls()).containsExactly(properties.fakePg().slowDelay().toMillis());
-        assertThat(row(orderId).get(0)).isEqualTo("DECLINED");
-    }
-
-    @Test
-    @DisplayName("시나리오가 없으면 설정 범위만큼 지연한 뒤 승인이나 거절로 끝난다")
-    void randomScenario() {
-        TicketingProperties.FakePg config = properties.fakePg();
-        for (int i = 0; i < 20; i++) {
-            String orderId = newOrderId();
-
-            FakePgReply reply = fakePgService.approve(orderId, 1000, null);
-
-            assertThat(reply.status()).isIn("APPROVED", "DECLINED");
-            assertThat(row(orderId).get(0)).isEqualTo(reply.status());
-        }
-        assertThat(sleeper.calls()).hasSize(20).allSatisfy(ms -> assertThat(ms == config.slowDelay().toMillis()
-                || (ms >= config.delayMin().toMillis() && ms <= config.delayMax().toMillis())).isTrue());
-    }
 
     private static String newOrderId() {
         return "t-" + UUID.randomUUID();

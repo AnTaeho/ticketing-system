@@ -5,7 +5,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.example.ticketing.common.config.TicketingProperties;
 import com.example.ticketing.payment.client.HttpPgClient;
-import com.example.ticketing.payment.client.OddPgTestConfig;
 import com.example.ticketing.payment.client.PgClient;
 import com.example.ticketing.payment.client.PgStatus;
 import com.example.ticketing.payment.dto.PaymentStart.Started;
@@ -22,7 +21,6 @@ import java.util.UUID;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.context.annotation.Import;
 import org.springframework.core.env.Environment;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -31,9 +29,8 @@ import org.springframework.web.client.RestClient;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
-// HttpPgClientTest와 같은 구성(RANDOM_PORT + OddPgTestConfig)이라 컨텍스트를 같이 쓴다
+// HttpPgClientTest와 같은 구성(RANDOM_PORT)이라 컨텍스트를 같이 쓴다
 @HttpIntegrationTest
-@Import(OddPgTestConfig.class)
 class PaymentHttpTest {
 
     @Autowired
