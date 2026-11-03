@@ -8,96 +8,77 @@ import com.example.ticketing.common.config.TicketingProperties.Payment;
 import com.example.ticketing.common.config.TicketingProperties.Pg;
 import com.example.ticketing.common.config.TicketingProperties.Queue;
 
-// 설정을 바꾼 대상은 컨텍스트를 늘리지 않고 이 사본으로 new 조립한다. 설정 record가 바뀌면 이 파일만 고친다
+// 설정을 바꾼 대상은 컨텍스트를 늘리지 않고 이 사본으로 new 조립한다. 설정 record가 바뀌면 empty()와 with()만 고친다
 public final class TestProperties {
 
-    private TicketingProperties.Seed seed;
-    private TicketingProperties.Redis redis;
-    private Hold hold;
-    private Payment payment;
-    private Gate gate;
-    private Queue queue;
-    private TicketingProperties.Seatmap seatmap;
-    private Outbox outbox;
-    private TicketingProperties.Ops ops;
-    private Pg pg;
-    private TicketingProperties.FakePg fakePg;
+    private TicketingProperties p;
 
-    private TestProperties() {
+    private TestProperties(TicketingProperties p) {
+        this.p = p;
     }
 
     public static TestProperties from(TicketingProperties p) {
-        TestProperties copy = new TestProperties();
-        copy.seed = p.seed();
-        copy.redis = p.redis();
-        copy.hold = p.hold();
-        copy.payment = p.payment();
-        copy.gate = p.gate();
-        copy.queue = p.queue();
-        copy.seatmap = p.seatmap();
-        copy.outbox = p.outbox();
-        copy.ops = p.ops();
-        copy.pg = p.pg();
-        copy.fakePg = p.fakePg();
-        return copy;
+        return new TestProperties(p);
     }
 
     // 컨텍스트 없는 단위 테스트용. 쓰는 묶음만 채운다
     public static TestProperties empty() {
-        return new TestProperties();
+        return new TestProperties(
+                new TicketingProperties(null, null, null, null, null, null, null, null, null, null, null));
     }
 
     public TestProperties hold(Hold hold) {
-        this.hold = hold;
-        return this;
+        return with(hold, p.payment(), p.gate(), p.queue(), p.outbox(), p.pg());
     }
 
     public TestProperties payment(Payment payment) {
-        this.payment = payment;
-        return this;
+        return with(p.hold(), payment, p.gate(), p.queue(), p.outbox(), p.pg());
     }
 
     public TestProperties gate(Gate gate) {
-        this.gate = gate;
-        return this;
+        return with(p.hold(), p.payment(), gate, p.queue(), p.outbox(), p.pg());
     }
 
     public TestProperties outbox(Outbox outbox) {
-        this.outbox = outbox;
-        return this;
+        return with(p.hold(), p.payment(), p.gate(), p.queue(), outbox, p.pg());
     }
 
     public TestProperties gateEnabled(boolean enabled) {
-        this.gate = new Gate(enabled, gate.fallbackMaxConcurrency(), gate.reconcileEnabled(), gate.reconcileScanMs());
-        return this;
+        Gate g = p.gate();
+        return gate(new Gate(enabled, g.fallbackMaxConcurrency(), g.reconcileEnabled(), g.reconcileScanMs()));
     }
 
     public TestProperties fallbackMaxConcurrency(int max) {
-        this.gate = new Gate(gate.enabled(), max, gate.reconcileEnabled(), gate.reconcileScanMs());
-        return this;
+        Gate g = p.gate();
+        return gate(new Gate(g.enabled(), max, g.reconcileEnabled(), g.reconcileScanMs()));
     }
 
     public TestProperties queueCapacity(int capacity) {
-        Queue q = queue;
-        this.queue = new Queue(capacity, q.processingMaxSession(), q.processingIdleTimeout(),
-                q.processingLeaveGrace(), q.waitingLeaveGrace(), q.waitingTokenTtl(), q.promoteEnabled(),
-                q.promoteIntervalMs());
-        return this;
+        Queue q = p.queue();
+        return with(p.hold(), p.payment(), p.gate(), new Queue(capacity, q.processingMaxSession(),
+                q.processingIdleTimeout(), q.processingLeaveGrace(), q.waitingLeaveGrace(), q.waitingTokenTtl(),
+                q.promoteEnabled(), q.promoteIntervalMs()), p.outbox(), p.pg());
     }
 
     public TestProperties outboxBatchSize(int batchSize) {
-        Outbox o = outbox;
-        this.outbox = new Outbox(o.workerEnabled(), o.pollIntervalMs(), batchSize, o.lockDuration(), o.maxAttempts(),
-                o.maxBackoff());
-        return this;
+        Outbox o = p.outbox();
+        return outbox(new Outbox(o.workerEnabled(), o.pollIntervalMs(), batchSize, o.lockDuration(), o.maxAttempts(),
+                o.maxBackoff()));
     }
 
     public TestProperties pgBaseUrl(String baseUrl) {
-        this.pg = new Pg(baseUrl, pg.connectTimeout(), pg.readTimeout());
-        return this;
+        Pg pg = p.pg();
+        return with(p.hold(), p.payment(), p.gate(), p.queue(), p.outbox(),
+                new Pg(baseUrl, pg.connectTimeout(), pg.readTimeout()));
     }
 
     public TicketingProperties build() {
-        return new TicketingProperties(seed, redis, hold, payment, gate, queue, seatmap, outbox, ops, pg, fakePg);
+        return p;
+    }
+
+    private TestProperties with(Hold hold, Payment payment, Gate gate, Queue queue, Outbox outbox, Pg pg) {
+        p = new TicketingProperties(p.seed(), p.redis(), hold, payment, gate, queue, p.seatmap(), outbox, p.ops(), pg,
+                p.fakePg());
+        return this;
     }
 }

@@ -59,7 +59,7 @@ class ApiExceptionHandlerTest {
     }
 
     @Test
-    @DisplayName("사용자 정보가 없으면 API 처리기가 401로 답한다")
+    @DisplayName("사용자 정보가 없거나 X-User-Id가 숫자가 아니면 API 처리기가 401로 답한다")
     void loginRequired() throws Exception {
         mockMvc.perform(get(PROBE + "/me"))
                 .andExpect(status().isUnauthorized())
@@ -67,27 +67,17 @@ class ApiExceptionHandlerTest {
                 .andExpect(jsonPath("$.message").value(ErrorCode.LOGIN_REQUIRED.getDefaultMessage()))
                 .andExpect(jsonPath("$.detail").isMap())
                 .andExpect(jsonPath("$.error").doesNotExist());
-    }
-
-    @Test
-    @DisplayName("숫자가 아닌 X-User-Id는 로그인 안 한 것으로 본다")
-    void invalidUserIdHeader() throws Exception {
         mockMvc.perform(get(PROBE + "/me").header(HttpNames.USER_ID_HEADER, "abc"))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.code").value("LOGIN_REQUIRED"));
     }
 
     @Test
-    @DisplayName("사용자 헤더(X-User-Id)가 쿠키(bk_uid)보다 먼저 쓰인다")
-    void headerBeforeCookie() throws Exception {
+    @DisplayName("사용자는 X-User-Id 헤더로 먼저 찾고 헤더가 없으면 bk_uid 쿠키로 찾는다")
+    void headerThenCookie() throws Exception {
         mockMvc.perform(get(PROBE + "/me").header(HttpNames.USER_ID_HEADER, "11").cookie(new Cookie("bk_uid", "22")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.userId").value(11));
-    }
-
-    @Test
-    @DisplayName("헤더가 없으면 bk_uid 쿠키로 사용자를 찾는다")
-    void cookieFallback() throws Exception {
         mockMvc.perform(get(PROBE + "/me").cookie(new Cookie("bk_uid", "22")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.userId").value(22));
@@ -96,7 +86,7 @@ class ApiExceptionHandlerTest {
     @Test
     @DisplayName("API 컨트롤러가 ApiException을 던지면 코드에 맞는 상태로 답한다")
     void apiException() throws Exception {
-        mockMvc.perform(get(PROBE + "/seat-taken").header(HttpNames.USER_ID_HEADER, "1"))
+        mockMvc.perform(get(PROBE + "/seat-taken"))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("SEAT_TAKEN"))
                 .andExpect(jsonPath("$.message").value(ErrorCode.SEAT_TAKEN.getDefaultMessage()))
@@ -108,7 +98,7 @@ class ApiExceptionHandlerTest {
     @Test
     @DisplayName("필수 헤더가 없으면 빠진 헤더 이름을 담아 400으로 답한다")
     void missingRequiredHeader() throws Exception {
-        mockMvc.perform(post(PROBE + "/required-header").header(HttpNames.USER_ID_HEADER, "1"))
+        mockMvc.perform(post(PROBE + "/required-header"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("INVALID_REQUEST"))
                 .andExpect(jsonPath("$.detail.header").value("X-Probe"))
@@ -118,8 +108,7 @@ class ApiExceptionHandlerTest {
     @Test
     @DisplayName("요청 본문 검증이 실패하면 틀린 필드를 담아 400으로 답한다")
     void validationFailure() throws Exception {
-        mockMvc.perform(post(PROBE + "/validate").header(HttpNames.USER_ID_HEADER, "1")
-                        .contentType(MediaType.APPLICATION_JSON)
+        mockMvc.perform(post(PROBE + "/validate").contentType(MediaType.APPLICATION_JSON)
                         .content("{\"nickname\":\"\"}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("INVALID_REQUEST"))
@@ -130,7 +119,7 @@ class ApiExceptionHandlerTest {
     @Test
     @DisplayName("API 처리기가 다루지 않는 예외는 잡지 않고 넘겨 Boot 기본 오류 처리에 맡긴다")
     void unhandledIsNotCaught() {
-        assertThatThrownBy(() -> mockMvc.perform(get(PROBE + "/boom").header(HttpNames.USER_ID_HEADER, "1")))
+        assertThatThrownBy(() -> mockMvc.perform(get(PROBE + "/boom")))
                 .hasRootCauseInstanceOf(IllegalStateException.class)
                 .hasRootCauseMessage("boom");
     }
