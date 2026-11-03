@@ -10,6 +10,8 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.function.LongSupplier;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.env.Environment;
 import org.springframework.http.HttpStatus;
@@ -27,8 +29,8 @@ import tools.jackson.databind.json.JsonMapper;
 @Component
 public class HttpPgClient implements PgClient {
 
-    private static final Set<PgStatus> BODY_STATUSES =
-            Set.of(PgStatus.APPROVED, PgStatus.DECLINED, PgStatus.CANCELLED, PgStatus.PROCESSING);
+    private static final Set<String> BODY_STATUSES = Stream.of(PgStatus.APPROVED, PgStatus.DECLINED,
+            PgStatus.CANCELLED, PgStatus.PROCESSING).map(Enum::name).collect(Collectors.toUnmodifiableSet());
     private static final int MAX_DETAIL_BODY = 200;
 
     private final RestClient restClient;
@@ -140,29 +142,16 @@ public class HttpPgClient implements PgClient {
                     ? PgResult.of(PgStatus.NOT_FOUND, null)
                     : PgResult.unknown("HTTP " + code + " " + abbreviate(body));
         }
-        PgStatus parsed = parseStatus(status);
-        if (parsed == null || !BODY_STATUSES.contains(parsed)) {
+        if (status == null || !BODY_STATUSES.contains(status)) {
             return PgResult.unknown("HTTP " + code + " 모르는 status: " + abbreviate(body));
         }
-        return PgResult.of(parsed, json.path("pgTxId").stringValue(null));
-    }
-
-    private static PgStatus parseStatus(String status) {
-        if (status == null) {
-            return null;
-        }
-        for (PgStatus candidate : PgStatus.values()) {
-            if (candidate.name().equals(status)) {
-                return candidate;
-            }
-        }
-        return null;
+        return PgResult.of(PgStatus.valueOf(status), json.path("pgTxId").stringValue(null));
     }
 
     private static String describe(Throwable e) {
         StringBuilder detail = new StringBuilder(e.getClass().getSimpleName()).append(": ").append(e.getMessage());
         Throwable cause = e.getCause();
-        if (cause != null && cause != e) {
+        if (cause != null) {
             detail.append(" (").append(cause.getClass().getSimpleName()).append(")");
         }
         return detail.toString();

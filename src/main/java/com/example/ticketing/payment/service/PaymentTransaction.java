@@ -92,8 +92,8 @@ public class PaymentTransaction {
                     paymentReader.resultOf(sameHold.get(), hold));
         }
 
+        requirePayable(hold);
         LocalDateTime now = dbClock.now();
-        requirePayable(hold, now);
         LocalDateTime deadline = now.plus(payDeadline);
         heldToPaying(hold, deadline);
         List<Long> seatIds = seatRepository.findHeldSeatIds(holdId);
@@ -160,7 +160,7 @@ public class PaymentTransaction {
         paymentRepository.approvedToCancelled(paymentId);
     }
 
-    private static void requirePayable(SeatHold hold, LocalDateTime now) {
+    private static void requirePayable(SeatHold hold) {
         long holdId = hold.getId();
         if (hold.getStatus() == HoldStatus.EXPIRED) {
             throw new ApiException(ErrorCode.HOLD_EXPIRED, Map.of("holdId", holdId));
@@ -169,12 +169,9 @@ public class PaymentTransaction {
             throw new ApiException(ErrorCode.HOLD_NOT_PAYABLE,
                     Map.of("holdId", holdId, "status", hold.getStatus().name()));
         }
-        if (!hold.getExpiresAt().isAfter(now)) {
-            throw new ApiException(ErrorCode.HOLD_EXPIRED, Map.of("holdId", holdId));
-        }
     }
 
-    // 좌석을 결제 마감까지 붙잡는다. 만료 경계에서 진 쪽은 HOLD_EXPIRED다
+    // 좌석을 결제 마감까지 붙잡는다. 만료 시각은 조건부 UPDATE가 DB 시각으로 판정한다
     private void heldToPaying(SeatHold hold, LocalDateTime deadline) {
         long holdId = hold.getId();
         if (seatHoldRepository.heldToPaying(holdId, deadline) != 1) {
