@@ -5,7 +5,7 @@ import java.util.function.LongSupplier;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
-// 시계를 빈으로 두어 테스트가 시각을 바꿔 끼울 수 있게 한다. 업무 시각은 DbClock을 쓴다
+// 시계를 빈으로 두어 테스트가 시각을 바꿔 끼울 수 있게 한다. 판정 시각은 DbClock을 쓴다
 @Configuration(proxyBeanMethods = false)
 public class TimeConfig {
 

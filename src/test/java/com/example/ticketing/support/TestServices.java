@@ -228,7 +228,6 @@ public class TestServices {
         private SeatGateRedisStore gateStore;
         private SeatHoldTransaction transaction;
         private QueueService queueService;
-        private DbClock dbClock;
 
         public SeatHoldServiceBuilder properties(TicketingProperties properties) {
             this.properties = properties;
@@ -250,11 +249,6 @@ public class TestServices {
             return this;
         }
 
-        public SeatHoldServiceBuilder dbClock(DbClock dbClock) {
-            this.dbClock = dbClock;
-            return this;
-        }
-
         // 반영 빈은 넘긴 게이트 저장소와 설정으로 새로 만든다
         public SeatHoldService build() {
             TicketingProperties resolved = properties != null ? properties : contextProperties();
@@ -262,7 +256,7 @@ public class TestServices {
             return new SeatHoldService(bean(SeatCatalog.class),
                     transaction != null ? transaction : bean(SeatHoldTransaction.class),
                     bean(SeatHoldRepository.class),
-                    dbClock != null ? dbClock : bean(DbClock.class), gate, gateReflector(gate, resolved),
+                    bean(DbClock.class), Clock.systemDefaultZone(), gate, gateReflector(gate, resolved),
                     queueService != null ? queueService : bean(QueueService.class),
                     new HoldMetrics(meterRegistry()), System::nanoTime, resolved);
         }
@@ -273,7 +267,6 @@ public class TestServices {
         private TicketingProperties properties;
         private QueueRedisStore store;
         private SeatMapQueryService seatMap;
-        private DbClock dbClock;
 
         public QueueServiceBuilder properties(TicketingProperties properties) {
             this.properties = properties;
@@ -290,15 +283,10 @@ public class TestServices {
             return this;
         }
 
-        public QueueServiceBuilder dbClock(DbClock dbClock) {
-            this.dbClock = dbClock;
-            return this;
-        }
-
         public QueueService build() {
             return new QueueService(store != null ? store : bean(QueueRedisStore.class), bean(SeatCatalog.class),
                     seatMap != null ? seatMap : bean(SeatMapQueryService.class),
-                    dbClock != null ? dbClock : bean(DbClock.class), Clock.systemDefaultZone(), System::nanoTime,
+                    Clock.systemDefaultZone(), System::nanoTime,
                     properties != null ? properties : contextProperties(), meterRegistry());
         }
     }

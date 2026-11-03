@@ -2,31 +2,15 @@ package com.example.ticketing.hold.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyLong;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.times;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
 
 import com.example.ticketing.common.error.ApiException;
 import com.example.ticketing.common.error.ErrorCode;
-import com.example.ticketing.common.time.DbClock;
-import com.example.ticketing.common.time.TestDbClock;
-import com.example.ticketing.hold.domain.GateResult;
 import com.example.ticketing.hold.dto.CreateHoldCommand;
 import com.example.ticketing.hold.dto.CreateHoldResult;
-import com.example.ticketing.hold.dto.HoldPlacement;
-import com.example.ticketing.hold.repository.SeatGateRedisStore;
-import com.example.ticketing.queue.service.QueueService;
-import com.example.ticketing.seat.dto.SeatSelection;
 import com.example.ticketing.support.Fixtures;
 import com.example.ticketing.support.IntegrationTest;
 import com.example.ticketing.support.TestDb;
 import com.example.ticketing.support.TestRedis;
-import com.example.ticketing.support.TestServices;
-import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
@@ -46,8 +30,6 @@ class SeatHoldServiceTest {
     private TestDb db;
     @Autowired
     private TestRedis testRedis;
-    @Autowired
-    private TestServices services;
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
@@ -175,42 +157,5 @@ class SeatHoldServiceTest {
                 new CreateHoldCommand(Long.MAX_VALUE, pid, db.seatIds(pid), token)))
                 .extracting("code").isEqualTo(ErrorCode.LOGIN_REQUIRED);
         assertThat(db.holdCount(pid)).isZero();
-    }
-
-    @Test
-    @DisplayName("사전 오픈 판정은 DB 시각을 기준으로 열림 여부를 가린다")
-    void openCheckUsesDbTime() {
-        LocalDateTime now = fixtures.dbNow();
-        long show = fixtures.newShow();
-        long opensInAnHour = fixtures.newPerformance(show, now.plusHours(1), now.plusDays(1), 1, 1, 2);
-        long openedAnHourAgo = fixtures.newPerformance(show, now.minusHours(1), now.plusDays(1), 1, 1, 2);
-        SeatHoldTransaction tx = mock(SeatHoldTransaction.class);
-        when(tx.persistHold(anyLong(), any(SeatSelection.class), anyString()))
-                .thenReturn(new HoldPlacement(1L, now.plusMinutes(5)));
-        SeatHoldService dbAhead = serviceWith(TestDbClock.withDbShift(jdbcTemplate, Duration.ofHours(2)), tx);
-        SeatHoldService dbBehind = serviceWith(TestDbClock.withDbShift(jdbcTemplate, Duration.ofHours(-2)), tx);
-
-        assertThat(dbAhead.hold(
-                new CreateHoldCommand(1L, opensInAnHour, db.seatIds(opensInAnHour).subList(0, 1), "1.admitted"))
-                .holdId())
-                .isEqualTo(1L);
-        verify(tx).persistHold(anyLong(), any(SeatSelection.class), anyString());
-
-        List<Long> openedSeats = db.seatIds(openedAnHourAgo).subList(0, 1);
-        assertThatThrownBy(() -> dbBehind.hold(new CreateHoldCommand(2L, openedAnHourAgo, openedSeats, null)))
-                .isInstanceOf(ApiException.class)
-                .extracting("code").isEqualTo(ErrorCode.NOT_OPEN);
-        // 두 번째 회차는 사전 판정에서 막혀 DB 판정 호출 수가 그대로다
-        verify(tx, times(1)).persistHold(anyLong(), any(SeatSelection.class), anyString());
-    }
-
-    // 처리열·게이트는 통과시키고 DB 판정은 목으로 받아 사전 판정만 본다
-    private SeatHoldService serviceWith(DbClock clock, SeatHoldTransaction tx) {
-        QueueService admitAll = mock(QueueService.class);
-        when(admitAll.isAdmitted(anyLong(), anyLong(), anyString())).thenReturn(true);
-        SeatGateRedisStore openGate = mock(SeatGateRedisStore.class);
-        when(openGate.tryHold(any(), any())).thenReturn(GateResult.ok());
-        return services.seatHoldService().queueService(admitAll).gateStore(openGate).transaction(tx).dbClock(clock)
-                .build();
     }
 }

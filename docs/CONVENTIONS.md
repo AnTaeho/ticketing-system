@@ -91,7 +91,7 @@ com.example.ticketing
 ## 5. 시간
 
 - 만료·마감 판정은 DB 시각이다. native는 `NOW(6)`, JPQL은 `current_timestamp`(MySQL에서 `current_timestamp(6)`)로 비교한다. "지금 + 기간"은 SQL에서 바인드한 기간으로 계산한다. 마이크로초 기간 값은 `SqlIntervals.micros`로 만든다.
-- 자바에서 업무 시각이 필요하면 `DbClock`에서 받는다. 경과 시간(캐시 신선도, 간격)은 주입한 `LongSupplier` 나노 시계로 잰다. `System.currentTimeMillis()`·`nanoTime()`을 직접 부르지 않는다.
+- 자바에서 판정 시각이 필요하면 `DbClock`에서 받는다. 요청마다 DB를 치지 않으려는 사전 확인(대기열 진입, 선점 전 오픈 확인)만 주입한 `Clock`으로 거르고, 경계는 트랜잭션 안의 DB 시각이 다시 판정한다. 경과 시간(캐시 신선도, 간격)은 주입한 `LongSupplier` 나노 시계로 잰다. `System.currentTimeMillis()`·`nanoTime()`을 직접 부르지 않는다.
 
 ## 6. Redis
 
