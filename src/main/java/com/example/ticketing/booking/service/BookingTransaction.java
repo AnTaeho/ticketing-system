@@ -7,13 +7,14 @@ import com.example.ticketing.booking.dto.RefundStatus;
 import com.example.ticketing.booking.repository.BookingRepository;
 import com.example.ticketing.common.error.ApiException;
 import com.example.ticketing.common.error.ErrorCode;
-import com.example.ticketing.common.jdbc.RowCounts;
+import com.example.ticketing.common.time.DbClock;
 import com.example.ticketing.hold.domain.GateHold;
 import com.example.ticketing.hold.domain.SeatHold;
 import com.example.ticketing.hold.repository.SeatHoldRepository;
 import com.example.ticketing.outbox.domain.OutboxTaskType;
 import com.example.ticketing.outbox.dto.RefundRequestedPayload;
 import com.example.ticketing.outbox.service.OutboxWriter;
+import com.example.ticketing.seat.domain.Seat;
 import com.example.ticketing.seat.repository.SeatRepository;
 import com.example.ticketing.show.repository.PerformanceRepository;
 import java.util.List;
@@ -33,6 +34,7 @@ public class BookingTransaction {
     private final SeatRepository seatRepository;
     private final PerformanceRepository performanceRepository;
     private final OutboxWriter outboxWriter;
+    private final DbClock dbClock;
 
     // booking 락이 같은 예매의 취소를 줄 세운다. 뒤에 온 쪽은 CANCELLED를 보고 아무것도 바꾸지 않으므로 환불 작업은 하나다
     @Transactional(isolation = Isolation.READ_COMMITTED)
@@ -51,12 +53,13 @@ public class BookingTransaction {
         String orderId = bookingRepository.findPaymentOrderId(booking.getPaymentId())
                 .orElseThrow(() -> new IllegalStateException("예매 " + bookingId + "의 결제가 없다"));
 
-        RowCounts.requireExactly(bookingRepository.confirmedToCancelled(bookingId), 1, "booking CANCELLED");
+        booking.confirmedToCancelled(dbClock.now());
         SeatHold hold = seatHoldRepository.findById(booking.getHoldId())
                 .orElseThrow(() -> new IllegalStateException("예매 " + bookingId + "의 hold가 없다"));
         // 게이트 키를 지울 좌석 ID는 hold_id를 비우기 전에 읽어 둔다
-        List<Long> seatIds = seatRepository.lockSoldSeatIds(hold.getId());
-        RowCounts.requireExactly(seatRepository.soldToAvailable(hold.getId()), seatIds.size(), "seat AVAILABLE");
+        List<Seat> seats = seatRepository.lockSoldSeats(hold.getId());
+        List<Long> seatIds = seats.stream().map(Seat::getId).toList();
+        seats.forEach(Seat::soldToAvailable);
         outboxWriter.write(OutboxTaskType.REFUND_REQUESTED, booking.getPaymentId(),
                 new RefundRequestedPayload(booking.getPaymentId(), orderId));
         return BookingCancellation.cancelled(

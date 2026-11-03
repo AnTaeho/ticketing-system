@@ -14,10 +14,12 @@ import java.util.List;
 import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
 
-// 예매 목록은 예매 한 번 + 좌석 한 번, 두 쿼리로 읽는다
+// 예매 목록은 예매 한 번 + 좌석 한 번, 두 쿼리를 한 읽기 전용 트랜잭션에서 읽는다
 @Component
 @RequiredArgsConstructor
+@Transactional(readOnly = true)
 public class BookingReader {
 
     private final BookingRepository bookingRepository;

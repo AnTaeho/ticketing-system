@@ -1,5 +1,7 @@
 package com.example.ticketing.booking.domain;
 
+import com.example.ticketing.seat.domain.SeatInfo;
+import jakarta.persistence.CascadeType;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EntityListeners;
@@ -9,9 +11,12 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Index;
+import jakarta.persistence.OneToMany;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -68,8 +73,13 @@ public class Booking {
     @Column(name = "cancelled_at")
     private LocalDateTime cancelledAt;
 
+    // 좌석 사본은 예매와 함께 저장한다. 읽기는 BookingSeatRepository가 예매 여러 건을 한 번에 한다
+    @OneToMany(mappedBy = "booking", cascade = CascadeType.PERSIST)
+    @Getter(AccessLevel.NONE)
+    private List<BookingSeat> seats = new ArrayList<>();
+
     public static Booking confirmed(String bookingNumber, Long holdId, Long paymentId, Long userId,
-                                    Long performanceId, int totalAmount) {
+                                    Long performanceId, int totalAmount, List<SeatInfo> seats) {
         Booking booking = new Booking();
         booking.bookingNumber = bookingNumber;
         booking.holdId = holdId;
@@ -78,6 +88,16 @@ public class Booking {
         booking.performanceId = performanceId;
         booking.totalAmount = totalAmount;
         booking.status = BookingStatus.CONFIRMED;
+        seats.forEach(seat -> booking.seats.add(BookingSeat.copyOf(booking, seat)));
         return booking;
+    }
+
+    // 이 행을 비관적 락으로 잠근 트랜잭션에서만 부른다. 취소 시각은 DB 시각이다
+    public void confirmedToCancelled(LocalDateTime dbNow) {
+        if (status != BookingStatus.CONFIRMED) {
+            throw new IllegalStateException("예매 " + id + "는 " + status + "라 취소할 수 없다");
+        }
+        status = BookingStatus.CANCELLED;
+        cancelledAt = dbNow;
     }
 }

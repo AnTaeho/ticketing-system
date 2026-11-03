@@ -1,20 +1,27 @@
 package com.example.ticketing.hold.repository;
 
+import com.example.ticketing.hold.domain.ClaimedHold;
 import com.example.ticketing.hold.domain.LiveGateSeat;
 import com.example.ticketing.hold.domain.SeatHold;
 import com.example.ticketing.hold.dto.ActiveHoldResult;
-import java.time.LocalDateTime;
+import jakarta.persistence.LockModeType;
+import jakarta.persistence.QueryHint;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
+import org.springframework.data.domain.Limit;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.jpa.repository.QueryHints;
 import org.springframework.data.repository.query.Param;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 
 public interface SeatHoldRepository extends JpaRepository<SeatHold, Long> {
 
-    // 조건부 UPDATE는 모두 flush·clear한다. 같은 트랜잭션에서 뒤이어 읽는 엔티티가 바뀌기 전 값으로 남지 않게
+    // bulk UPDATE는 모두 flush·clear한다. 같은 트랜잭션에서 뒤이어 읽는 엔티티가 바뀌기 전 값으로 남지 않게
 
     Optional<SeatHold> findByIdAndUserId(Long id, Long userId);
 
@@ -52,54 +59,29 @@ public interface SeatHoldRepository extends JpaRepository<SeatHold, Long> {
     List<String> findLiveUserHoldTokens(@Param("performanceId") long performanceId,
                                         @Param("tokens") Collection<String> tokens);
 
-    @Query(value = "SELECT * FROM seat_hold WHERE hold_id = :id AND user_id = :userId FOR UPDATE", nativeQuery = true)
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select h from SeatHold h where h.id = :id and h.userId = :userId")
     Optional<SeatHold> lockByIdAndUserId(@Param("id") long id, @Param("userId") long userId);
 
-    @Query(value = "SELECT * FROM seat_hold WHERE hold_id = :id FOR UPDATE", nativeQuery = true)
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select h from SeatHold h where h.id = :id")
     Optional<SeatHold> lockById(@Param("id") long id);
 
-    @Modifying(clearAutomatically = true, flushAutomatically = true)
-    @Query(value = """
-            UPDATE seat_hold SET status = 'RELEASED', updated_at = NOW(6)
-             WHERE hold_id = :id AND status = 'HELD'""", nativeQuery = true)
-    int heldToReleased(@Param("id") long id);
+    // 잠금 시간 -2는 Hibernate에서 FOR UPDATE SKIP LOCKED다. 트랜잭션 밖에서는 락이 바로 풀려 서버끼리 같은 행을 집으므로 상태 변경과 같은 트랜잭션에서만 부른다
+    @Transactional(propagation = Propagation.MANDATORY)
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @QueryHints(@QueryHint(name = "jakarta.persistence.lock.timeout", value = "-2"))
+    @Query("""
+            select new com.example.ticketing.hold.domain.ClaimedHold(h.id, h.userId, h.performanceId, h.holdToken)
+              from SeatHold h
+             where h.status = HELD and h.expiresAt < current_timestamp
+             order by h.id""")
+    List<ClaimedHold> claimExpired(Limit limit);
 
+    // claimExpired로 잠근 hold를 한 문장으로 만료한다. 결제 중(PAYING)은 대상이 아니다. 결제 대사가 결론을 낸다
     @Modifying(clearAutomatically = true, flushAutomatically = true)
-    @Query(value = """
-            UPDATE seat_hold SET status = 'PAYING', pay_deadline = :payDeadline, updated_at = NOW(6)
-             WHERE hold_id = :id AND status = 'HELD' AND expires_at > NOW(6)""", nativeQuery = true)
-    int heldToPaying(@Param("id") long id, @Param("payDeadline") LocalDateTime payDeadline);
-
-    @Modifying(clearAutomatically = true, flushAutomatically = true)
-    @Query(value = """
-            UPDATE seat_hold SET status = 'CONFIRMED', updated_at = NOW(6)
-             WHERE hold_id = :id AND status = 'PAYING'""", nativeQuery = true)
-    int payingToConfirmed(@Param("id") long id);
-
-    @Modifying(clearAutomatically = true, flushAutomatically = true)
-    @Query(value = """
-            UPDATE seat_hold SET status = 'REFUNDING', updated_at = NOW(6)
-             WHERE hold_id = :id AND status = 'PAYING'""", nativeQuery = true)
-    int payingToRefunding(@Param("id") long id);
-
-    // PG 거절·망취소 확정 때만 부른다. 사용자 취소(HELD → RELEASED)는 heldToReleased
-    @Modifying(clearAutomatically = true, flushAutomatically = true)
-    @Query(value = """
-            UPDATE seat_hold SET status = 'RELEASED', updated_at = NOW(6)
-             WHERE hold_id = :id AND status = 'PAYING'""", nativeQuery = true)
-    int payingToReleased(@Param("id") long id);
-
-    // 좌석 상실로 환불하던 hold를 환불 확정 뒤 닫는다. 예매 취소의 환불은 hold가 CONFIRMED라 대상이 아니다
-    @Modifying(clearAutomatically = true, flushAutomatically = true)
-    @Query(value = """
-            UPDATE seat_hold SET status = 'RELEASED', updated_at = NOW(6)
-             WHERE hold_id = :id AND status = 'REFUNDING'""", nativeQuery = true)
-    int refundingToReleased(@Param("id") long id);
-
-    // 결제 중(PAYING)은 대상이 아니다. 결제 대사가 결론을 낸다
-    @Modifying(clearAutomatically = true, flushAutomatically = true)
-    @Query(value = """
-            UPDATE seat_hold SET status = 'EXPIRED', updated_at = NOW(6)
-             WHERE hold_id IN (:ids) AND status = 'HELD'""", nativeQuery = true)
+    @Query("""
+            update SeatHold h set h.status = EXPIRED, h.updatedAt = current_timestamp
+             where h.id in :ids and h.status = HELD""")
     int heldToExpired(@Param("ids") Collection<Long> ids);
 }

@@ -5,27 +5,28 @@ import com.example.ticketing.seat.domain.PerformanceInfo;
 import com.example.ticketing.seat.domain.Seat;
 import com.example.ticketing.seat.domain.SeatInfo;
 import com.example.ticketing.seat.domain.SeatMapSeat;
+import jakarta.persistence.LockModeType;
 import java.time.LocalDateTime;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 public interface SeatRepository extends JpaRepository<Seat, Long> {
 
-    // 조건부 UPDATE는 모두 flush·clear한다. 같은 트랜잭션에서 뒤이어 읽는 엔티티가 바뀌기 전 값으로 남지 않게
+    // 좌석을 잠그지 않고 다투는 전이는 조건부 UPDATE의 영향 행 수로 판정한다. 모두 flush·clear해 1차 캐시가 바뀌기 전 값으로 남지 않게 한다
 
     // 빈자리이거나 선점 기한이 지난(EXPIRED) 좌석만 잡는다. 영향 행 수가 고른 좌석 수와 다르면 호출자가 롤백한다
     @Modifying(clearAutomatically = true, flushAutomatically = true)
-    @Query(value = """
-            UPDATE seat
-               SET status = 'HELD', hold_id = :holdId, held_until = :heldUntil
-             WHERE performance_id = :performanceId
-               AND seat_id IN (:seatIds)
-               AND (status = 'AVAILABLE' OR (status = 'HELD' AND held_until < NOW(6)))""", nativeQuery = true)
+    @Query("""
+            update Seat s set s.status = HELD, s.holdId = :holdId, s.heldUntil = :heldUntil
+             where s.performanceId = :performanceId
+               and s.id in :seatIds
+               and (s.status = AVAILABLE or (s.status = HELD and s.heldUntil < current_timestamp))""")
     int availableOrExpiredToHeld(@Param("performanceId") long performanceId,
                                  @Param("seatIds") Collection<Long> seatIds,
                                  @Param("holdId") long holdId,
@@ -72,44 +73,30 @@ public interface SeatRepository extends JpaRepository<Seat, Long> {
             + "where s.holdId in :holdIds and s.status = HELD order by s.id")
     List<HeldSeat> findHeldSeats(@Param("holdIds") Collection<Long> holdIds);
 
-    @Query(value = "SELECT seat_id FROM seat WHERE hold_id = :holdId AND status = 'HELD' ORDER BY seat_id FOR UPDATE",
-            nativeQuery = true)
-    List<Long> lockHeldSeatIds(@Param("holdId") long holdId);
+    // 락 순서대로 id 오름차순으로 잠근다
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select s from Seat s where s.holdId = :holdId and s.status = HELD order by s.id")
+    List<Seat> lockHeldSeats(@Param("holdId") long holdId);
 
     // 결제 중 좌석을 남이 가져가지 못하게 held_until을 결제 마감까지 늘린다
     @Modifying(clearAutomatically = true, flushAutomatically = true)
-    @Query(value = """
-            UPDATE seat SET held_until = :heldUntil
-             WHERE hold_id = :holdId AND status = 'HELD'""", nativeQuery = true)
+    @Query("update Seat s set s.heldUntil = :heldUntil where s.holdId = :holdId and s.status = HELD")
     int extendHeldUntil(@Param("holdId") long holdId, @Param("heldUntil") LocalDateTime heldUntil);
-
-    @Modifying(clearAutomatically = true, flushAutomatically = true)
-    @Query(value = """
-            UPDATE seat SET status = 'SOLD', held_until = NULL
-             WHERE hold_id = :holdId AND status = 'HELD'""", nativeQuery = true)
-    int heldToSold(@Param("holdId") long holdId);
 
     // hold_id 조건 덕분에 남이 이미 가져간 좌석은 건드리지 않는다
     @Modifying(clearAutomatically = true, flushAutomatically = true)
-    @Query(value = """
-            UPDATE seat SET status = 'AVAILABLE', hold_id = NULL, held_until = NULL
-             WHERE hold_id = :holdId AND status = 'HELD'""", nativeQuery = true)
+    @Query("""
+            update Seat s set s.status = AVAILABLE, s.holdId = null, s.heldUntil = null
+             where s.holdId = :holdId and s.status = HELD""")
     int heldToAvailable(@Param("holdId") long holdId);
 
     @Modifying(clearAutomatically = true, flushAutomatically = true)
-    @Query(value = """
-            UPDATE seat SET status = 'AVAILABLE', hold_id = NULL, held_until = NULL
-             WHERE hold_id IN (:holdIds) AND status = 'HELD'""", nativeQuery = true)
+    @Query("""
+            update Seat s set s.status = AVAILABLE, s.holdId = null, s.heldUntil = null
+             where s.holdId in :holdIds and s.status = HELD""")
     int heldToAvailableOfHolds(@Param("holdIds") Collection<Long> holdIds);
 
-    @Query(value = "SELECT seat_id FROM seat WHERE hold_id = :holdId AND status = 'SOLD' ORDER BY seat_id FOR UPDATE",
-            nativeQuery = true)
-    List<Long> lockSoldSeatIds(@Param("holdId") long holdId);
-
-    // 예매 취소 때만 부른다. hold_id를 비워 다른 사용자가 다시 잡을 수 있게 한다
-    @Modifying(clearAutomatically = true, flushAutomatically = true)
-    @Query(value = """
-            UPDATE seat SET status = 'AVAILABLE', hold_id = NULL, held_until = NULL
-             WHERE hold_id = :holdId AND status = 'SOLD'""", nativeQuery = true)
-    int soldToAvailable(@Param("holdId") long holdId);
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select s from Seat s where s.holdId = :holdId and s.status = SOLD order by s.id")
+    List<Seat> lockSoldSeats(@Param("holdId") long holdId);
 }

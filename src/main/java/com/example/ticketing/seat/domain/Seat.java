@@ -17,7 +17,7 @@ import lombok.NoArgsConstructor;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
-// 상태 전이는 SeatRepository의 조건부 UPDATE로만 한다
+// 상태 전이 메서드는 이 좌석 행을 비관적 락으로 잠근 트랜잭션에서만 부른다. 잠그지 않고 다투는 전이(잡기, 풀기)는 SeatRepository의 조건부 UPDATE다
 @Entity
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
@@ -66,4 +66,33 @@ public class Seat {
 
     @Column(name = "held_until")
     private LocalDateTime heldUntil;
+
+    public SeatInfo info() {
+        return new SeatInfo(id, section, rowNo, seatNo, grade, price);
+    }
+
+    public void heldToSold() {
+        moveTo(SeatStatus.HELD, SeatStatus.SOLD);
+        heldUntil = null;
+    }
+
+    public void heldToAvailable() {
+        moveTo(SeatStatus.HELD, SeatStatus.AVAILABLE);
+        holdId = null;
+        heldUntil = null;
+    }
+
+    // 예매 취소 때만 부른다. hold_id를 비워 다른 사용자가 다시 잡을 수 있게 한다
+    public void soldToAvailable() {
+        moveTo(SeatStatus.SOLD, SeatStatus.AVAILABLE);
+        holdId = null;
+        heldUntil = null;
+    }
+
+    private void moveTo(SeatStatus from, SeatStatus to) {
+        if (status != from) {
+            throw new IllegalStateException("좌석 " + id + "는 " + status + "라 " + from + " → " + to + "로 바꿀 수 없다");
+        }
+        status = to;
+    }
 }

@@ -1,8 +1,8 @@
 package com.example.ticketing.hold.service;
 
+import com.example.ticketing.common.jdbc.RowCounts;
 import com.example.ticketing.hold.domain.ClaimedHold;
 import com.example.ticketing.hold.dto.HoldExpiry;
-import com.example.ticketing.hold.repository.SeatHoldJdbcRepository;
 import com.example.ticketing.hold.repository.SeatHoldRepository;
 import com.example.ticketing.seat.repository.SeatRepository;
 import com.example.ticketing.seat.domain.HeldSeat;
@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Limit;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
@@ -19,13 +20,12 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 public class HoldExpiryTransaction {
 
-    private final SeatHoldJdbcRepository seatHoldJdbcRepository;
     private final SeatHoldRepository seatHoldRepository;
     private final SeatRepository seatRepository;
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public List<HoldExpiry> claimAndExpire(int batch) {
-        List<ClaimedHold> claimed = seatHoldJdbcRepository.claimExpired(batch);
+        List<ClaimedHold> claimed = seatHoldRepository.claimExpired(Limit.of(batch));
         if (claimed.isEmpty()) {
             return List.of();
         }
@@ -34,7 +34,8 @@ public class HoldExpiryTransaction {
                 .collect(Collectors.groupingBy(HeldSeat::holdId,
                         Collectors.mapping(HeldSeat::seatId, Collectors.toList())));
 
-        seatHoldRepository.heldToExpired(ids);
+        RowCounts.requireExactly(seatHoldRepository.heldToExpired(ids), ids.size(), "hold EXPIRED");
+        // 좌석은 잠그지 않아 기한이 지난 좌석을 남이 이미 잡았을 수 있으므로 hold_id 조건부 UPDATE로 푼다
         seatRepository.heldToAvailableOfHolds(ids);
 
         return claimed.stream()
