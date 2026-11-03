@@ -18,7 +18,6 @@ public class DemoLoginService {
     static final int MAX_NICKNAME_LENGTH = 20;
 
     private final AppUserRepository appUserRepository;
-    private final AppUserReader appUserReader;
 
     public DemoLoginResult login(String rawNickname) {
         String nickname = normalize(rawNickname);
@@ -27,12 +26,12 @@ public class DemoLoginService {
         return DemoLoginResult.from(user);
     }
 
-    // 같은 닉네임을 동시에 넣다 유니크 위반이 나면 먼저 커밋된 행을 새 트랜잭션에서 읽는다
+    // 같은 닉네임을 동시에 넣다 유니크 위반이 나면 먼저 커밋된 행을 다시 읽는다. 바깥 트랜잭션이 없어 새로 읽으면 보인다
     private AppUser insertOrFind(String nickname) {
         try {
             return appUserRepository.saveAndFlush(AppUser.create(nickname));
         } catch (DataIntegrityViolationException e) {
-            return appUserReader.findCommittedByNickname(nickname).orElseThrow(() -> e);
+            return appUserRepository.findByNickname(nickname).orElseThrow(() -> e);
         }
     }
 
