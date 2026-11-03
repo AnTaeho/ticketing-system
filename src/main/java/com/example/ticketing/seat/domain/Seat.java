@@ -67,6 +67,10 @@ public class Seat {
     @Column(name = "held_until")
     private LocalDateTime heldUntil;
 
+    public SeatInfo info() {
+        return new SeatInfo(id, section, rowNo, seatNo, grade, price);
+    }
+
     public void heldToSold() {
         moveTo(SeatStatus.HELD, SeatStatus.SOLD);
         heldUntil = null;

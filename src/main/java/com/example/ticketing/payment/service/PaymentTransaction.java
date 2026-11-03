@@ -123,7 +123,8 @@ public class PaymentTransaction {
         hold.payingToConfirmed();
         locked.payment().openToApproved(pgTxId);
         IssuedBooking booking = bookingIssuer.issue(new IssueBookingCommand(hold.getUserId(),
-                hold.getPerformanceId(), holdId, paymentId, hold.getTotalAmount(), seatIds.size(), now));
+                hold.getPerformanceId(), holdId, paymentId, hold.getTotalAmount(),
+                seats.stream().map(Seat::info).toList(), now));
         // 서버와 DB의 시간대가 달라도 맞도록 DB 시각 기준 남은 시간으로 바꾼다
         LocalDateTime gateCloseAt = seatCatalog.performance(hold.getPerformanceId()).gateCloseAt();
         Instant gateCloseInstant = clock.instant().plus(Duration.between(now, gateCloseAt));
