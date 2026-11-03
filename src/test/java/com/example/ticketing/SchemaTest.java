@@ -8,7 +8,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
-// 마이그레이션이 만든 실제 DDL을 읽어 키·컬럼 타입이 설계대로인지 본다
+// 실제 DDL을 읽어 키·컬럼 타입이 설계대로인지 본다. 행동 테스트가 지키는 유니크 제약은 여기서 다시 보지 않는다
 @IntegrationTest
 class SchemaTest {
 
@@ -16,13 +16,12 @@ class SchemaTest {
     private TestDb db;
 
     @Test
-    @DisplayName("사용자 테이블(app_user)은 닉네임이 겹치지 않게 막는다")
+    @DisplayName("사용자 테이블(app_user)은 닉네임과 만든 시각을 담는다")
     void appUser() {
         String ddl = db.showCreateTable("app_user");
 
         assertThat(ddl)
                 .contains("PRIMARY KEY (`user_id`)")
-                .contains("UNIQUE KEY `uk_app_user_nickname` (`nickname`)")
                 .contains("`nickname` varchar(30) NOT NULL")
                 .contains("`created_at` datetime(6) NOT NULL");
     }
@@ -54,13 +53,12 @@ class SchemaTest {
     }
 
     @Test
-    @DisplayName("좌석 테이블(seat)은 같은 위치의 좌석이 둘 생기지 않게 막는다")
+    @DisplayName("좌석 테이블(seat)은 회차별 상태·선점별 조회 인덱스를 가진다")
     void seat() {
         String ddl = db.showCreateTable("seat");
 
         assertThat(ddl)
                 .contains("PRIMARY KEY (`seat_id`)")
-                .contains("UNIQUE KEY `uk_seat_position` (`performance_id`,`section`,`row_no`,`seat_no`)")
                 .contains("KEY `idx_seat_perf_status` (`performance_id`,`status`)")
                 .contains("KEY `idx_seat_hold` (`hold_id`)")
                 .contains("`grade` varchar(10) NOT NULL")
@@ -87,14 +85,12 @@ class SchemaTest {
     }
 
     @Test
-    @DisplayName("결제 테이블(booking_payment)은 선점 하나에 결제 하나만 허용한다")
+    @DisplayName("결제 테이블(booking_payment)은 주문번호가 겹치지 않게 막고 대사 조회 인덱스를 가진다")
     void bookingPayment() {
         String ddl = db.showCreateTable("booking_payment");
 
         assertThat(ddl)
                 .contains("PRIMARY KEY (`payment_id`)")
-                .contains("UNIQUE KEY `uk_payment_hold` (`hold_id`)")
-                .contains("UNIQUE KEY `uk_payment_idem` (`user_id`,`idempotency_key`)")
                 .contains("UNIQUE KEY `uk_payment_order` (`order_id`)")
                 .contains("KEY `idx_payment_check` (`status`,`next_check_at`)")
                 .contains("`idempotency_key` varchar(64) NOT NULL")
@@ -160,13 +156,12 @@ class SchemaTest {
     }
 
     @Test
-    @DisplayName("알림 테이블(notification)은 예매 하나에 알림 하나만 허용한다")
+    @DisplayName("알림 테이블(notification)은 사용자별 조회 인덱스를 가진다")
     void notification() {
         String ddl = db.showCreateTable("notification");
 
         assertThat(ddl)
                 .contains("PRIMARY KEY (`notification_id`)")
-                .contains("UNIQUE KEY `uk_notification_booking` (`booking_id`)")
                 .contains("KEY `idx_notification_user` (`user_id`,`created_at`)")
                 .contains("`message` varchar(300) NOT NULL")
                 .contains("`created_at` datetime(6) NOT NULL");

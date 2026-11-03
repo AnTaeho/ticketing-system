@@ -67,7 +67,7 @@ class SeatGateReflectorTest {
     }
 
     @Test
-    @DisplayName("게이트가 꺼져 있으면 어떤 반영도 Redis를 부르지 않는다")
+    @DisplayName("게이트가 꺼져 있으면 놓기·예매 취소·결제 연장·확정·만료 반영 모두 Redis를 부르지 않는다")
     void gateOffSkipsRedis() {
         SeatGateRedisStore store = mock(SeatGateRedisStore.class);
         SeatGateReflector reflector = reflector(store, false);

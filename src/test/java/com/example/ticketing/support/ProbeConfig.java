@@ -29,20 +29,20 @@ public class ProbeConfig {
         }
 
         @GetMapping("/seat-taken")
-        void seatTaken(@CurrentUser Long userId) {
+        void seatTaken() {
             throw new ApiException(ErrorCode.SEAT_TAKEN, Map.of("seatIds", List.of(7L, 8L)));
         }
 
         @PostMapping("/required-header")
-        void requiredHeader(@CurrentUser Long userId, @RequestHeader("X-Probe") String probe) {
+        void requiredHeader(@RequestHeader("X-Probe") String probe) {
         }
 
         @PostMapping("/validate")
-        void validate(@CurrentUser Long userId, @Valid @RequestBody ProbeRequest request) {
+        void validate(@Valid @RequestBody ProbeRequest request) {
         }
 
         @GetMapping("/boom")
-        void boom(@CurrentUser Long userId) {
+        void boom() {
             throw new IllegalStateException("boom");
         }
     }

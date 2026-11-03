@@ -1,5 +1,6 @@
 package com.example.ticketing.seat.service;
 
+import static com.example.ticketing.support.ApiErrors.catchApiException;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -120,16 +121,16 @@ class SeatCatalogTest {
         List<Long> ids = db.seatIdsInLayoutOrder(pid);
         Long otherSeat = db.seatIdsInLayoutOrder(otherPid).get(0);
 
-        assertInvalidSelection(pid, List.of());
-        assertInvalidSelection(pid, null);
-        assertInvalidSelection(pid, ids.subList(0, properties.hold().maxSeats() + 1));
-        assertInvalidSelection(pid, List.of(ids.get(0), ids.get(0)));
-        assertInvalidSelection(pid, List.of(ids.get(0), otherSeat));
-        assertInvalidSelection(pid, List.of(ids.get(0), Long.MAX_VALUE));
+        assertInvalidSelection(pid, List.of(), "COUNT");
+        assertInvalidSelection(pid, null, "COUNT");
+        assertInvalidSelection(pid, ids.subList(0, properties.hold().maxSeats() + 1), "COUNT");
+        assertInvalidSelection(pid, List.of(ids.get(0), ids.get(0)), "DUPLICATE");
+        assertInvalidSelection(pid, List.of(ids.get(0), otherSeat), "UNKNOWN_SEAT");
+        assertInvalidSelection(pid, List.of(ids.get(0), Long.MAX_VALUE), "UNKNOWN_SEAT");
         List<Long> withNull = new ArrayList<>();
         withNull.add(ids.get(0));
         withNull.add(null);
-        assertInvalidSelection(pid, withNull);
+        assertInvalidSelection(pid, withNull, "UNKNOWN_SEAT");
     }
 
     @Test
@@ -181,10 +182,9 @@ class SeatCatalogTest {
                 .isEqualTo(ErrorCode.NOT_OPEN);
     }
 
-    private void assertInvalidSelection(long pid, Collection<Long> seatIds) {
-        assertThatThrownBy(() -> seatCatalog.validateSeats(pid, seatIds))
-                .isInstanceOf(ApiException.class)
-                .extracting(e -> ((ApiException) e).getCode())
-                .isEqualTo(ErrorCode.INVALID_SEAT_SELECTION);
+    private void assertInvalidSelection(long pid, Collection<Long> seatIds, String reason) {
+        ApiException e = catchApiException(() -> seatCatalog.validateSeats(pid, seatIds));
+        assertThat(e.getCode()).isEqualTo(ErrorCode.INVALID_SEAT_SELECTION);
+        assertThat(e.getDetail()).containsEntry("reason", reason);
     }
 }
