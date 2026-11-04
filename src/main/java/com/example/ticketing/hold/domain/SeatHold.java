@@ -45,8 +45,8 @@ public class SeatHold {
     @Column(name = "user_id", nullable = false)
     private Long userId;
 
-    // MySQL 방언은 길이 있는 CHAR를 varchar로 만들어 설계 DDL대로 char(36)을 직접 적는다
-    @Column(name = "hold_token", nullable = false, columnDefinition = "char(36)")
+    // MySQL 방언은 길이 있는 CHAR를 varchar로 만들어 char(36)을 직접 적는다. length가 없으면 update가 기본 길이 255와 비교해 매번 ALTER한다
+    @Column(name = "hold_token", nullable = false, length = 36, columnDefinition = "char(36)")
     private String holdToken;
 
     @Enumerated(EnumType.STRING)
