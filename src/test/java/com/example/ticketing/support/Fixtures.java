@@ -18,8 +18,8 @@ import com.example.ticketing.queue.service.QueueService;
 import com.example.ticketing.show.dto.CreatePerformanceCommand;
 import com.example.ticketing.show.dto.CreateShowCommand;
 import com.example.ticketing.show.service.ShowAdminService;
-import com.example.ticketing.user.domain.AppUser;
-import com.example.ticketing.user.repository.AppUserRepository;
+import com.example.ticketing.user.domain.User;
+import com.example.ticketing.user.repository.UserRepository;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
@@ -36,7 +36,7 @@ import org.springframework.boot.test.context.TestComponent;
 public class Fixtures {
 
     private final ShowAdminService showAdminService;
-    private final AppUserRepository appUserRepository;
+    private final UserRepository userRepository;
     private final DbClock dbClock;
     private final QueueService queueService;
     private final SeatHoldService seatHoldService;
@@ -84,7 +84,7 @@ public class Fixtures {
     }
 
     public long newUser() {
-        return appUserRepository.save(AppUser.create("fx-" + shortId())).getId();
+        return userRepository.save(User.create("fx-" + shortId())).getId();
     }
 
     // 운영과 같은 진입 경로로 처리열 토큰을 받는다. 바로 입장하지 못하면 테스트가 실패한다

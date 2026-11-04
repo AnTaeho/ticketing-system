@@ -40,9 +40,9 @@ class DemoLoginServiceTest {
         assertThat(results.values()).hasSize(THREAD_COUNT);
         Set<Long> userIds = Set.copyOf(results.values());
         assertThat(userIds).hasSize(1);
-        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM app_user WHERE nickname = ?",
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM users WHERE nickname = ?",
                 Long.class, nickname)).isEqualTo(1L);
-        Long rowId = jdbcTemplate.queryForObject("SELECT user_id FROM app_user WHERE nickname = ?", Long.class, nickname);
+        Long rowId = jdbcTemplate.queryForObject("SELECT user_id FROM users WHERE nickname = ?", Long.class, nickname);
         assertThat(userIds).containsExactly(rowId);
     }
 

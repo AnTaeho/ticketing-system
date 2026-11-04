@@ -2,9 +2,9 @@ package com.example.ticketing.user.service;
 
 import com.example.ticketing.common.error.ApiException;
 import com.example.ticketing.common.error.ErrorCode;
-import com.example.ticketing.user.domain.AppUser;
+import com.example.ticketing.user.domain.User;
 import com.example.ticketing.user.dto.DemoLoginResult;
-import com.example.ticketing.user.repository.AppUserRepository;
+import com.example.ticketing.user.repository.UserRepository;
 import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -17,21 +17,21 @@ public class DemoLoginService {
     static final int MIN_NICKNAME_LENGTH = 2;
     static final int MAX_NICKNAME_LENGTH = 20;
 
-    private final AppUserRepository appUserRepository;
+    private final UserRepository userRepository;
 
     public DemoLoginResult login(String rawNickname) {
         String nickname = normalize(rawNickname);
-        AppUser user = appUserRepository.findByNickname(nickname)
+        User user = userRepository.findByNickname(nickname)
                 .orElseGet(() -> insertOrFind(nickname));
         return DemoLoginResult.from(user);
     }
 
     // 같은 닉네임을 동시에 넣다 유니크 위반이 나면 먼저 커밋된 행을 다시 읽는다. 바깥 트랜잭션이 없어 새로 읽으면 보인다
-    private AppUser insertOrFind(String nickname) {
+    private User insertOrFind(String nickname) {
         try {
-            return appUserRepository.saveAndFlush(AppUser.create(nickname));
+            return userRepository.saveAndFlush(User.create(nickname));
         } catch (DataIntegrityViolationException e) {
-            return appUserRepository.findByNickname(nickname).orElseThrow(() -> e);
+            return userRepository.findByNickname(nickname).orElseThrow(() -> e);
         }
     }
 

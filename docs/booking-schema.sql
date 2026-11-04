@@ -1,12 +1,12 @@
 -- V7 지정석 예매 스키마 (MySQL 9.3, Hibernate 7 ddl-auto로 생성된 테이블을 SHOW CREATE TABLE로 뽑음)
 -- prod 프로필은 ddl-auto: validate라 이 DDL로 테이블을 먼저 만든다.
 
-CREATE TABLE `app_user` (
+CREATE TABLE `users` (
   `user_id` bigint NOT NULL AUTO_INCREMENT,
   `created_at` datetime(6) NOT NULL,
   `nickname` varchar(30) NOT NULL,
   PRIMARY KEY (`user_id`),
-  UNIQUE KEY `uk_app_user_nickname` (`nickname`)
+  UNIQUE KEY `uk_users_nickname` (`nickname`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE `show_info` (

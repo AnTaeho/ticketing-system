@@ -12,7 +12,7 @@ import com.example.ticketing.hold.repository.SeatHoldRepository;
 import com.example.ticketing.seat.dto.SeatSelection;
 import com.example.ticketing.seat.repository.SeatRepository;
 import com.example.ticketing.seat.service.SeatCatalog;
-import com.example.ticketing.user.repository.AppUserRepository;
+import com.example.ticketing.user.repository.UserRepository;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -21,21 +21,21 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
-// 락 순서: app_user → seat_hold → seat(id 오름차순). 이 안에서는 Redis를 부르지 않는다
+// 락 순서: users → seat_hold → seat(id 오름차순). 이 안에서는 Redis를 부르지 않는다
 @Component
 public class SeatHoldTransaction {
 
-    private final AppUserRepository appUserRepository;
+    private final UserRepository userRepository;
     private final SeatHoldRepository seatHoldRepository;
     private final SeatRepository seatRepository;
     private final SeatCatalog seatCatalog;
     private final DbClock dbClock;
     private final Duration holdTtl;
 
-    public SeatHoldTransaction(AppUserRepository appUserRepository, SeatHoldRepository seatHoldRepository,
+    public SeatHoldTransaction(UserRepository userRepository, SeatHoldRepository seatHoldRepository,
                                SeatRepository seatRepository, SeatCatalog seatCatalog, DbClock dbClock,
                                TicketingProperties properties) {
-        this.appUserRepository = appUserRepository;
+        this.userRepository = userRepository;
         this.seatHoldRepository = seatHoldRepository;
         this.seatRepository = seatRepository;
         this.seatCatalog = seatCatalog;
@@ -46,7 +46,7 @@ public class SeatHoldTransaction {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public HoldPlacement persistHold(long userId, SeatSelection selection, String holdToken) {
         long performanceId = selection.performanceId();
-        if (appUserRepository.lockById(userId).isEmpty()) {
+        if (userRepository.lockById(userId).isEmpty()) {
             throw new ApiException(ErrorCode.LOGIN_REQUIRED);
         }
         if (seatHoldRepository.countActive(userId, performanceId) > 0) {

@@ -19,9 +19,9 @@ import org.springframework.data.jpa.domain.support.AuditingEntityListener;
 @Getter
 @EntityListeners(AuditingEntityListener.class)
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
-@Table(name = "app_user",
-        uniqueConstraints = @UniqueConstraint(name = "uk_app_user_nickname", columnNames = "nickname"))
-public class AppUser {
+@Table(name = "users",
+        uniqueConstraints = @UniqueConstraint(name = "uk_users_nickname", columnNames = "nickname"))
+public class User {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -35,8 +35,8 @@ public class AppUser {
     @Column(nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
-    public static AppUser create(String nickname) {
-        AppUser user = new AppUser();
+    public static User create(String nickname) {
+        User user = new User();
         user.nickname = nickname;
         return user;
     }

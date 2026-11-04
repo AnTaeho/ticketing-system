@@ -16,9 +16,9 @@ class SchemaTest {
     private TestDb db;
 
     @Test
-    @DisplayName("사용자 테이블(app_user)은 닉네임과 만든 시각을 담는다")
-    void appUser() {
-        String ddl = db.showCreateTable("app_user");
+    @DisplayName("사용자 테이블(users)은 닉네임과 만든 시각을 담는다")
+    void users() {
+        String ddl = db.showCreateTable("users");
 
         assertThat(ddl)
                 .contains("PRIMARY KEY (`user_id`)")

@@ -87,7 +87,7 @@ com.example.ticketing
 - 잠그지 않고 경합하는 전이(좌석 잡기, 결과 모름·대사가 겹치는 결제, 잠금 기한이 있는 Outbox 반영)와 잠근 여러 행을 한꺼번에 바꾸는 전이는 JPQL 조건부 UPDATE의 영향 행 수로 판정한다. 관리 중인 엔티티와 섞이면 `@Modifying(clearAutomatically = true, flushAutomatically = true)`를 단다.
 - 상태에 대한 판정(예: "결제가 아직 열려 있나")은 상태 enum에 둔다.
 - 영향 행 수는 그대로 비교한다(`updated == 1`). 기대와 다르면 업무 실패는 `ApiException`, 락 아래라 어긋날 수 없는 불변식 위반은 `RowCounts.requireExactly`의 `IllegalStateException`이다.
-- 상태를 바꾸는 트랜잭션은 `READ_COMMITTED`다. 락 순서는 부모 행(app_user → seat_hold/booking) → 좌석(id 오름차순)이다.
+- 상태를 바꾸는 트랜잭션은 `READ_COMMITTED`다. 락 순서는 부모 행(users → seat_hold/booking) → 좌석(id 오름차순)이다.
 - `SKIP LOCKED` 집기는 상태 변경과 같은 트랜잭션에서 한다.
 - 트랜잭션은 `*Transaction`의 선언형 `@Transactional`로만 연다. `TransactionTemplate`은 쓰지 않는다.
 
