@@ -156,13 +156,14 @@ class SchemaTest {
     }
 
     @Test
-    @DisplayName("알림 테이블(notification)은 사용자별 조회 인덱스를 가진다")
+    @DisplayName("알림 테이블(notification)은 예매 하나에 알림 하나만 둔다")
     void notification() {
         String ddl = db.showCreateTable("notification");
 
         assertThat(ddl)
                 .contains("PRIMARY KEY (`notification_id`)")
-                .contains("KEY `idx_notification_user` (`user_id`,`created_at`)")
+                .contains("UNIQUE KEY `uk_notification_booking` (`booking_id`)")
+                .doesNotContain("user_id")
                 .contains("`message` varchar(300) NOT NULL")
                 .contains("`created_at` datetime(6) NOT NULL");
     }

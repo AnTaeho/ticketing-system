@@ -141,10 +141,8 @@ CREATE TABLE `notification` (
   `booking_id` bigint NOT NULL,
   `created_at` datetime(6) NOT NULL,
   `message` varchar(300) NOT NULL,
-  `user_id` bigint NOT NULL,
   PRIMARY KEY (`notification_id`),
-  UNIQUE KEY `uk_notification_booking` (`booking_id`),
-  KEY `idx_notification_user` (`user_id`,`created_at`)
+  UNIQUE KEY `uk_notification_booking` (`booking_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE `fake_pg_transaction` (

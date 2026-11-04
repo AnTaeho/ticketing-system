@@ -12,7 +12,7 @@ class TicketIssuedMessageTest {
     @Test
     @DisplayName("좌석이 1석이면 알림에 「외 N석」 없이 그 좌석만 적는다")
     void singleSeatHasNoOthers() {
-        IssuedTicket ticket = new IssuedTicket(1L, "B20261101-000042", "테스트 공연",
+        IssuedTicket ticket = new IssuedTicket("B20261101-000042", "테스트 공연",
                 LocalDateTime.of(2026, 11, 2, 19, 30));
 
         String message = TicketIssuedMessage.of(ticket, List.of(new IssuedSeat("A", 1, 1)));

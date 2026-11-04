@@ -16,7 +16,7 @@ public interface NotificationRepository extends JpaRepository<Notification, Long
     // 예매·회차·공연·좌석 사본은 다른 기능의 테이블이라 읽기만 한다
     @Query("""
             select new com.example.ticketing.notification.domain.IssuedTicket(
-                   b.userId, b.bookingNumber, s.title, p.startsAt)
+                   b.bookingNumber, s.title, p.startsAt)
               from Booking b
               join Performance p on p.id = b.performanceId
               join Show s on s.id = p.showId

@@ -103,10 +103,8 @@ class OutboxDispatchSchedulerTest {
 
         assertThat(db.outboxTask("TICKET_ISSUED", c.bookingId())).containsEntry("status", "DONE")
                 .containsEntry("attempt", 0).containsEntry("locked_until", null);
-        Map<String, Object> notification = jdbcTemplate.queryForMap(
-                "SELECT user_id, message FROM notification WHERE booking_id = ?", c.bookingId());
-        String message = (String) notification.get("message");
-        assertThat(notification).containsEntry("user_id", c.userId());
+        String message = jdbcTemplate.queryForObject(
+                "SELECT message FROM notification WHERE booking_id = ?", String.class, c.bookingId());
         Map<String, Object> booking = jdbcTemplate.queryForMap("SELECT b.booking_number, s.title FROM booking b "
                 + "JOIN performance p ON p.performance_id = b.performance_id JOIN show_info s ON s.show_id = p.show_id "
                 + "WHERE b.booking_id = ?", c.bookingId());

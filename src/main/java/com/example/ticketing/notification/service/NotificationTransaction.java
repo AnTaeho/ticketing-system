@@ -23,7 +23,7 @@ public class NotificationTransaction {
         }
         IssuedTicket ticket = notificationRepository.findIssuedTicket(bookingId)
                 .orElseThrow(() -> new IllegalStateException("예매 " + bookingId + "가 없다"));
-        notificationRepository.save(Notification.ticketIssued(ticket.userId(), bookingId,
+        notificationRepository.save(Notification.ticketIssued(bookingId,
                 TicketIssuedMessage.of(ticket, notificationRepository.findIssuedSeats(bookingId))));
     }
 }

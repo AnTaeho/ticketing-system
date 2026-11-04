@@ -6,7 +6,6 @@ import jakarta.persistence.EntityListeners;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
-import jakarta.persistence.Index;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 import java.time.LocalDateTime;
@@ -22,8 +21,7 @@ import org.springframework.data.jpa.domain.support.AuditingEntityListener;
 @EntityListeners(AuditingEntityListener.class)
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 @Table(name = "notification",
-        uniqueConstraints = @UniqueConstraint(name = Notification.UK_BOOKING, columnNames = "booking_id"),
-        indexes = @Index(name = "idx_notification_user", columnList = "user_id, created_at"))
+        uniqueConstraints = @UniqueConstraint(name = Notification.UK_BOOKING, columnNames = "booking_id"))
 public class Notification {
 
     public static final String UK_BOOKING = "uk_notification_booking";
@@ -33,9 +31,6 @@ public class Notification {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     @Column(name = "notification_id")
     private Long id;
-
-    @Column(name = "user_id", nullable = false)
-    private Long userId;
 
     @Column(name = "booking_id", nullable = false)
     private Long bookingId;
@@ -47,9 +42,8 @@ public class Notification {
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
-    public static Notification ticketIssued(Long userId, Long bookingId, String message) {
+    public static Notification ticketIssued(Long bookingId, String message) {
         Notification notification = new Notification();
-        notification.userId = userId;
         notification.bookingId = bookingId;
         notification.message = message;
         return notification;
