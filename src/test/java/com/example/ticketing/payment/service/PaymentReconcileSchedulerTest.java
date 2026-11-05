@@ -1,19 +1,17 @@
 package com.example.ticketing.payment.service;
 
-import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 import com.example.ticketing.common.config.TicketingProperties;
 import com.example.ticketing.common.config.TicketingProperties.Gate;
 import com.example.ticketing.common.config.TicketingProperties.Hold;
 import com.example.ticketing.common.config.TicketingProperties.Payment;
-import com.example.ticketing.common.metrics.Metrics;
-import com.example.ticketing.common.metrics.Metrics.Tag;
 import com.example.ticketing.hold.domain.GateHold;
 import com.example.ticketing.hold.domain.HoldStatus;
 import com.example.ticketing.hold.repository.SeatGateRedisStore;
@@ -26,10 +24,8 @@ import com.example.ticketing.payment.dto.ClaimedPayment;
 import com.example.ticketing.payment.dto.PaymentOutcome;
 import com.example.ticketing.payment.dto.PaymentResult;
 import com.example.ticketing.payment.dto.PaymentSettlement;
-import com.example.ticketing.support.Counters;
 import com.example.ticketing.support.TestProperties;
 import com.example.ticketing.support.TestServices;
-import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Duration;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
@@ -46,8 +42,6 @@ class PaymentReconcileSchedulerTest {
     private PaymentTransaction paymentTransaction;
     private PgClient pgClient;
     private SeatGateRedisStore seatGateRedisStore;
-    private SimpleMeterRegistry meterRegistry;
-    private Counters counters;
 
     @BeforeEach
     void setUp() {
@@ -56,8 +50,6 @@ class PaymentReconcileSchedulerTest {
         paymentTransaction = mock(PaymentTransaction.class);
         pgClient = mock(PgClient.class);
         seatGateRedisStore = mock(SeatGateRedisStore.class);
-        meterRegistry = new SimpleMeterRegistry();
-        counters = new Counters(meterRegistry);
     }
 
     @Test
@@ -73,7 +65,6 @@ class PaymentReconcileSchedulerTest {
 
         verify(paymentTransaction).openToApproved(2, "tx2");
         verifyNoInteractions(seatGateRedisStore);
-        assertThat(counters.count(Metrics.PAYMENT_RECONCILE, Tag.RESULT, "confirmed")).isEqualTo(1);
     }
 
     @Test
@@ -89,12 +80,26 @@ class PaymentReconcileSchedulerTest {
         scheduler(false).run();
 
         verifyNoInteractions(seatGateRedisStore);
-        assertThat(counters.count(Metrics.PAYMENT_RECONCILE, Tag.RESULT, "confirmed")).isEqualTo(1);
-        assertThat(counters.count(Metrics.PAYMENT_RECONCILE, Tag.RESULT, "declined")).isEqualTo(1);
     }
 
     @Test
-    @DisplayName("다른 쪽이 먼저 결론을 내 좌석이 그대로면 Redis 반영도 집계도 하지 않는다")
+    @DisplayName("대사가 거절로 결론을 내면 그 선점의 좌석 게이트 키를 지우고 확정은 키를 건드리지 않는다")
+    void declinedReleasesGateKeys() {
+        when(paymentReader.findDue(BATCH))
+                .thenReturn(List.of(claimed(1, "o1", false), claimed(2, "o2", false)));
+        when(pgClient.query("o1")).thenReturn(PgResult.of(PgStatus.DECLINED, null));
+        when(pgClient.query("o2")).thenReturn(PgResult.of(PgStatus.APPROVED, "tx2"));
+        when(paymentTransaction.openToDeclined(1)).thenReturn(seatsChanged(1, PaymentOutcome.DECLINED));
+        when(paymentTransaction.openToApproved(2, "tx2")).thenReturn(seatsChanged(2, PaymentOutcome.CONFIRMED));
+
+        scheduler(true).run();
+
+        verify(seatGateRedisStore).release(new GateHold(7L, "token", List.of(101L)));
+        verifyNoMoreInteractions(seatGateRedisStore);
+    }
+
+    @Test
+    @DisplayName("다른 쪽이 먼저 결론을 내 좌석이 그대로면 Redis 반영도 하지 않는다")
     void notAppliedIsNotReflected() {
         when(paymentReader.findDue(BATCH)).thenReturn(List.of(claimed(1, "o1", false)));
         when(pgClient.query("o1")).thenReturn(PgResult.of(PgStatus.APPROVED, "tx1"));
@@ -103,7 +108,6 @@ class PaymentReconcileSchedulerTest {
         scheduler(true).run();
 
         verifyNoInteractions(seatGateRedisStore);
-        assertThat(counters.count(Metrics.PAYMENT_RECONCILE, Tag.RESULT, "confirmed")).isZero();
     }
 
     @Test
@@ -121,8 +125,6 @@ class PaymentReconcileSchedulerTest {
         verify(paymentTransaction).openToDeclined(1);
         verify(paymentTransaction, never()).openToCancelled(2);
         verify(paymentReconcileTransaction).reschedule(2, RECHECK, "PG 취소 UNKNOWN: connect refused");
-        assertThat(counters.count(Metrics.PAYMENT_RECONCILE, Tag.RESULT, "declined")).isEqualTo(1);
-        assertThat(counters.count(Metrics.PAYMENT_RECONCILE, Tag.RESULT, "query_failed")).isEqualTo(1);
     }
 
     private PaymentReconcileScheduler scheduler(boolean gateEnabled) {
@@ -134,7 +136,7 @@ class PaymentReconcileSchedulerTest {
                 .build();
         SeatGateReflector reflector = TestServices.gateReflector(seatGateRedisStore, properties);
         return TestServices.paymentReconcileScheduler(paymentReader, paymentReconcileTransaction, paymentTransaction, pgClient,
-                reflector, properties, meterRegistry);
+                reflector, properties);
     }
 
     private static ClaimedPayment claimed(long paymentId, String orderId, boolean cancelDue) {

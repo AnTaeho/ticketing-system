@@ -4,8 +4,6 @@ import static com.example.ticketing.support.ApiErrors.catchApiException;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.example.ticketing.common.error.ApiException;
-import com.example.ticketing.common.metrics.Metrics;
-import com.example.ticketing.common.metrics.Metrics.Tag;
 import com.example.ticketing.common.redis.RedisKeys;
 import com.example.ticketing.payment.client.PgResult;
 import com.example.ticketing.payment.client.PgStatus;
@@ -14,7 +12,6 @@ import com.example.ticketing.payment.dto.PayCommand;
 import com.example.ticketing.payment.dto.PaymentStart.Started;
 import com.example.ticketing.support.Concurrently;
 import com.example.ticketing.support.Concurrently.Results;
-import com.example.ticketing.support.Counters;
 import com.example.ticketing.support.Fixtures;
 import com.example.ticketing.support.Fixtures.Held;
 import com.example.ticketing.support.IntegrationTest;
@@ -65,8 +62,6 @@ class PaymentReconcileTest {
     private TestRedis testRedis;
     @Autowired
     private TestServices services;
-    @Autowired
-    private Counters counters;
 
     private StringRedisTemplate redis;
     private PaymentReconcileScheduler scheduler;
@@ -91,7 +86,6 @@ class PaymentReconcileTest {
         Held held = fixtures.held(2);
         long paymentId = unsettled(kind, held);
         stubPg.queryWith(PgResult.of(PgStatus.APPROVED, "pg-late-1"));
-        double before = counters.count(Metrics.PAYMENT_RECONCILE, Tag.RESULT, "confirmed");
         db.makePaymentDue(paymentId);
 
         scheduler.run();
@@ -109,7 +103,6 @@ class PaymentReconcileTest {
             assertThat(redis.opsForValue().get(RedisKeys.seat(held.pid(), seatId))).isEqualTo(held.holdToken());
         }
         assertThat(stubPg.queryCalls()).isEqualTo(1);
-        assertThat(counters.count(Metrics.PAYMENT_RECONCILE, Tag.RESULT, "confirmed") - before).isEqualTo(1);
     }
 
     @Test
@@ -117,7 +110,6 @@ class PaymentReconcileTest {
     void requestedOrphanWaitsBeforeCancelWindow() {
         Held held = fixtures.held(1);
         long paymentId = orphan(held);
-        double before = counters.count(Metrics.PAYMENT_RECONCILE, Tag.RESULT, "waiting");
         db.makePaymentDue(paymentId);
 
         scheduler.run();
@@ -128,7 +120,6 @@ class PaymentReconcileTest {
         assertThat(db.seat(held.seatIds().get(0))).containsEntry("status", "HELD");
         assertThat(stubPg.queryCalls()).isEqualTo(1);
         assertThat(stubPg.cancelCalls()).isZero();
-        assertThat(counters.count(Metrics.PAYMENT_RECONCILE, Tag.RESULT, "waiting") - before).isEqualTo(1);
     }
 
     @ParameterizedTest(name = "{0}")
@@ -138,7 +129,6 @@ class PaymentReconcileTest {
         Held held = fixtures.held(2);
         long paymentId = unsettled(kind, held);
         assertThat(testRedis.keys(held.pid())).isNotEmpty();
-        double before = counters.count(Metrics.PAYMENT_RECONCILE, Tag.RESULT, "cancelled");
         db.agePayment(paymentId, 60);
         db.makePaymentDue(paymentId);
 
@@ -150,7 +140,6 @@ class PaymentReconcileTest {
                 .containsEntry("hold_id", null));
         assertThat(testRedis.keys(held.pid())).isEmpty();
         assertThat(stubPg.cancelCalls()).isEqualTo(1);
-        assertThat(counters.count(Metrics.PAYMENT_RECONCILE, Tag.RESULT, "cancelled") - before).isEqualTo(1);
     }
 
     @Test
@@ -182,7 +171,6 @@ class PaymentReconcileTest {
         Held held = fixtures.held(2);
         long paymentId = unknownPayment(held);
         stubPg.queryWith(PgResult.of(PgStatus.APPROVED, "pg-twice-1"));
-        double before = counters.count(Metrics.PAYMENT_RECONCILE, Tag.RESULT, "confirmed");
         db.makePaymentDue(paymentId);
         List<ClaimedPayment> claimed = paymentReader.findDue(20);
         assertThat(claimed).extracting(ClaimedPayment::paymentId).containsExactly(paymentId);
@@ -195,7 +183,6 @@ class PaymentReconcileTest {
         assertThat(db.bookingCountOfHold(held.holdId())).isEqualTo(1);
         assertThat(db.payment(paymentId)).containsEntry("status", "APPROVED");
         assertThat(db.holdStatus(held.holdId())).isEqualTo("CONFIRMED");
-        assertThat(counters.count(Metrics.PAYMENT_RECONCILE, Tag.RESULT, "confirmed") - before).isEqualTo(1);
     }
 
     @Test
@@ -204,7 +191,6 @@ class PaymentReconcileTest {
         Held held = fixtures.held(1);
         long paymentId = unknownPayment(held);
         stubPg.queryWith(PgResult.unknown("connect timeout 500ms"));
-        double before = counters.count(Metrics.PAYMENT_RECONCILE, Tag.RESULT, "query_failed");
         db.makePaymentDue(paymentId);
 
         scheduler.run();
@@ -214,7 +200,6 @@ class PaymentReconcileTest {
         assertThat((String) payment.get("last_error")).contains("connect timeout 500ms");
         assertThat(db.paymentRecheckMs(paymentId)).isBetween(10_000L - TOLERANCE_MS, 10_000L);
         assertThat(db.holdStatus(held.holdId())).isEqualTo("PAYING");
-        assertThat(counters.count(Metrics.PAYMENT_RECONCILE, Tag.RESULT, "query_failed") - before).isEqualTo(1);
     }
 
     @Test
@@ -238,7 +223,6 @@ class PaymentReconcileTest {
         Held held = fixtures.held(2);
         long paymentId = unknownPayment(held);
         stubPg.queryWith(PgResult.of(PgStatus.DECLINED, null));
-        double before = counters.count(Metrics.PAYMENT_RECONCILE, Tag.RESULT, "declined");
         db.makePaymentDue(paymentId);
 
         scheduler.run();
@@ -248,7 +232,6 @@ class PaymentReconcileTest {
         held.seatIds().forEach(seatId -> assertThat(db.seat(seatId)).containsEntry("status", "AVAILABLE")
                 .containsEntry("hold_id", null));
         assertThat(testRedis.keys(held.pid())).isEmpty();
-        assertThat(counters.count(Metrics.PAYMENT_RECONCILE, Tag.RESULT, "declined") - before).isEqualTo(1);
     }
 
     @Test

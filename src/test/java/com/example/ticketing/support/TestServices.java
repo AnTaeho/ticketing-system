@@ -21,7 +21,6 @@ import com.example.ticketing.payment.service.PaymentReconcileScheduler;
 import com.example.ticketing.payment.service.PaymentReconcileTransaction;
 import com.example.ticketing.payment.service.PaymentTransaction;
 import com.example.ticketing.seat.service.SeatCatalog;
-import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Clock;
 import org.springframework.boot.test.context.TestComponent;
 import org.springframework.context.ApplicationContext;
@@ -45,10 +44,6 @@ public class TestServices {
 
     private TicketingProperties contextProperties() {
         return bean(TicketingProperties.class);
-    }
-
-    private MeterRegistry meterRegistry() {
-        return bean(MeterRegistry.class);
     }
 
     // 컨텍스트 없는 테스트도 쓴다
@@ -83,15 +78,15 @@ public class TestServices {
     public static PaymentReconcileScheduler paymentReconcileScheduler(
             PaymentReader paymentReader, PaymentReconcileTransaction reconcileTransaction,
             PaymentTransaction paymentTransaction, PgClient pgClient,
-            SeatGateReflector reflector, TicketingProperties properties, MeterRegistry meterRegistry) {
+            SeatGateReflector reflector, TicketingProperties properties) {
         return new PaymentReconcileScheduler(paymentReader, reconcileTransaction, paymentTransaction, pgClient,
-                new PaymentGateReflector(reflector), properties, meterRegistry);
+                new PaymentGateReflector(reflector), properties);
     }
 
     // 컨텍스트의 PG 클라이언트(대역이 있으면 대역)로 만든다
     public PaymentReconcileScheduler paymentReconcileScheduler() {
         return paymentReconcileScheduler(bean(PaymentReader.class), bean(PaymentReconcileTransaction.class), bean(PaymentTransaction.class),
-                bean(PgClient.class), bean(SeatGateReflector.class), contextProperties(), meterRegistry());
+                bean(PgClient.class), bean(SeatGateReflector.class), contextProperties());
     }
 
     public HttpPgClient httpPgClient(TicketingProperties properties, Environment environment) {

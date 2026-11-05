@@ -1,19 +1,13 @@
 package com.example.ticketing.payment.service;
 
 import com.example.ticketing.common.config.TicketingProperties;
-import com.example.ticketing.common.metrics.Metrics;
-import com.example.ticketing.common.metrics.Metrics.ReconcileResult;
-import com.example.ticketing.common.metrics.Metrics.Tag;
 import com.example.ticketing.payment.client.PgClient;
 import com.example.ticketing.payment.client.PgResult;
 import com.example.ticketing.payment.dto.ClaimedPayment;
 import com.example.ticketing.payment.dto.PaymentResult;
 import com.example.ticketing.payment.dto.PaymentSettlement;
-import io.micrometer.core.instrument.Counter;
-import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Duration;
 import java.util.List;
-import java.util.Map;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -33,12 +27,10 @@ public class PaymentReconcileScheduler {
     private final int batchSize;
     private final Duration recheckAfter;
     private final Duration processingRecheckAfter;
-    private final Map<String, Counter> results;
 
     public PaymentReconcileScheduler(PaymentReader paymentReader, PaymentReconcileTransaction reconcileTransaction,
                                      PaymentTransaction paymentTransaction, PgClient pgClient,
-                                     PaymentGateReflector reflector, TicketingProperties properties,
-                                     MeterRegistry meterRegistry) {
+                                     PaymentGateReflector reflector, TicketingProperties properties) {
         this.paymentReader = paymentReader;
         this.reconcileTransaction = reconcileTransaction;
         this.paymentTransaction = paymentTransaction;
@@ -47,9 +39,6 @@ public class PaymentReconcileScheduler {
         this.batchSize = properties.payment().reconcileBatchSize();
         this.recheckAfter = properties.payment().unknownRecheckAfter();
         this.processingRecheckAfter = properties.payment().processingRecheckAfter();
-        this.results = Metrics.counters(meterRegistry, Metrics.PAYMENT_RECONCILE, Tag.RESULT,
-                ReconcileResult.CONFIRMED, ReconcileResult.DECLINED,
-                ReconcileResult.CANCELLED, ReconcileResult.WAITING, ReconcileResult.QUERY_FAILED);
     }
 
     @Scheduled(fixedDelayString = "${ticketing.payment.reconcile-scan-ms}")
@@ -72,24 +61,24 @@ public class PaymentReconcileScheduler {
             case APPROVED -> settle(paymentTransaction.openToApproved(payment.paymentId(), pg.pgTxId()));
             case DECLINED -> settle(paymentTransaction.openToDeclined(payment.paymentId()));
             case CANCELLED -> settle(paymentTransaction.openToCancelled(payment.paymentId()));
-            case PROCESSING -> recheck(payment, processingRecheckAfter, null, ReconcileResult.WAITING);
+            case PROCESSING -> recheck(payment, processingRecheckAfter, null);
             case NOT_FOUND -> notFound(payment);
-            default -> recheck(payment, recheckAfter, pg.describe("PG 조회"), ReconcileResult.QUERY_FAILED);
+            default -> recheck(payment, recheckAfter, pg.describe("PG 조회"));
         }
     }
 
     // 묘비 덕분에 망취소 뒤 늦게 온 승인은 거절되므로, 생성 후 일정 시간이 지나면 취소한다
     private void notFound(ClaimedPayment payment) {
         if (!payment.notFoundCancelDue()) {
-            recheck(payment, recheckAfter, null, ReconcileResult.WAITING);
+            recheck(payment, recheckAfter, null);
             return;
         }
         PgResult cancel = pgClient.cancel(payment.orderId());
         switch (cancel.status()) {
             case CANCELLED -> settle(paymentTransaction.openToCancelled(payment.paymentId()));
             case DECLINED -> settle(paymentTransaction.openToDeclined(payment.paymentId()));
-            case CONFLICT -> recheck(payment, recheckAfter, cancel.describe("PG 취소"), ReconcileResult.WAITING);
-            default -> recheck(payment, recheckAfter, cancel.describe("PG 취소"), ReconcileResult.QUERY_FAILED);
+            case CONFLICT -> recheck(payment, recheckAfter, cancel.describe("PG 취소"));
+            default -> recheck(payment, recheckAfter, cancel.describe("PG 취소"));
         }
     }
 
@@ -101,18 +90,10 @@ public class PaymentReconcileScheduler {
             return;
         }
         reflector.reflect(settlement);
-        switch (result.outcome()) {
-            case CONFIRMED -> results.get(ReconcileResult.CONFIRMED).increment();
-            case DECLINED -> results.get(ReconcileResult.DECLINED).increment();
-            case CANCELLED -> results.get(ReconcileResult.CANCELLED).increment();
-            default -> {
-            }
-        }
         log.info("[reconcile] 결제 결론을 반영했다 paymentId={} outcome={}", result.paymentId(), result.outcome());
     }
 
-    private void recheck(ClaimedPayment payment, Duration delay, String lastError, String result) {
+    private void recheck(ClaimedPayment payment, Duration delay, String lastError) {
         reconcileTransaction.reschedule(payment.paymentId(), delay, lastError);
-        results.get(result).increment();
     }
 }

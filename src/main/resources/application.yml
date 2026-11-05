@@ -22,23 +22,6 @@ spring:
       connect-timeout: 500ms
       database: 0              # 테스트는 1을 써서 로컬 앱 키와 섞이지 않게 한다
 
-management:
-  endpoints:
-    web:
-      exposure:
-        include: health,metrics
-  endpoint:
-    health:
-      status:
-        order: DOWN, OUT_OF_SERVICE, DEGRADED, UNKNOWN, UP
-        http-mapping:          # 하나라도 적으면 기본 매핑이 사라지므로 DOWN·OUT_OF_SERVICE도 적는다
-          DOWN: 503
-          OUT_OF_SERVICE: 503
-          DEGRADED: 200
-  health:
-    redis:
-      enabled: false           # 기본 항목은 장애 때 DOWN(503)이라 서버가 빠진다. DEGRADED로 답하는 bookingRedis가 대신한다
-
 ticketing:
   seed:
     enabled: true              # @Profile("local")에서만 의미. 예매 테스트는 false

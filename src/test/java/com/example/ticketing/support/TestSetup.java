@@ -19,7 +19,7 @@ import org.springframework.test.context.TestPropertySource;
         "spring.datasource.url=jdbc:mysql://localhost:3306/ticketing_booking_test"
                 + "?createDatabaseIfNotExist=true&serverTimezone=Asia/Seoul&characterEncoding=UTF-8"
 })
-@Import({Fixtures.class, TestDb.class, TestRedis.class, TestServices.class, TestMvc.class, Counters.class})
+@Import({Fixtures.class, TestDb.class, TestRedis.class, TestServices.class, TestMvc.class})
 @ExtendWith(TestCleanup.class)
 @interface TestSetup {
 }
