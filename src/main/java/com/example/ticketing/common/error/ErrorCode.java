@@ -26,16 +26,13 @@ public enum ErrorCode {
     SEAT_TAKEN(HttpStatus.CONFLICT, "방금 다른 분이 고른 자리예요. 다른 자리를 골라 주세요"),
     SEAT_STATE_CHANGED(HttpStatus.CONFLICT, "방금 다른 분이 고른 자리예요. 다른 자리를 골라 주세요"),
     USER_HAS_HOLD(HttpStatus.CONFLICT, "이미 잡아 둔 자리가 있어요"),
-    COOLDOWN(HttpStatus.CONFLICT, "시간이 지나 놓친 자리는 10분 뒤에 다시 고를 수 있어요"),
     HOLD_NOT_CANCELLABLE(HttpStatus.CONFLICT, "지금은 이 자리를 놓을 수 없어요"),
     HOLD_EXPIRED(HttpStatus.CONFLICT, "결제 시간이 지나 자리가 풀렸어요"),
     HOLD_NOT_PAYABLE(HttpStatus.CONFLICT, "지금은 이 자리를 결제할 수 없어요"),
     ALREADY_PAYING(HttpStatus.CONFLICT, "다른 화면에서 이미 결제하고 있어요"),
     SEAT_LOST_REFUNDING(HttpStatus.CONFLICT, "결제는 됐지만 자리를 지키지 못했어요. 결제 금액은 자동으로 돌려드려요"),
     PAYMENT_CANCELLED(HttpStatus.CONFLICT, "결제가 취소됐어요. 자리는 풀렸어요"),
-    CANCEL_NOT_ALLOWED(HttpStatus.CONFLICT, "공연이 시작돼 예매를 취소할 수 없어요"),
-
-    BUSY(HttpStatus.SERVICE_UNAVAILABLE, "사람이 많아 잠시 막혔어요. 잠시 뒤 다시 눌러 주세요");
+    CANCEL_NOT_ALLOWED(HttpStatus.CONFLICT, "공연이 시작돼 예매를 취소할 수 없어요");
 
     private final HttpStatus status;
     private final String defaultMessage;

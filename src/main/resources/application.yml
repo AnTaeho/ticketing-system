@@ -48,10 +48,8 @@ ticketing:
     expiry-enabled: true       # false면 만료 스케줄러 빈을 만들지 않는다. 아래 *-enabled도 같다(테스트는 모두 false)
     expiry-scan-ms: 1000
     expiry-batch-size: 50
-    rehold-cooldown: 10m
   payment:
     pay-deadline: 10m
-    gate-key-margin: 1m        # 결제 중 게이트 키를 결제 마감보다 이만큼 더 남긴다
     requested-recheck-after: 30s
     processing-recheck-after: 5s     # PG가 아직 처리 중이라고 답한 결제를 다시 볼 때까지
     unknown-recheck-after: 10s
@@ -62,7 +60,6 @@ ticketing:
     reconcile-claim-lease: 30s       # 집은 결제를 PG 조회가 끝날 때까지 다른 서버가 다시 집지 않게 미뤄 둔다
   gate:
     enabled: true              # 부하 테스트 비교 스위치
-    fallback-max-concurrency: 8      # Hikari 풀(10)보다 작게
   outbox:
     worker-enabled: true
     poll-interval-ms: 500

@@ -8,13 +8,12 @@ public record CreatePerformanceRequest(
         @NotNull Long showId,
         @NotNull LocalDateTime startsAt,
         @NotNull LocalDateTime openAt,
-        LocalDateTime gateCloseAt,
         @NotNull Integer sections,
         @NotNull Integer rows,
         @NotNull Integer seatsPerRow
 ) {
 
     public CreatePerformanceCommand toCommand() {
-        return new CreatePerformanceCommand(showId, startsAt, openAt, gateCloseAt, sections, rows, seatsPerRow);
+        return new CreatePerformanceCommand(showId, startsAt, openAt, sections, rows, seatsPerRow);
     }
 }

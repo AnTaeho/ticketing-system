@@ -12,8 +12,6 @@ public final class RedisScripts {
 
     @SuppressWarnings("rawtypes")
     public static final RedisScript<List> HOLD = load("hold.lua", List.class);
-    public static final RedisScript<Long> EXTEND = load("extend.lua", Long.class);
-    public static final RedisScript<Long> CONFIRM = load("confirm.lua", Long.class);
     public static final RedisScript<Long> DELETE_IF_EQUALS = load("delete_if_equals.lua", Long.class);
 
     private RedisScripts() {

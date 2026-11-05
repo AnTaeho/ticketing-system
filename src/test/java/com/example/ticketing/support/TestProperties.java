@@ -43,13 +43,7 @@ public final class TestProperties {
     }
 
     public TestProperties gateEnabled(boolean enabled) {
-        Gate g = p.gate();
-        return gate(new Gate(enabled, g.fallbackMaxConcurrency()));
-    }
-
-    public TestProperties fallbackMaxConcurrency(int max) {
-        Gate g = p.gate();
-        return gate(new Gate(g.enabled(), max));
+        return gate(new Gate(enabled));
     }
 
     public TestProperties outboxBatchSize(int batchSize) {

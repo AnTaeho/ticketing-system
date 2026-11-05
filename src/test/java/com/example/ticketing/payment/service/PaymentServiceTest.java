@@ -30,7 +30,6 @@ import com.example.ticketing.support.StubPgClient;
 import com.example.ticketing.support.StubPgTestConfig;
 import com.example.ticketing.support.TestDb;
 import com.example.ticketing.support.TestRedis;
-import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -97,7 +96,7 @@ class PaymentServiceTest {
     }
 
     @Test
-    @DisplayName("결제가 승인되면 예매가 확정되고 좌석 키는 게이트 마감까지 남는다")
+    @DisplayName("결제가 승인되면 예매가 확정된다")
     void confirm() {
         Held held = fixtures.held(2);
 
@@ -160,15 +159,9 @@ class PaymentServiceTest {
         assertThat(stubPg.approvals().get(0).amount()).isEqualTo(held.totalAmount());
         assertThat(stubPg.approvals().get(0).orderId()).isEqualTo(payment.get("order_id"));
 
-        LocalDateTime gateCloseAt = jdbcTemplate.queryForObject(
-                "SELECT gate_close_at FROM performance WHERE performance_id = ?", LocalDateTime.class, held.pid());
-        long expectedMs = Duration.between(now, gateCloseAt).toMillis();
         for (long seatId : held.seatIds()) {
-            String seatKey = RedisKeys.seat(held.pid(), seatId);
-            assertThat(redis.opsForValue().get(seatKey)).isEqualTo(held.holdToken());
-            assertThat(testRedis.pttl(seatKey)).isBetween(expectedMs - TOLERANCE_MS, expectedMs + TOLERANCE_MS);
+            assertThat(redis.opsForValue().get(RedisKeys.seat(held.pid(), seatId))).isEqualTo(held.holdToken());
         }
-        assertThat(redis.hasKey(RedisKeys.userHold(held.userId(), held.pid()))).isFalse();
     }
 
     @Test
@@ -212,7 +205,7 @@ class PaymentServiceTest {
     }
 
     @Test
-    @DisplayName("PG 응답이 시간 초과면 결과 모름으로 두고 좌석과 게이트 키를 결제 마감까지 지킨다")
+    @DisplayName("PG 응답이 시간 초과면 결과 모름으로 두고 좌석을 그대로 둔다")
     void unknownKeepsSeats() {
         Held held = fixtures.held(2);
         stubPg.approveWith(PgResult.unknown("read timeout 3s"));
@@ -230,13 +223,8 @@ class PaymentServiceTest {
         LocalDateTime payDeadline = db.payDeadline(held.holdId());
         held.seatIds().forEach(seatId -> assertThat(db.seat(seatId)).containsEntry("status", "HELD")
                 .containsEntry("hold_id", held.holdId()).containsEntry("held_until", payDeadline));
-        long payDeadlineMs = Duration.between(db.dbNow(), payDeadline).toMillis();
-        long expectedTtl = payDeadlineMs + properties.payment().gateKeyMargin().toMillis();
-        assertThat(testRedis.pttl(RedisKeys.userHold(held.userId(), held.pid())))
-                .isBetween(expectedTtl - TOLERANCE_MS, expectedTtl + TOLERANCE_MS);
         for (long seatId : held.seatIds()) {
-            assertThat(testRedis.pttl(RedisKeys.seat(held.pid(), seatId)))
-                    .isBetween(expectedTtl - TOLERANCE_MS, expectedTtl + TOLERANCE_MS);
+            assertThat(redis.opsForValue().get(RedisKeys.seat(held.pid(), seatId))).isEqualTo(held.holdToken());
         }
     }
 
@@ -416,9 +404,7 @@ class PaymentServiceTest {
         assertThat(refund.get("paymentId").asLong()).isEqualTo(paymentId);
         assertThat(refund.get("orderId").asString()).isEqualTo(payment.get("order_id"));
 
-        assertThat(redis.hasKey(RedisKeys.userHold(held.userId(), held.pid()))).isFalse();
         assertThat(redis.hasKey(RedisKeys.seat(held.pid(), kept))).isFalse();
-        assertThat(redis.hasKey(RedisKeys.seat(held.pid(), lost))).isFalse();
         assertThat(redis.opsForValue().get(RedisKeys.seat(held.pid(), db.seatIds(held.pid()).get(2))))
                 .isEqualTo(db.holdToken(thiefHold.holdId()));
 

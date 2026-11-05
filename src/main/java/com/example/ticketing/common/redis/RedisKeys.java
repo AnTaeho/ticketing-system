@@ -14,15 +14,7 @@ public final class RedisKeys {
         return "seat:" + tag(performanceId) + ":" + seatId;
     }
 
-    public static String userHold(long userId, long performanceId) {
-        return "userhold:" + tag(performanceId) + ":" + userId;
-    }
-
-    public static String rehold(long userId, long performanceId, long seatId) {
-        return "rehold:" + tag(performanceId) + ":" + userId + ":" + seatId;
-    }
-
-    // seat·rehold 키 모두 마지막 구간이 좌석 ID다
+    // 키의 마지막 구간이 좌석 ID다
     public static long seatIdOf(String key) {
         return Long.parseLong(key.substring(key.lastIndexOf(':') + 1));
     }

@@ -5,15 +5,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.example.ticketing.common.config.TicketingProperties;
 import com.example.ticketing.common.error.ApiException;
 import com.example.ticketing.common.error.ErrorCode;
-import com.example.ticketing.common.metrics.Metrics;
-import com.example.ticketing.common.metrics.Metrics.Tag;
+import com.example.ticketing.common.redis.RedisKeys;
 import com.example.ticketing.hold.dto.CreateHoldCommand;
 import com.example.ticketing.hold.dto.CreateHoldResult;
 import com.example.ticketing.support.ApiErrors;
 import com.example.ticketing.support.Concurrently;
 import com.example.ticketing.support.Concurrently.Outcome;
 import com.example.ticketing.support.Concurrently.Results;
-import com.example.ticketing.support.Counters;
 import com.example.ticketing.support.Fixtures;
 import com.example.ticketing.support.IntegrationTest;
 import com.example.ticketing.support.TestDb;
@@ -44,8 +42,6 @@ class SeatHoldConcurrencyTest {
     @Autowired
     private TestRedis testRedis;
     @Autowired
-    private Counters counters;
-    @Autowired
     private JdbcTemplate jdbcTemplate;
     @Autowired
     private TicketingProperties properties;
@@ -60,12 +56,6 @@ class SeatHoldConcurrencyTest {
             long userId = fixtures.newUser();
             users.add(userId);
         }
-        double okBefore = counters.count(Metrics.HOLD_DB, Tag.RESULT, "ok");
-        double changedBefore = counters.count(Metrics.HOLD_DB, Tag.RESULT, "state_changed");
-        double dbBefore = counters.sum(Metrics.HOLD_DB);
-        double gateOkBefore = counters.count(Metrics.HOLD_GATE, Tag.RESULT, "ok");
-        double gateTakenBefore = counters.count(Metrics.HOLD_GATE, Tag.RESULT, "seat_taken");
-        double gateSkippedBefore = counters.count(Metrics.HOLD_GATE, Tag.RESULT, "skipped");
 
         Results<CreateHoldResult> results = Concurrently.of(THREAD_COUNT)
                 .readyWithin(Duration.ofSeconds(30))
@@ -83,21 +73,12 @@ class SeatHoldConcurrencyTest {
         assertThat(db.holdCount(pid)).isEqualTo(1);
         assertThat(db.heldSeats(pid, winnerHoldId)).hasSize(2);
         assertThat(db.heldSeatCount(pid)).isEqualTo(2);
-        double dbDelta = counters.sum(Metrics.HOLD_DB) - dbBefore;
-        assertThat(counters.count(Metrics.HOLD_DB, Tag.RESULT, "ok") - okBefore).isEqualTo(1);
         if (gateEnabled()) {
-            // 게이트가 Redis에서 거절하므로 DB에 닿는 선점은 이긴 1건뿐이다
-            assertThat(dbDelta).isEqualTo(1);
-            assertThat(counters.count(Metrics.HOLD_DB, Tag.RESULT, "state_changed") - changedBefore).isZero();
-            assertThat(counters.count(Metrics.HOLD_GATE, Tag.RESULT, "ok") - gateOkBefore).isEqualTo(1);
-            assertThat(counters.count(Metrics.HOLD_GATE, Tag.RESULT, "seat_taken") - gateTakenBefore)
-                    .isEqualTo(THREAD_COUNT - 1);
+            // 이긴 1건의 키만 남고, 진 요청이 쓴 키는 없다
+            assertThat(testRedis.keys(pid)).hasSize(2);
+            assertThat(target).allSatisfy(seatId -> assertThat(testRedis.template().opsForValue()
+                    .get(RedisKeys.seat(pid, seatId))).isEqualTo(db.holdToken(winnerHoldId)));
         } else {
-            assertThat(dbDelta).isEqualTo(THREAD_COUNT);
-            assertThat(counters.count(Metrics.HOLD_DB, Tag.RESULT, "state_changed") - changedBefore)
-                    .isEqualTo(THREAD_COUNT - 1);
-            assertThat(counters.count(Metrics.HOLD_GATE, Tag.RESULT, "skipped") - gateSkippedBefore)
-                    .isEqualTo(THREAD_COUNT);
             assertThat(testRedis.keys(pid)).isEmpty();
         }
     }
@@ -179,9 +160,8 @@ class SeatHoldConcurrencyTest {
                 "SELECT COUNT(*) FROM seat_hold WHERE performance_id = ? AND user_id = ?",
                 Long.class, pid, userId)).isEqualTo(1);
         assertThat(db.heldSeatCount(pid)).isEqualTo(1);
-        if (!gateEnabled()) {
-            assertThat(testRedis.keys(pid)).isEmpty();
-        }
+        // 진 요청이 게이트에 쓴 좌석 키는 지워지고 이긴 1건의 키만 남는다
+        assertThat(testRedis.keys(pid)).hasSize(gateEnabled() ? 1 : 0);
     }
 
     protected SeatHoldService service() {

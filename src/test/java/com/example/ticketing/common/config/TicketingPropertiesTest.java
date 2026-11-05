@@ -39,7 +39,6 @@ class TicketingPropertiesTest {
         assertThat(properties.fakePg().declineRate()).isEqualTo(0.1);
         assertThat(properties.fakePg().slowDelay()).isEqualTo(Duration.ofSeconds(5));
         assertThat(properties.fakePg().delayMin()).isEqualTo(Duration.ofMillis(200));
-        assertThat(properties.payment().gateKeyMargin()).isEqualTo(Duration.ofMinutes(1));
         assertThat(properties.payment().processingRecheckAfter()).isEqualTo(Duration.ofSeconds(5));
         assertThat(properties.payment().reconcileClaimLease()).isEqualTo(Duration.ofSeconds(30));
         assertThat(properties.outbox().maxBackoff()).isEqualTo(Duration.ofSeconds(60));

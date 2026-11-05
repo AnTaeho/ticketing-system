@@ -3,7 +3,6 @@ package com.example.ticketing.support;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.example.ticketing.common.config.TicketingProperties;
-import com.example.ticketing.common.redis.RedisKeys;
 import com.example.ticketing.common.time.DbClock;
 import com.example.ticketing.hold.dto.CreateHoldCommand;
 import com.example.ticketing.hold.dto.CreateHoldResult;
@@ -60,7 +59,7 @@ public class Fixtures {
     public long newPerformance(long showId, LocalDateTime openAt, LocalDateTime startsAt,
                                int sections, int rows, int seatsPerRow) {
         long pid = showAdminService.createPerformance(
-                        new CreatePerformanceCommand(showId, startsAt, openAt, null, sections, rows, seatsPerRow))
+                        new CreatePerformanceCommand(showId, startsAt, openAt, sections, rows, seatsPerRow))
                 .performanceId();
         performances.add(pid);
         return pid;

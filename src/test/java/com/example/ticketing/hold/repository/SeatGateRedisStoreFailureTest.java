@@ -8,9 +8,7 @@ import com.example.ticketing.support.IntegrationTest;
 import com.example.ticketing.support.TestRedis;
 import com.example.ticketing.support.TestServices;
 import java.time.Duration;
-import java.time.Instant;
 import java.util.List;
-import org.assertj.core.api.ThrowableAssert.ThrowingCallable;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -22,7 +20,7 @@ import org.springframework.dao.DataAccessException;
 class SeatGateRedisStoreFailureTest {
 
     private static final long PID = 9_100_000_000_000L;
-    private static final GateHold HOLD = new GateHold(1L, PID, "t", List.of(1L, 2L));
+    private static final GateHold HOLD = new GateHold(PID, "t", List.of(1L, 2L));
 
     @Autowired
     private TestRedis testRedis;
@@ -43,19 +41,10 @@ class SeatGateRedisStoreFailureTest {
     }
 
     @Test
-    @DisplayName("해제·연장·확정·쿨다운 중 Redis가 죽어도 같은 예외로 바꿔 던진다")
-    void reflectionsThrowTranslated() {
-        List<ThrowingCallable> calls = List.of(
-                () -> deadGate.release(HOLD),
-                () -> deadGate.releaseSeatsOnly(HOLD),
-                () -> deadGate.extend(HOLD, Duration.ofMinutes(11)),
-                () -> deadGate.confirm(HOLD, Instant.now().plusSeconds(3600)),
-                () -> deadGate.setReholdCooldown(HOLD, Duration.ofMinutes(10)));
-
-        for (ThrowingCallable call : calls) {
-            assertThatThrownBy(call)
-                    .isInstanceOf(RedisUnavailableException.class)
-                    .hasCauseInstanceOf(DataAccessException.class);
-        }
+    @DisplayName("해제(release) 중 Redis가 죽어도 같은 예외로 바꿔 던진다")
+    void releaseThrowsTranslated() {
+        assertThatThrownBy(() -> deadGate.release(HOLD))
+                .isInstanceOf(RedisUnavailableException.class)
+                .hasCauseInstanceOf(DataAccessException.class);
     }
 }

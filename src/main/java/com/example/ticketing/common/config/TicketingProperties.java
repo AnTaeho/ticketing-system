@@ -32,14 +32,12 @@ public record TicketingProperties(
             @Positive int maxSeats,
             boolean expiryEnabled,
             @Positive long expiryScanMs, // @Scheduled 전용
-            @Positive int expiryBatchSize,
-            @NotNull @DurationMin Duration reholdCooldown
+            @Positive int expiryBatchSize
     ) {
     }
 
     public record Payment(
             @NotNull @DurationMin(millis = 1) Duration payDeadline,
-            @NotNull @DurationMin Duration gateKeyMargin,
             @NotNull @DurationMin Duration requestedRecheckAfter,
             @NotNull @DurationMin Duration processingRecheckAfter,
             @NotNull @DurationMin Duration unknownRecheckAfter,
@@ -52,8 +50,7 @@ public record TicketingProperties(
     }
 
     public record Gate(
-            boolean enabled,
-            @Positive int fallbackMaxConcurrency
+            boolean enabled
     ) {
     }
 

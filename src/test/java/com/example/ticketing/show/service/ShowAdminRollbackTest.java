@@ -42,7 +42,7 @@ class ShowAdminRollbackTest {
                 .when(spy).insert(anyLong(), anyList());
 
         assertThatThrownBy(() -> showAdminService.createPerformance(
-                new CreatePerformanceCommand(showId, now.plusDays(1), now, null, 1, 1, 1)))
+                new CreatePerformanceCommand(showId, now.plusDays(1), now, 1, 1, 1)))
                 .isInstanceOf(DataIntegrityViolationException.class);
         assertThat(performanceRepository.findByShowIdOrderByStartsAtAscIdAsc(showId)).isEmpty();
     }

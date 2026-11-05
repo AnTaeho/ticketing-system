@@ -1,10 +1,8 @@
 package com.example.ticketing.payment.service;
 
-import com.example.ticketing.common.config.TicketingProperties;
 import com.example.ticketing.common.error.ApiException;
 import com.example.ticketing.common.error.ErrorCode;
 import com.example.ticketing.common.jdbc.ConstraintViolations;
-import com.example.ticketing.hold.service.SeatGateReflector;
 import com.example.ticketing.payment.client.PgClient;
 import com.example.ticketing.payment.client.PgResult;
 import com.example.ticketing.payment.domain.Payment;
@@ -16,7 +14,6 @@ import com.example.ticketing.payment.dto.PaymentStart;
 import com.example.ticketing.payment.dto.PaymentStart.Existing;
 import com.example.ticketing.payment.dto.PaymentStart.OtherKey;
 import com.example.ticketing.payment.dto.PaymentStart.Started;
-import java.time.Duration;
 import java.util.Map;
 import java.util.Optional;
 import lombok.extern.slf4j.Slf4j;
@@ -31,18 +28,14 @@ public class PaymentService {
     private final PaymentTransaction paymentTransaction;
     private final PaymentReader paymentReader;
     private final PgClient pgClient;
-    private final SeatGateReflector gate;
     private final PaymentGateReflector reflector;
-    private final Duration gateKeyMargin;
 
     public PaymentService(PaymentTransaction paymentTransaction, PaymentReader paymentReader, PgClient pgClient,
-                          SeatGateReflector gate, PaymentGateReflector reflector, TicketingProperties properties) {
+                          PaymentGateReflector reflector) {
         this.paymentTransaction = paymentTransaction;
         this.paymentReader = paymentReader;
         this.pgClient = pgClient;
-        this.gate = gate;
         this.reflector = reflector;
-        this.gateKeyMargin = properties.payment().gateKeyMargin();
     }
 
     public PaymentResult pay(PayCommand command) {
@@ -55,17 +48,13 @@ public class PaymentService {
         }
         Started started = (Started) start;
 
-        // 게이트 키가 결제 중에 풀리지 않게 결제 마감 뒤까지 늘린다
-        gate.extend(started.gate(), Duration.between(started.dbNow(), started.payDeadline()).plus(gateKeyMargin));
-
         PgResult pg = pgClient.approve(started.orderId(), started.amount(), command.pgScenario().map(Enum::name));
         PaymentSettlement settlement = switch (pg.status()) {
             case APPROVED -> paymentTransaction.openToApproved(started.paymentId(), pg.pgTxId());
             case DECLINED -> paymentTransaction.openToDeclined(started.paymentId());
             default -> paymentTransaction.requestedToUnknown(started.paymentId(), unknownCause(pg));
         };
-        // 승인 중 남이 가져간 좌석의 키도 이 요청이 늘려 두었으므로, 트랜잭션이 본 좌석 대신 늘린 좌석 전부에 반영한다
-        reflector.reflect(settlement.withGate(started.gate()));
+        reflector.reflect(settlement);
         return successOrThrow(settlement.result());
     }
 

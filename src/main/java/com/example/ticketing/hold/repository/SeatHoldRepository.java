@@ -54,7 +54,7 @@ public interface SeatHoldRepository extends JpaRepository<SeatHold, Long> {
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @QueryHints(@QueryHint(name = "jakarta.persistence.lock.timeout", value = "-2"))
     @Query("""
-            select new com.example.ticketing.hold.domain.ClaimedHold(h.id, h.userId, h.performanceId, h.holdToken)
+            select new com.example.ticketing.hold.domain.ClaimedHold(h.id, h.performanceId, h.holdToken)
               from SeatHold h
              where h.status = HELD and h.expiresAt < current_timestamp
              order by h.id""")

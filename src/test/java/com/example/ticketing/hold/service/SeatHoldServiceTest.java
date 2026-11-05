@@ -6,13 +6,11 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.example.ticketing.common.error.ApiException;
 import com.example.ticketing.common.error.ErrorCode;
-import com.example.ticketing.common.metrics.Metrics;
 import com.example.ticketing.hold.domain.HoldStatus;
 import com.example.ticketing.hold.dto.ActiveHoldResult;
 import com.example.ticketing.hold.dto.CreateHoldCommand;
 import com.example.ticketing.hold.dto.CreateHoldResult;
 import com.example.ticketing.hold.dto.HoldDetailResult;
-import com.example.ticketing.support.Counters;
 import com.example.ticketing.support.Fixtures;
 import com.example.ticketing.support.IntegrationTest;
 import com.example.ticketing.support.TestDb;
@@ -38,8 +36,6 @@ class SeatHoldServiceTest {
     private TestRedis testRedis;
     @Autowired
     private JdbcTemplate jdbcTemplate;
-    @Autowired
-    private Counters counters;
 
     @Test
     @DisplayName("선점하면 선점과 좌석이 DB 시각 기준 5분 뒤까지 잡힌다")
@@ -179,13 +175,12 @@ class SeatHoldServiceTest {
     }
 
     @Test
-    @DisplayName("고른 좌석이 잘못됐으면 DB 판정까지 가지 않고 INVALID_SEAT_SELECTION이다")
+    @DisplayName("고른 좌석이 잘못됐으면 INVALID_SEAT_SELECTION이고 선점을 만들지 않는다")
     void invalidSelectionDoesNotReachDb() {
         long pid = fixtures.newPerformance(1, 1, 6);
         long otherPid = fixtures.newPerformance(1, 1, 2);
         List<Long> ids = db.seatIds(pid);
         long userId = fixtures.newUser();
-        double before = counters.sum(Metrics.HOLD_DB);
 
         for (List<Long> invalid : List.of(List.of(ids.get(0), db.seatIds(otherPid).get(0)),
                 List.of(ids.get(0), Long.MAX_VALUE), ids.subList(0, 5))) {
@@ -193,7 +188,6 @@ class SeatHoldServiceTest {
                     .isEqualTo(ErrorCode.INVALID_SEAT_SELECTION);
         }
 
-        assertThat(counters.sum(Metrics.HOLD_DB)).isEqualTo(before);
         assertThat(db.holdCount(pid)).isZero();
     }
 

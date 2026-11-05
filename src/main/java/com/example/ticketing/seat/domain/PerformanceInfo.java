@@ -12,21 +12,19 @@ public record PerformanceInfo(
         long performanceId,
         LocalDateTime openAt,
         LocalDateTime startsAt,
-        LocalDateTime gateCloseAt,
         Map<Long, SeatInfo> seats
 ) {
 
     // SeatRepository의 JPQL이 부른다. 좌석은 withSeats로 붙인다
-    public PerformanceInfo(long performanceId, LocalDateTime openAt, LocalDateTime startsAt,
-                           LocalDateTime gateCloseAt) {
-        this(performanceId, openAt, startsAt, gateCloseAt, Map.of());
+    public PerformanceInfo(long performanceId, LocalDateTime openAt, LocalDateTime startsAt) {
+        this(performanceId, openAt, startsAt, Map.of());
     }
 
     // seats는 좌석 ID 오름차순으로 넘긴다
     public PerformanceInfo withSeats(List<SeatInfo> seats) {
         Map<Long, SeatInfo> byId = new LinkedHashMap<>();
         seats.forEach(seat -> byId.put(seat.id(), seat));
-        return new PerformanceInfo(performanceId, openAt, startsAt, gateCloseAt, Collections.unmodifiableMap(byId));
+        return new PerformanceInfo(performanceId, openAt, startsAt, Collections.unmodifiableMap(byId));
     }
 
     public PerformanceState stateAt(LocalDateTime now) {

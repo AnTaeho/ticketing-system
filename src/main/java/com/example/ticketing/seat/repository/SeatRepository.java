@@ -34,7 +34,7 @@ public interface SeatRepository extends JpaRepository<Seat, Long> {
 
     // 회차는 show 기능의 테이블이라 읽기만 한다
     @Query("""
-            select new com.example.ticketing.seat.domain.PerformanceInfo(p.id, p.openAt, p.startsAt, p.gateCloseAt)
+            select new com.example.ticketing.seat.domain.PerformanceInfo(p.id, p.openAt, p.startsAt)
               from Performance p
              where p.id = :performanceId""")
     Optional<PerformanceInfo> findPerformanceInfo(@Param("performanceId") long performanceId);

@@ -17,7 +17,7 @@ public class BookingService {
 
     public CancelResult cancel(long userId, long bookingId) {
         BookingCancellation cancellation = bookingTransaction.confirmedToCancelled(userId, bookingId);
-        cancellation.releasedGate().ifPresent(gate::releaseSeatsOnly);
+        cancellation.releasedGate().ifPresent(gate::release);
         return new CancelResult(bookingId, BookingStatus.CANCELLED, cancellation.refund());
     }
 }

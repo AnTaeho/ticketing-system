@@ -35,17 +35,11 @@ public class Performance {
     @Column(name = "open_at", nullable = false)
     private LocalDateTime openAt;
 
-    // 확정 좌석 게이트 키가 이 시각에 만료된다
-    @Column(name = "gate_close_at", nullable = false)
-    private LocalDateTime gateCloseAt;
-
-    public static Performance create(Long showId, LocalDateTime startsAt, LocalDateTime openAt,
-                                     LocalDateTime gateCloseAt) {
+    public static Performance create(Long showId, LocalDateTime startsAt, LocalDateTime openAt) {
         Performance performance = new Performance();
         performance.showId = showId;
         performance.startsAt = startsAt;
         performance.openAt = openAt;
-        performance.gateCloseAt = gateCloseAt;
         return performance;
     }
 }

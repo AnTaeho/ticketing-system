@@ -49,7 +49,7 @@ class ShowAdminServiceTest {
         LocalDateTime now = fixtures.dbNow();
 
         CreatePerformanceResult created = showAdminService.createPerformance(
-                new CreatePerformanceCommand(showId, now.plusDays(1), now.minusMinutes(1), null, 4, 10, 20));
+                new CreatePerformanceCommand(showId, now.plusDays(1), now.minusMinutes(1), 4, 10, 20));
 
         assertThat(created.seatCount()).isEqualTo(800);
         assertThat(count("SELECT COUNT(*) FROM seat WHERE performance_id = ?", created.performanceId()))
@@ -93,42 +93,13 @@ class ShowAdminServiceTest {
     }
 
     @Test
-    @DisplayName("게이트 마감 시각(gateCloseAt)이 없으면 오픈 24시간 뒤로 정한다")
-    void gateCloseAtDefaultsToOpenPlus24h() {
-        LocalDateTime openAt = fixtures.dbNow().plusHours(1);
-        Performance performance = create(openAt, openAt.plusDays(3), null);
-
-        assertThat(performance.getGateCloseAt()).isEqualTo(openAt.plusHours(24));
-    }
-
-    @Test
-    @DisplayName("기본 gateCloseAt이 startsAt보다 늦으면 startsAt으로 맞춘다")
-    void gateCloseAtDefaultClampedToStartsAt() {
-        LocalDateTime openAt = fixtures.dbNow().plusHours(1);
-        Performance performance = create(openAt, openAt.plusHours(2), null);
-
-        assertThat(performance.getGateCloseAt()).isEqualTo(openAt.plusHours(2));
-    }
-
-    @Test
-    @DisplayName("지정한 gateCloseAt은 그대로 쓰되 startsAt보다 늦으면 startsAt으로 맞춘다")
-    void explicitGateCloseAt() {
-        LocalDateTime openAt = fixtures.dbNow().plusHours(1);
-
-        assertThat(create(openAt, openAt.plusDays(3), openAt.plusHours(5)).getGateCloseAt())
-                .isEqualTo(openAt.plusHours(5));
-        assertThat(create(openAt, openAt.plusHours(3), openAt.plusHours(10)).getGateCloseAt())
-                .isEqualTo(openAt.plusHours(3));
-    }
-
-    @Test
     @DisplayName("오픈 시각이 시작 시각보다 앞서지 않으면 INVALID_REQUEST로 거절한다")
     void openAtMustPrecedeStartsAt() {
         long showId = fixtures.newShow();
         LocalDateTime now = fixtures.dbNow();
 
-        assertInvalid(new CreatePerformanceCommand(showId, now, now, null, 1, 1, 1));
-        assertInvalid(new CreatePerformanceCommand(showId, now, now.plusMinutes(1), null, 1, 1, 1));
+        assertInvalid(new CreatePerformanceCommand(showId, now, now, 1, 1, 1));
+        assertInvalid(new CreatePerformanceCommand(showId, now, now.plusMinutes(1), 1, 1, 1));
         assertThat(performanceRepository.findByShowIdOrderByStartsAtAscIdAsc(showId)).isEmpty();
     }
 
@@ -139,13 +110,12 @@ class ShowAdminServiceTest {
         LocalDateTime now = fixtures.dbNow();
         LocalDateTime startsAt = now.plusDays(1);
 
-        assertInvalid(new CreatePerformanceCommand(showId, startsAt, now, null, 0, 10, 20));
-        assertInvalid(new CreatePerformanceCommand(showId, startsAt, now, null, 27, 10, 20));
-        assertInvalid(new CreatePerformanceCommand(showId, startsAt, now, null, 4, 0, 20));
-        assertInvalid(new CreatePerformanceCommand(showId, startsAt, now, null, 4, 31, 20));
-        assertInvalid(new CreatePerformanceCommand(showId, startsAt, now, null, 4, 10, 0));
-        assertInvalid(new CreatePerformanceCommand(showId, startsAt, now, null, 4, 10, 51));
-        assertInvalid(new CreatePerformanceCommand(showId, startsAt, now, now, 4, 10, 20));
+        assertInvalid(new CreatePerformanceCommand(showId, startsAt, now, 0, 10, 20));
+        assertInvalid(new CreatePerformanceCommand(showId, startsAt, now, 27, 10, 20));
+        assertInvalid(new CreatePerformanceCommand(showId, startsAt, now, 4, 0, 20));
+        assertInvalid(new CreatePerformanceCommand(showId, startsAt, now, 4, 31, 20));
+        assertInvalid(new CreatePerformanceCommand(showId, startsAt, now, 4, 10, 0));
+        assertInvalid(new CreatePerformanceCommand(showId, startsAt, now, 4, 10, 51));
         assertThat(performanceRepository.findByShowIdOrderByStartsAtAscIdAsc(showId)).isEmpty();
     }
 
@@ -155,15 +125,15 @@ class ShowAdminServiceTest {
         LocalDateTime now = fixtures.dbNow();
 
         assertThatThrownBy(() -> showAdminService.createPerformance(
-                new CreatePerformanceCommand(Long.MAX_VALUE, now.plusDays(1), now, null, 1, 1, 1)))
+                new CreatePerformanceCommand(Long.MAX_VALUE, now.plusDays(1), now, 1, 1, 1)))
                 .isInstanceOf(ApiException.class)
                 .extracting(e -> ((ApiException) e).getCode())
                 .isEqualTo(ErrorCode.SHOW_NOT_FOUND);
     }
 
-    private Performance create(LocalDateTime openAt, LocalDateTime startsAt, LocalDateTime gateCloseAt) {
+    private Performance create(LocalDateTime openAt, LocalDateTime startsAt) {
         CreatePerformanceResult created = showAdminService.createPerformance(
-                new CreatePerformanceCommand(fixtures.newShow(), startsAt, openAt, gateCloseAt, 1, 1, 1));
+                new CreatePerformanceCommand(fixtures.newShow(), startsAt, openAt, 1, 1, 1));
         return performanceRepository.findById(created.performanceId()).orElseThrow();
     }
 

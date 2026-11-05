@@ -8,7 +8,6 @@ import com.example.ticketing.hold.repository.SeatGateRedisStore;
 import com.example.ticketing.hold.repository.SeatHoldRepository;
 import com.example.ticketing.hold.service.HoldExpiryScheduler;
 import com.example.ticketing.hold.service.HoldExpiryTransaction;
-import com.example.ticketing.hold.service.HoldMetrics;
 import com.example.ticketing.hold.service.SeatGateReflector;
 import com.example.ticketing.hold.service.SeatHoldService;
 import com.example.ticketing.hold.service.SeatHoldTransaction;
@@ -21,14 +20,10 @@ import com.example.ticketing.payment.service.PaymentGateReflector;
 import com.example.ticketing.payment.service.PaymentReconcileScheduler;
 import com.example.ticketing.payment.service.PaymentReconcileTransaction;
 import com.example.ticketing.payment.service.PaymentTransaction;
-import com.example.ticketing.seat.repository.SeatRepository;
 import com.example.ticketing.seat.service.SeatCatalog;
-import com.example.ticketing.seat.service.SeatMapBuilder;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Clock;
-import java.util.Collection;
 import java.util.List;
-import java.util.Optional;
 import org.springframework.boot.test.context.TestComponent;
 import org.springframework.context.ApplicationContext;
 import org.springframework.core.env.Environment;
@@ -58,13 +53,8 @@ public class TestServices {
     }
 
     // 컨텍스트 없는 테스트도 쓴다
-    public static SeatGateReflector gateReflector(SeatGateRedisStore store, TicketingProperties properties,
-                                                  MeterRegistry meterRegistry) {
-        return new SeatGateReflector(store, properties, meterRegistry, System::nanoTime);
-    }
-
-    public SeatGateReflector gateReflector(SeatGateRedisStore store, TicketingProperties properties) {
-        return gateReflector(store, properties, meterRegistry());
+    public static SeatGateReflector gateReflector(SeatGateRedisStore store, TicketingProperties properties) {
+        return new SeatGateReflector(store, properties);
     }
 
     public static SeatGateRedisStore gateStore(StringRedisTemplate redis) {
@@ -76,13 +66,13 @@ public class TestServices {
     }
 
     public static HoldExpiryScheduler holdExpiryScheduler(HoldExpiryTransaction expiryTransaction,
-                                                          SeatGateReflector reflector, MeterRegistry meterRegistry,
+                                                          SeatGateReflector reflector,
                                                           TicketingProperties properties) {
-        return new HoldExpiryScheduler(expiryTransaction, reflector, new HoldMetrics(meterRegistry), properties);
+        return new HoldExpiryScheduler(expiryTransaction, reflector, properties);
     }
 
     public HoldExpiryScheduler holdExpiryScheduler() {
-        return holdExpiryScheduler(bean(HoldExpiryTransaction.class), bean(SeatGateReflector.class), meterRegistry(),
+        return holdExpiryScheduler(bean(HoldExpiryTransaction.class), bean(SeatGateReflector.class),
                 contextProperties());
     }
 
@@ -149,7 +139,7 @@ public class TestServices {
                     transaction != null ? transaction : bean(SeatHoldTransaction.class),
                     bean(SeatHoldRepository.class),
                     bean(DbClock.class), Clock.systemDefaultZone(), gate, gateReflector(gate, resolved),
-                    new HoldMetrics(meterRegistry()), System::nanoTime, resolved);
+                    resolved);
         }
     }
 }

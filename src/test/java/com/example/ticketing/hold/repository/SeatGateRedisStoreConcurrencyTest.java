@@ -41,13 +41,13 @@ class SeatGateRedisStoreConcurrencyTest {
                 .readyWithin(Duration.ofSeconds(30))
                 .within(Duration.ofSeconds(30))
                 .run(i -> seatGateRedisStore.tryHold(
-                        new GateHold(i + 1, pid, "t-" + (i + 1), seats), Duration.ofMinutes(5)));
+                        new GateHold(pid, "t-" + (i + 1), seats), Duration.ofMinutes(5)));
 
         assertThat(results.errors()).isEmpty();
         Map<GateResult, Long> counts = results.values().stream().collect(groupingBy(identity(), counting()));
         assertThat(counts.get(GateResult.ok())).isEqualTo(1);
         assertThat(counts).containsOnlyKeys(GateResult.ok(), GateResult.seatTaken(101L));
         assertThat(counts.get(GateResult.seatTaken(101L))).isEqualTo(THREAD_COUNT - 1);
-        assertThat(testRedis.keys(pid)).hasSize(3);
+        assertThat(testRedis.keys(pid)).hasSize(2);
     }
 }

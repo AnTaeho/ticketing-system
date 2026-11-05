@@ -27,10 +27,7 @@ import com.example.ticketing.payment.dto.PaymentStart.Started;
 import com.example.ticketing.payment.repository.PaymentRepository;
 import com.example.ticketing.seat.domain.Seat;
 import com.example.ticketing.seat.repository.SeatRepository;
-import com.example.ticketing.seat.service.SeatCatalog;
-import java.time.Clock;
 import java.time.Duration;
-import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
@@ -48,28 +45,24 @@ public class PaymentTransaction {
     private final PaymentReader paymentReader;
     private final SeatHoldRepository seatHoldRepository;
     private final SeatRepository seatRepository;
-    private final SeatCatalog seatCatalog;
     private final BookingIssuer bookingIssuer;
     private final OutboxWriter outboxWriter;
     private final DbClock dbClock;
-    private final Clock clock;
     private final Duration payDeadline;
     private final Duration requestedRecheckAfter;
     private final long unknownRecheckNanos;
 
     public PaymentTransaction(PaymentRepository paymentRepository, PaymentReader paymentReader,
                               SeatHoldRepository seatHoldRepository, SeatRepository seatRepository,
-                              SeatCatalog seatCatalog, BookingIssuer bookingIssuer, OutboxWriter outboxWriter,
-                              DbClock dbClock, Clock clock, TicketingProperties properties) {
+                              BookingIssuer bookingIssuer, OutboxWriter outboxWriter,
+                              DbClock dbClock, TicketingProperties properties) {
         this.paymentRepository = paymentRepository;
         this.paymentReader = paymentReader;
         this.seatHoldRepository = seatHoldRepository;
         this.seatRepository = seatRepository;
-        this.seatCatalog = seatCatalog;
         this.bookingIssuer = bookingIssuer;
         this.outboxWriter = outboxWriter;
         this.dbClock = dbClock;
-        this.clock = clock;
         this.payDeadline = properties.payment().payDeadline();
         this.requestedRecheckAfter = properties.payment().requestedRecheckAfter();
         this.unknownRecheckNanos = properties.payment().unknownRecheckAfter().toNanos();
@@ -96,12 +89,11 @@ public class PaymentTransaction {
         requirePayable(hold, now);
         LocalDateTime deadline = now.plus(payDeadline);
         heldToPaying(hold, deadline, now);
-        List<Long> seatIds = seatRepository.findHeldSeatIds(holdId);
 
         String orderId = UUID.randomUUID().toString().replace("-", "");
         Payment payment = paymentRepository.save(Payment.requested(holdId, userId, idempotencyKey,
                 orderId, hold.getTotalAmount(), now.plus(requestedRecheckAfter)));
-        return new Started(payment.getId(), orderId, hold.getTotalAmount(), gateOf(hold, seatIds), deadline, now);
+        return new Started(payment.getId(), orderId, hold.getTotalAmount());
     }
 
     // 요청 스레드와 대사가 동시에 불러도 hold 락 뒤 PAYING 확인으로 한 번만 효과가 있다
@@ -127,12 +119,9 @@ public class PaymentTransaction {
         IssuedBooking booking = bookingIssuer.issue(new IssueBookingCommand(hold.getUserId(),
                 hold.getPerformanceId(), holdId, paymentId, hold.getTotalAmount(),
                 seats.stream().map(Seat::info).toList(), now));
-        // 서버와 DB의 시간대가 달라도 맞도록 DB 시각 기준 남은 시간으로 바꾼다
-        LocalDateTime gateCloseAt = seatCatalog.performance(hold.getPerformanceId()).gateCloseAt();
-        Instant gateCloseInstant = clock.instant().plus(Duration.between(now, gateCloseAt));
         return PaymentSettlement.seatsChanged(new PaymentResult(paymentId, PaymentOutcome.CONFIRMED,
                         PaymentStatus.APPROVED, HoldStatus.CONFIRMED, booking.bookingId(), booking.bookingNumber()),
-                gateOf(hold, seatIds), gateCloseInstant);
+                gateOf(hold, seatIds));
     }
 
     @Transactional(isolation = Isolation.READ_COMMITTED)
@@ -204,7 +193,7 @@ public class PaymentTransaction {
         outboxWriter.write(OutboxTaskType.REFUND_REQUESTED, paymentId,
                 new RefundRequestedPayload(paymentId, payment.getOrderId()), dbNow);
         return PaymentSettlement.seatsChanged(new PaymentResult(paymentId, PaymentOutcome.SEAT_LOST,
-                PaymentStatus.APPROVED, HoldStatus.REFUNDING, null, null), gateOf(hold, seatIds), null);
+                PaymentStatus.APPROVED, HoldStatus.REFUNDING, null, null), gateOf(hold, seatIds));
     }
 
     private PaymentSettlement payingToReleased(long paymentId, PaymentStatus target) {
@@ -223,7 +212,7 @@ public class PaymentTransaction {
         RowCounts.requireExactly(seatRepository.heldToAvailable(hold.getId()), seats.size(), "seat AVAILABLE");
         return PaymentSettlement.seatsChanged(new PaymentResult(paymentId,
                 PaymentOutcome.of(target, HoldStatus.RELEASED), target, HoldStatus.RELEASED, null, null),
-                gateOf(hold, idsOf(seats)), null);
+                gateOf(hold, idsOf(seats)));
     }
 
     // 결제 엔티티를 읽기 전에 hold를 먼저 잠근다. 결과 모름 전이는 hold를 잠그지 않으므로 결제 행도 잠가 락 뒤의 최신 상태를 본다
@@ -240,7 +229,7 @@ public class PaymentTransaction {
     }
 
     private static GateHold gateOf(SeatHold hold, List<Long> seatIds) {
-        return new GateHold(hold.getUserId(), hold.getPerformanceId(), hold.getHoldToken(), seatIds);
+        return new GateHold(hold.getPerformanceId(), hold.getHoldToken(), seatIds);
     }
 
     private static ApiException paymentNotFound(long paymentId) {

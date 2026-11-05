@@ -56,7 +56,6 @@ class SeatCatalogTest {
         Performance performance = performanceRepository.findById(pid).orElseThrow();
         assertThat(info.openAt()).isEqualTo(performance.getOpenAt());
         assertThat(info.startsAt()).isEqualTo(performance.getStartsAt());
-        assertThat(info.gateCloseAt()).isEqualTo(performance.getGateCloseAt());
 
         List<SeatInfo> fromDb = jdbcTemplate.query(
                 "SELECT seat_id, section, row_no, seat_no, grade, price FROM seat WHERE performance_id = ?",

@@ -65,6 +65,6 @@ public class BookingTransaction {
         outboxWriter.write(OutboxTaskType.REFUND_REQUESTED, booking.getPaymentId(),
                 new RefundRequestedPayload(booking.getPaymentId(), orderId), now);
         return BookingCancellation.cancelled(
-                new GateHold(booking.getUserId(), booking.getPerformanceId(), hold.getHoldToken(), seatIds));
+                new GateHold(booking.getPerformanceId(), hold.getHoldToken(), seatIds));
     }
 }

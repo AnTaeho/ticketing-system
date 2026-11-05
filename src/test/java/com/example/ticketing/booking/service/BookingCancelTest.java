@@ -33,7 +33,6 @@ import com.example.ticketing.support.TestRedis;
 import com.example.ticketing.support.TestServices;
 import java.time.Duration;
 import java.time.LocalDateTime;
-import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -245,11 +244,11 @@ class BookingCancelTest {
         SeatGateRedisStore gate = mock(SeatGateRedisStore.class);
         Confirmed c = fixtures.confirmed(2);
         bookingServiceWith(gate).cancel(c.userId(), c.bookingId());
-        verify(gate).releaseSeatsOnly(new GateHold(c.userId(), c.pid(), c.holdToken(), c.seatIds()));
+        verify(gate).release(new GateHold(c.pid(), c.holdToken(), c.seatIds()));
 
         SeatGateRedisStore againGate = mock(SeatGateRedisStore.class);
         bookingServiceWith(againGate).cancel(c.userId(), c.bookingId());
-        verify(againGate, never()).releaseSeatsOnly(any());
+        verify(againGate, never()).release(any());
     }
 
     private void startPerformance(long pid) {

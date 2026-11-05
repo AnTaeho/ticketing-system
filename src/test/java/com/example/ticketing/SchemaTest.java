@@ -48,8 +48,7 @@ class SchemaTest {
                 .contains("KEY `idx_perf_show` (`show_id`,`starts_at`)")
                 .contains("KEY `idx_perf_open` (`open_at`,`starts_at`)")
                 .contains("`starts_at` datetime(6) NOT NULL")
-                .contains("`open_at` datetime(6) NOT NULL")
-                .contains("`gate_close_at` datetime(6) NOT NULL");
+                .contains("`open_at` datetime(6) NOT NULL");
     }
 
     @Test

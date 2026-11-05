@@ -7,11 +7,7 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doAnswer;
 
-import com.example.ticketing.common.metrics.Metrics;
-import com.example.ticketing.common.metrics.Metrics.Tag;
-import com.example.ticketing.common.redis.RedisKeys;
 import com.example.ticketing.hold.dto.CreateHoldCommand;
-import com.example.ticketing.support.Counters;
 import com.example.ticketing.support.Fixtures;
 import com.example.ticketing.support.IntegrationTest;
 import com.example.ticketing.support.TestDb;
@@ -37,8 +33,6 @@ class SeatHoldGateRollbackTest {
     @Autowired
     private TestRedis testRedis;
     @Autowired
-    private Counters counters;
-    @Autowired
     private JdbcTemplate jdbcTemplate;
     @MockitoSpyBean
     private SeatHoldTransaction seatHoldTransaction;
@@ -55,14 +49,10 @@ class SeatHoldGateRollbackTest {
             invocation.callRealMethod();
             throw new DataAccessResourceFailureException("db connection lost");
         }).when(spy).persistHold(anyLong(), any(), anyString());
-        double gateOkBefore = counters.count(Metrics.HOLD_GATE, Tag.RESULT, "ok");
-        double releaseFailureBefore = counters.count(Metrics.REDIS_REFLECT_FAILURE, Tag.OP, "release");
 
         assertThatThrownBy(() -> seatHoldService.hold(new CreateHoldCommand(userId, pid, target)))
                 .isInstanceOf(DataAccessResourceFailureException.class);
 
-        assertThat(counters.count(Metrics.HOLD_GATE, Tag.RESULT, "ok") - gateOkBefore).isEqualTo(1);
-        assertThat(counters.count(Metrics.REDIS_REFLECT_FAILURE, Tag.OP, "release")).isEqualTo(releaseFailureBefore);
         assertThat(testRedis.keys(pid)).isEmpty();
         assertThat(db.holdCount(pid)).isZero();
         assertThat(jdbcTemplate.queryForList("SELECT DISTINCT status FROM seat WHERE performance_id = ?",

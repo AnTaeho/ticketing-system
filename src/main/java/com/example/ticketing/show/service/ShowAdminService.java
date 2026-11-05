@@ -12,8 +12,6 @@ import com.example.ticketing.show.dto.CreateShowCommand;
 import com.example.ticketing.show.dto.CreateShowResult;
 import com.example.ticketing.show.repository.PerformanceRepository;
 import com.example.ticketing.show.repository.ShowRepository;
-import java.time.Duration;
-import java.time.LocalDateTime;
 import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -23,7 +21,6 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 public class ShowAdminService {
 
-    static final Duration DEFAULT_GATE_OPEN_PERIOD = Duration.ofHours(24);
     static final int MAX_ROWS = 30;
     static final int MAX_SEATS_PER_ROW = 50;
 
@@ -45,25 +42,16 @@ public class ShowAdminService {
         if (!showRepository.existsById(command.showId())) {
             throw new ApiException(ErrorCode.SHOW_NOT_FOUND, Map.of("showId", command.showId()));
         }
-        LocalDateTime gateCloseAt = resolveGateCloseAt(command.openAt(), command.startsAt(), command.gateCloseAt());
         Performance performance = performanceRepository.save(
-                Performance.create(command.showId(), command.startsAt(), command.openAt(), gateCloseAt));
+                Performance.create(command.showId(), command.startsAt(), command.openAt()));
         int seatCount = seatBulkInserter.insert(performance.getId(),
                 SeatLayout.generate(command.sections(), command.rows(), command.seatsPerRow()));
         return new CreatePerformanceResult(performance.getId(), seatCount);
     }
 
-    static LocalDateTime resolveGateCloseAt(LocalDateTime openAt, LocalDateTime startsAt, LocalDateTime requested) {
-        LocalDateTime gateCloseAt = requested != null ? requested : openAt.plus(DEFAULT_GATE_OPEN_PERIOD);
-        return gateCloseAt.isAfter(startsAt) ? startsAt : gateCloseAt;
-    }
-
     private static void validate(CreatePerformanceCommand command) {
         if (!command.openAt().isBefore(command.startsAt())) {
             throw invalid(Map.of("reason", "OPEN_NOT_BEFORE_START"));
-        }
-        if (command.gateCloseAt() != null && !command.gateCloseAt().isAfter(command.openAt())) {
-            throw invalid(Map.of("reason", "GATE_CLOSE_NOT_AFTER_OPEN"));
         }
         checkRange("sections", command.sections(), SeatLayout.MAX_SECTIONS);
         checkRange("rows", command.rows(), MAX_ROWS);

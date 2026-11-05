@@ -31,7 +31,6 @@ import com.example.ticketing.support.TestProperties;
 import com.example.ticketing.support.TestServices;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Duration;
-import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -71,7 +70,7 @@ class PaymentReconcileSchedulerTest {
         scheduler(true).run();
 
         verify(paymentTransaction).openToApproved(2, "tx2");
-        verify(seatGateRedisStore).confirm(new GateHold(11L, 7L, "token", List.of(101L)), Instant.EPOCH);
+        verifyNoInteractions(seatGateRedisStore);
         assertThat(counters.count(Metrics.PAYMENT_RECONCILE, Tag.RESULT, "confirmed")).isEqualTo(1);
     }
 
@@ -126,13 +125,13 @@ class PaymentReconcileSchedulerTest {
 
     private PaymentReconcileScheduler scheduler(boolean gateEnabled) {
         TicketingProperties properties = TestProperties.empty()
-                .hold(new Hold(Duration.ofMinutes(5), 4, true, 1000, 50, Duration.ofMinutes(10)))
-                .payment(new Payment(Duration.ofMinutes(10), Duration.ofMinutes(1), Duration.ofSeconds(30),
+                .hold(new Hold(Duration.ofMinutes(5), 4, true, 1000, 50))
+                .payment(new Payment(Duration.ofMinutes(10), Duration.ofSeconds(30),
                         Duration.ofSeconds(5), RECHECK, Duration.ofSeconds(30), true, 2000, BATCH,
                         Duration.ofSeconds(30)))
-                .gate(new Gate(gateEnabled, 20))
+                .gate(new Gate(gateEnabled))
                 .build();
-        SeatGateReflector reflector = TestServices.gateReflector(seatGateRedisStore, properties, meterRegistry);
+        SeatGateReflector reflector = TestServices.gateReflector(seatGateRedisStore, properties);
         return TestServices.paymentReconcileScheduler(paymentReconcileTransaction, paymentTransaction, pgClient,
                 reflector, properties, meterRegistry);
     }
@@ -151,7 +150,6 @@ class PaymentReconcileSchedulerTest {
         if (!changedSeats) {
             return PaymentSettlement.seatsUnchanged(result);
         }
-        return PaymentSettlement.seatsChanged(result, new GateHold(11L, 7L, "token", List.of(101L)),
-                outcome == PaymentOutcome.CONFIRMED ? Instant.EPOCH : null);
+        return PaymentSettlement.seatsChanged(result, new GateHold(7L, "token", List.of(101L)));
     }
 }

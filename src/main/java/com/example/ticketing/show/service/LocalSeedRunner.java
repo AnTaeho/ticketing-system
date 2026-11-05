@@ -55,7 +55,7 @@ public class LocalSeedRunner implements ApplicationRunner {
 
     private long createPerformance(Long showId, LocalDateTime openAt, LocalDateTime startsAt) {
         return showAdminService.createPerformance(
-                        new CreatePerformanceCommand(showId, startsAt, openAt, null, SECTIONS, ROWS, SEATS_PER_ROW))
+                        new CreatePerformanceCommand(showId, startsAt, openAt, SECTIONS, ROWS, SEATS_PER_ROW))
                 .performanceId();
     }
 }

@@ -18,14 +18,12 @@ public class HoldExpiryScheduler {
 
     private final HoldExpiryTransaction expiryTransaction;
     private final SeatGateReflector gateReflector;
-    private final HoldMetrics metrics;
     private final int batchSize;
 
     public HoldExpiryScheduler(HoldExpiryTransaction expiryTransaction, SeatGateReflector gateReflector,
-                               HoldMetrics metrics, TicketingProperties properties) {
+                               TicketingProperties properties) {
         this.expiryTransaction = expiryTransaction;
         this.gateReflector = gateReflector;
-        this.metrics = metrics;
         this.batchSize = properties.hold().expiryBatchSize();
     }
 
@@ -47,7 +45,6 @@ public class HoldExpiryScheduler {
 
     // 커밋이 끝난 뒤라 Redis를 불러도 된다
     private void afterCommit(List<HoldExpiry> expired) {
-        metrics.expired(expired.size());
-        expired.forEach(hold -> gateReflector.expire(hold.gate()));
+        expired.forEach(hold -> gateReflector.release(hold.gate()));
     }
 }

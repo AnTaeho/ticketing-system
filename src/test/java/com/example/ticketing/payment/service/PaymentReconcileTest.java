@@ -118,15 +118,9 @@ class PaymentReconcileTest {
         long bookingId = db.bookingIdOfHold(held.holdId());
         assertThat(db.outboxCount("TICKET_ISSUED", bookingId)).isEqualTo(1);
 
-        LocalDateTime gateCloseAt = jdbcTemplate.queryForObject(
-                "SELECT gate_close_at FROM performance WHERE performance_id = ?", LocalDateTime.class, held.pid());
-        long expectedMs = Duration.between(db.dbNow(), gateCloseAt).toMillis();
         for (long seatId : held.seatIds()) {
-            String seatKey = RedisKeys.seat(held.pid(), seatId);
-            assertThat(redis.opsForValue().get(seatKey)).isEqualTo(held.holdToken());
-            assertThat(testRedis.pttl(seatKey)).isBetween(expectedMs - TOLERANCE_MS, expectedMs + TOLERANCE_MS);
+            assertThat(redis.opsForValue().get(RedisKeys.seat(held.pid(), seatId))).isEqualTo(held.holdToken());
         }
-        assertThat(redis.hasKey(RedisKeys.userHold(held.userId(), held.pid()))).isFalse();
         assertThat(stubPg.queryCalls()).isEqualTo(1);
         assertThat(counters.count(Metrics.PAYMENT_RECONCILE, Tag.RESULT, "confirmed") - before).isEqualTo(1);
     }
@@ -221,7 +215,6 @@ class PaymentReconcileTest {
         assertThat(db.outboxCount("REFUND_REQUESTED", paymentId)).isEqualTo(1);
         assertThat(db.bookingCountOfHold(held.holdId())).isZero();
         assertThat(redis.hasKey(RedisKeys.seat(held.pid(), kept))).isFalse();
-        assertThat(redis.hasKey(RedisKeys.userHold(held.userId(), held.pid()))).isFalse();
         assertThat(redis.opsForValue().get(RedisKeys.seat(held.pid(), lost)))
                 .isEqualTo(db.holdToken(thiefHold.holdId()));
         assertThat(counters.count(Metrics.PAYMENT_RECONCILE, Tag.RESULT, "seat_lost") - before).isEqualTo(1);
