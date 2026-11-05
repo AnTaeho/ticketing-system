@@ -19,7 +19,6 @@ CREATE TABLE `show_info` (
 
 CREATE TABLE `performance` (
   `performance_id` bigint NOT NULL AUTO_INCREMENT,
-  `gate_close_at` datetime(6) NOT NULL,
   `open_at` datetime(6) NOT NULL,
   `show_id` bigint NOT NULL,
   `starts_at` datetime(6) NOT NULL,
@@ -31,7 +30,6 @@ CREATE TABLE `performance` (
 CREATE TABLE `seat` (
   `seat_id` bigint NOT NULL AUTO_INCREMENT,
   `grade` varchar(10) NOT NULL,
-  `held_until` datetime(6) DEFAULT NULL,
   `hold_id` bigint DEFAULT NULL,
   `performance_id` bigint NOT NULL,
   `price` int NOT NULL,
@@ -52,7 +50,6 @@ CREATE TABLE `seat_hold` (
   `created_at` datetime(6) NOT NULL,
   `expires_at` datetime(6) NOT NULL,
   `hold_token` char(36) NOT NULL,
-  `pay_deadline` datetime(6) DEFAULT NULL,
   `performance_id` bigint NOT NULL,
   `seat_count` int NOT NULL,
   `status` varchar(12) NOT NULL,
@@ -63,7 +60,7 @@ CREATE TABLE `seat_hold` (
   UNIQUE KEY `uk_hold_token` (`hold_token`),
   KEY `idx_hold_expiry` (`status`,`expires_at`),
   KEY `idx_hold_user` (`user_id`,`performance_id`,`status`),
-  CONSTRAINT `seat_hold_chk_1` CHECK ((`status` in (_utf8mb4'HELD',_utf8mb4'PAYING',_utf8mb4'CONFIRMED',_utf8mb4'EXPIRED',_utf8mb4'RELEASED',_utf8mb4'REFUNDING')))
+  CONSTRAINT `seat_hold_chk_1` CHECK ((`status` in (_utf8mb4'HELD',_utf8mb4'PAYING',_utf8mb4'CONFIRMED',_utf8mb4'EXPIRED',_utf8mb4'RELEASED')))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE `booking_payment` (
@@ -106,43 +103,15 @@ CREATE TABLE `booking` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE `booking_seat` (
-  `booking_id` bigint NOT NULL,
   `seat_id` bigint NOT NULL,
   `grade` varchar(10) NOT NULL,
   `price` int NOT NULL,
   `row_no` int NOT NULL,
   `seat_no` int NOT NULL,
   `section` varchar(10) NOT NULL,
+  `booking_id` bigint NOT NULL,
   PRIMARY KEY (`booking_id`,`seat_id`),
   CONSTRAINT `booking_seat_chk_1` CHECK ((`grade` in (_utf8mb4'VIP',_utf8mb4'R',_utf8mb4'S',_utf8mb4'A')))
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
-
-CREATE TABLE `outbox_task` (
-  `outbox_task_id` bigint NOT NULL AUTO_INCREMENT,
-  `aggregate_id` bigint NOT NULL,
-  `attempt` int NOT NULL,
-  `created_at` datetime(6) NOT NULL,
-  `last_error` varchar(500) DEFAULT NULL,
-  `locked_until` datetime(6) DEFAULT NULL,
-  `next_attempt_at` datetime(6) NOT NULL,
-  `payload` text NOT NULL,
-  `status` varchar(12) NOT NULL,
-  `task_type` varchar(30) NOT NULL,
-  `updated_at` datetime(6) NOT NULL,
-  PRIMARY KEY (`outbox_task_id`),
-  UNIQUE KEY `uk_outbox_dedup` (`task_type`,`aggregate_id`),
-  KEY `idx_outbox_poll` (`status`,`next_attempt_at`),
-  CONSTRAINT `outbox_task_chk_1` CHECK ((`status` in (_utf8mb4'PENDING',_utf8mb4'PROCESSING',_utf8mb4'DONE',_utf8mb4'FAILED'))),
-  CONSTRAINT `outbox_task_chk_2` CHECK ((`task_type` in (_utf8mb4'TICKET_ISSUED',_utf8mb4'REFUND_REQUESTED')))
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
-
-CREATE TABLE `notification` (
-  `notification_id` bigint NOT NULL AUTO_INCREMENT,
-  `booking_id` bigint NOT NULL,
-  `created_at` datetime(6) NOT NULL,
-  `message` varchar(300) NOT NULL,
-  PRIMARY KEY (`notification_id`),
-  UNIQUE KEY `uk_notification_booking` (`booking_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE `fake_pg_transaction` (
@@ -155,4 +124,3 @@ CREATE TABLE `fake_pg_transaction` (
   PRIMARY KEY (`order_id`),
   CONSTRAINT `fake_pg_transaction_chk_1` CHECK ((`status` in (_utf8mb4'PROCESSING',_utf8mb4'APPROVED',_utf8mb4'DECLINED',_utf8mb4'CANCELLED')))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
-
