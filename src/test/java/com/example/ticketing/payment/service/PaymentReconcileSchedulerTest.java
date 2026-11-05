@@ -146,11 +146,20 @@ class PaymentReconcileSchedulerTest {
     }
 
     private static PaymentSettlement settlement(long paymentId, PaymentOutcome outcome, boolean changedSeats) {
-        PaymentResult result = new PaymentResult(paymentId, outcome, PaymentStatus.APPROVED, HoldStatus.CONFIRMED,
-                null, null);
+        PaymentResult result = new PaymentResult(paymentId, statusOf(outcome), HoldStatus.CONFIRMED, null, null);
         if (!changedSeats) {
             return PaymentSettlement.seatsUnchanged(result);
         }
         return PaymentSettlement.seatsChanged(result, new GateHold(7L, "token", List.of(101L)));
+    }
+
+    private static PaymentStatus statusOf(PaymentOutcome outcome) {
+        return switch (outcome) {
+            case PROCESSING -> PaymentStatus.REQUESTED;
+            case UNKNOWN -> PaymentStatus.UNKNOWN;
+            case CONFIRMED -> PaymentStatus.APPROVED;
+            case DECLINED -> PaymentStatus.DECLINED;
+            case CANCELLED -> PaymentStatus.CANCELLED;
+        };
     }
 }

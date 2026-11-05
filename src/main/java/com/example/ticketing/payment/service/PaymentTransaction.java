@@ -15,7 +15,6 @@ import com.example.ticketing.hold.domain.SeatHold;
 import com.example.ticketing.hold.repository.SeatHoldRepository;
 import com.example.ticketing.payment.domain.Payment;
 import com.example.ticketing.payment.domain.PaymentStatus;
-import com.example.ticketing.payment.dto.PaymentOutcome;
 import com.example.ticketing.payment.dto.PaymentResult;
 import com.example.ticketing.payment.dto.PaymentSettlement;
 import com.example.ticketing.payment.dto.PaymentStart;
@@ -108,7 +107,7 @@ public class PaymentTransaction {
         IssuedBooking booking = bookingIssuer.issue(new IssueBookingCommand(hold.getUserId(),
                 hold.getPerformanceId(), holdId, paymentId, hold.getTotalAmount(),
                 seats.stream().map(Seat::info).toList(), now));
-        return PaymentSettlement.seatsChanged(new PaymentResult(paymentId, PaymentOutcome.CONFIRMED,
+        return PaymentSettlement.seatsChanged(new PaymentResult(paymentId,
                         PaymentStatus.APPROVED, HoldStatus.CONFIRMED, booking.bookingId(), booking.bookingNumber()),
                 gateOf(hold, seatIds));
     }
@@ -180,7 +179,7 @@ public class PaymentTransaction {
         }
         RowCounts.requireExactly(seatRepository.heldToAvailable(hold.getId()), seats.size(), "seat AVAILABLE");
         return PaymentSettlement.seatsChanged(new PaymentResult(paymentId,
-                PaymentOutcome.of(target), target, HoldStatus.RELEASED, null, null),
+                target, HoldStatus.RELEASED, null, null),
                 gateOf(hold, idsOf(seats)));
     }
 

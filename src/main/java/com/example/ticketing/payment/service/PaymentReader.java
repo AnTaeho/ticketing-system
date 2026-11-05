@@ -9,7 +9,7 @@ import com.example.ticketing.hold.domain.SeatHold;
 import com.example.ticketing.hold.repository.SeatHoldRepository;
 import com.example.ticketing.payment.domain.Payment;
 import com.example.ticketing.payment.dto.DuePayment;
-import com.example.ticketing.payment.dto.PaymentOutcome;
+import com.example.ticketing.payment.domain.PaymentStatus;
 import com.example.ticketing.payment.dto.PaymentResult;
 import com.example.ticketing.payment.dto.PaymentStart;
 import com.example.ticketing.payment.dto.PaymentStart.Existing;
@@ -74,11 +74,10 @@ public class PaymentReader {
     }
 
     public PaymentResult resultOf(Payment payment, SeatHold hold) {
-        PaymentOutcome outcome = PaymentOutcome.of(payment.getStatus());
-        Optional<IssuedBooking> booking = outcome == PaymentOutcome.CONFIRMED
+        Optional<IssuedBooking> booking = payment.getStatus() == PaymentStatus.APPROVED
                 ? bookingIssuer.findByHold(hold.getId())
                 : Optional.empty();
-        return new PaymentResult(payment.getId(), outcome, payment.getStatus(), hold.getStatus(),
+        return new PaymentResult(payment.getId(), payment.getStatus(), hold.getStatus(),
                 booking.map(IssuedBooking::bookingId).orElse(null),
                 booking.map(IssuedBooking::bookingNumber).orElse(null));
     }
