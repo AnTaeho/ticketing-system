@@ -14,7 +14,7 @@ spring:
   task:
     scheduling:
       pool:
-        size: 6                # 예매 @Scheduled 6개
+        size: 2                # 예매 @Scheduled 2개
 
   data:
     redis:
@@ -58,13 +58,6 @@ ticketing:
     reconcile-batch-size: 20
   gate:
     enabled: true              # 부하 테스트 비교 스위치
-  outbox:
-    worker-enabled: true
-    poll-interval-ms: 500
-    batch-size: 50
-    lock-duration: 60s
-    max-attempts: 5
-    max-backoff: 60s           # 재시도 간격은 2^attempt초이고 이 값에서 멈춘다
   pg:
     base-url: ""               # 비우면 http://localhost:${local.server.port}/fake-pg
     connect-timeout: 500ms

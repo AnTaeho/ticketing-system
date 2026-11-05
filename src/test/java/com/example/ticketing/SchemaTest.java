@@ -134,38 +134,6 @@ class SchemaTest {
     }
 
     @Test
-    @DisplayName("작업 테이블(outbox_task)은 같은 대상의 같은 작업을 한 번만 쌓는다")
-    void outboxTask() {
-        String ddl = db.showCreateTable("outbox_task");
-
-        assertThat(ddl)
-                .contains("PRIMARY KEY (`outbox_task_id`)")
-                .contains("UNIQUE KEY `uk_outbox_dedup` (`task_type`,`aggregate_id`)")
-                .contains("KEY `idx_outbox_poll` (`status`,`next_attempt_at`)")
-                .contains("`task_type` varchar(30) NOT NULL")
-                .contains("`aggregate_id` bigint NOT NULL")
-                .contains("`payload` text NOT NULL")
-                .contains("`status` varchar(12) NOT NULL")
-                .contains("`attempt` int NOT NULL")
-                .contains("`next_attempt_at` datetime(6) NOT NULL")
-                .contains("`locked_until` datetime(6) DEFAULT NULL")
-                .contains("`last_error` varchar(500) DEFAULT NULL");
-    }
-
-    @Test
-    @DisplayName("알림 테이블(notification)은 예매 하나에 알림 하나만 둔다")
-    void notification() {
-        String ddl = db.showCreateTable("notification");
-
-        assertThat(ddl)
-                .contains("PRIMARY KEY (`notification_id`)")
-                .contains("UNIQUE KEY `uk_notification_booking` (`booking_id`)")
-                .doesNotContain("user_id")
-                .contains("`message` varchar(300) NOT NULL")
-                .contains("`created_at` datetime(6) NOT NULL");
-    }
-
-    @Test
     @DisplayName("가짜 PG 테이블(fake_pg_transaction)은 주문번호를 기본 키로 쓴다")
     void fakePgTransaction() {
         String ddl = db.showCreateTable("fake_pg_transaction");

@@ -6,7 +6,6 @@ import com.example.ticketing.booking.repository.BookingRepository;
 import com.example.ticketing.booking.repository.BookingSeatRepository;
 import com.example.ticketing.fakepg.repository.FakePgOrderRepository;
 import com.example.ticketing.hold.repository.SeatHoldRepository;
-import com.example.ticketing.outbox.repository.OutboxTaskRepository;
 import com.example.ticketing.payment.domain.PaymentStatus;
 import com.example.ticketing.payment.repository.PaymentRepository;
 import com.example.ticketing.seat.repository.SeatRepository;
@@ -54,7 +53,7 @@ class RepositoryQueryRulesTest {
     void modifyingOptionsAreConsistent() {
         List<Method> modifying = new ArrayList<>();
         for (Class<?> repository : List.of(SeatHoldRepository.class, SeatRepository.class, PaymentRepository.class,
-                BookingRepository.class, BookingSeatRepository.class, OutboxTaskRepository.class,
+                BookingRepository.class, BookingSeatRepository.class,
                 FakePgOrderRepository.class)) {
             Arrays.stream(repository.getDeclaredMethods())
                     .filter(method -> method.isAnnotationPresent(Modifying.class))

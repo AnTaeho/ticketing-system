@@ -7,11 +7,10 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import com.example.ticketing.notification.service.TicketIssuedHandler;
-import com.example.ticketing.outbox.dto.TicketIssuedPayload;
 import com.example.ticketing.support.Fixtures;
 import com.example.ticketing.support.Fixtures.Confirmed;
 import com.example.ticketing.support.IntegrationTest;
+import com.example.ticketing.payment.client.PgResult;
 import com.example.ticketing.support.StubPgClient;
 import com.example.ticketing.support.StubPgTestConfig;
 import com.example.ticketing.support.TestDb;
@@ -30,8 +29,6 @@ import tools.jackson.databind.JsonNode;
 @Import(StubPgTestConfig.class)
 class BookingApiControllerTest {
 
-    @Autowired
-    private TicketIssuedHandler ticketIssuedHandler;
     @Autowired
     private StubPgClient stubPg;
     @Autowired
@@ -61,7 +58,6 @@ class BookingApiControllerTest {
         Confirmed older = confirmed(userId, 2);
         Confirmed newer = confirmed(userId, 1);
         fixtures.confirmed(1);
-        issueTicket(older.bookingId());
 
         JsonNode list = testMvc.body(mockMvc.perform(get("/api/bookings").header(USER_ID_HEADER, userId))
                 .andExpect(status().isOk())
@@ -79,12 +75,7 @@ class BookingApiControllerTest {
         assertThat(first.get("startsAt").isString()).isTrue();
         assertThat(first.get("createdAt").isString()).isTrue();
         assertThat(first.get("cancelledAt").isNull()).isTrue();
-        assertThat(first.get("refund").isNull()).isTrue();
         assertThat(first.get("cancellable").asBoolean()).isTrue();
-        assertThat(first.get("notification").asString())
-                .startsWith("「" + first.get("showTitle").asString() + "」 ")
-                .contains("A구역 1열 1번 외 1석 예매가 확정됐어요")
-                .endsWith(first.get("bookingNumber").asString());
         JsonNode seats = first.get("seats");
         assertThat(seats).hasSize(2);
         assertThat(seats.get(0).get("seatId").asLong()).isEqualTo(older.seatIds().get(0));
@@ -96,17 +87,14 @@ class BookingApiControllerTest {
         assertThat(seats.get(0).get("price").asInt() + seats.get(1).get("price").asInt())
                 .isEqualTo(older.totalAmount());
 
-        // 알림이 아직 없는 예매는 notification이 null
-        assertThat(list.get(0).get("notification").isNull()).isTrue();
         assertThat(list.get(0).get("seats")).hasSize(1);
     }
 
     @Test
-    @DisplayName("상세 → 취소 → 상세 흐름에서 예매가 CANCELLED, 환불이 REQUESTED로 바뀐다")
+    @DisplayName("상세 → 취소 → 상세 흐름에서 예매가 CANCELLED로 바뀐다")
     void detailAndCancel() throws Exception {
         Confirmed b = fixtures.confirmed(2);
         long userId = b.userId();
-        issueTicket(b.bookingId());
 
         mockMvc.perform(get("/api/bookings/{id}", b.bookingId()).header(USER_ID_HEADER, userId))
                 .andExpect(status().isOk())
@@ -119,18 +107,31 @@ class BookingApiControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.bookingId").value(b.bookingId()))
                 .andExpect(jsonPath("$.status").value("CANCELLED"))
-                .andExpect(jsonPath("$.refund").value("REQUESTED"))
                 .andReturn());
-        assertThat(cancel.propertyNames()).containsExactlyInAnyOrder("bookingId", "status", "refund");
+        assertThat(cancel.propertyNames()).containsExactlyInAnyOrder("bookingId", "status");
 
         mockMvc.perform(get("/api/bookings/{id}", b.bookingId()).header(USER_ID_HEADER, userId))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("CANCELLED"))
                 .andExpect(jsonPath("$.cancelledAt").isString())
-                .andExpect(jsonPath("$.refund").value("REQUESTED"))
                 .andExpect(jsonPath("$.cancellable").value(false))
-                .andExpect(jsonPath("$.seats.length()").value(2))
-                .andExpect(jsonPath("$.notification").isString());
+                .andExpect(jsonPath("$.seats.length()").value(2));
+    }
+
+    @Test
+    @DisplayName("PG 환불이 결과 모름이면 취소는 503 REFUND_FAILED이고 예매는 확정 그대로다")
+    void cancelRefundFailed() throws Exception {
+        Confirmed b = fixtures.confirmed(1);
+        stubPg.cancelWith(PgResult.unknown("read timeout 3s"));
+
+        mockMvc.perform(post("/api/bookings/{id}/cancel", b.bookingId()).header(USER_ID_HEADER, b.userId()))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.code").value("REFUND_FAILED"));
+
+        mockMvc.perform(get("/api/bookings/{id}", b.bookingId()).header(USER_ID_HEADER, b.userId()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("CONFIRMED"))
+                .andExpect(jsonPath("$.cancellable").value(true));
     }
 
     @Test
@@ -158,10 +159,5 @@ class BookingApiControllerTest {
     private Confirmed confirmed(long userId, int seatCount) {
         long pid = fixtures.newPerformance(1, 1, 6);
         return fixtures.confirmed(pid, userId, db.seatIds(pid).subList(0, seatCount));
-    }
-
-    // 워커 대신 발권 핸들러를 바로 불러 알림을 만든다
-    private void issueTicket(long bookingId) {
-        ticketIssuedHandler.handle(new TicketIssuedPayload(bookingId));
     }
 }

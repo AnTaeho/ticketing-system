@@ -2,8 +2,6 @@ package com.example.ticketing.booking.service;
 
 import com.example.ticketing.booking.domain.Booking;
 import com.example.ticketing.booking.domain.BookingStatus;
-import com.example.ticketing.booking.dto.BookingCancellation;
-import com.example.ticketing.booking.dto.RefundStatus;
 import com.example.ticketing.booking.repository.BookingRepository;
 import com.example.ticketing.common.error.ApiException;
 import com.example.ticketing.common.error.ErrorCode;
@@ -11,15 +9,11 @@ import com.example.ticketing.common.time.DbClock;
 import com.example.ticketing.hold.domain.GateHold;
 import com.example.ticketing.hold.domain.SeatHold;
 import com.example.ticketing.hold.repository.SeatHoldRepository;
-import com.example.ticketing.outbox.domain.OutboxTaskType;
-import com.example.ticketing.outbox.dto.RefundRequestedPayload;
-import com.example.ticketing.outbox.service.OutboxWriter;
 import com.example.ticketing.seat.domain.Seat;
 import com.example.ticketing.seat.repository.SeatRepository;
-import com.example.ticketing.show.repository.PerformanceRepository;
-import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Isolation;
@@ -33,38 +27,25 @@ public class BookingTransaction {
     private final BookingRepository bookingRepository;
     private final SeatHoldRepository seatHoldRepository;
     private final SeatRepository seatRepository;
-    private final PerformanceRepository performanceRepository;
-    private final OutboxWriter outboxWriter;
     private final DbClock dbClock;
 
-    // booking 락이 같은 예매의 취소를 줄 세운다. 뒤에 온 쪽은 CANCELLED를 보고 아무것도 바꾸지 않으므로 환불 작업은 하나다
+    // PG 환불이 끝난 뒤 부르므로 회차 시작은 다시 보지 않는다. booking 락이 같은 예매의 취소를 줄 세우고,
+    // 이미 취소된 예매는 아무것도 바꾸지 않아 빈 값을 돌려준다. 값이 있으면 커밋 뒤 지울 좌석 게이트 키다
     @Transactional(isolation = Isolation.READ_COMMITTED)
-    public BookingCancellation confirmedToCancelled(long userId, long bookingId) {
+    public Optional<GateHold> confirmedToCancelled(long userId, long bookingId) {
         Booking booking = bookingRepository.lockByIdAndUserId(bookingId, userId)
-                .orElseThrow(() -> new ApiException(ErrorCode.BOOKING_NOT_FOUND,
-                        Map.of("bookingId", bookingId)));
+                .orElseThrow(() -> new ApiException(ErrorCode.BOOKING_NOT_FOUND, Map.of("bookingId", bookingId)));
         if (booking.getStatus() == BookingStatus.CANCELLED) {
-            boolean refunded = bookingRepository.findPaymentRefunded(booking.getPaymentId())
-                    .orElseThrow(() -> new IllegalStateException("예매 " + bookingId + "의 결제가 없다"));
-            return BookingCancellation.alreadyCancelled(RefundStatus.of(BookingStatus.CANCELLED, refunded));
+            return Optional.empty();
         }
-        if (performanceRepository.countStarted(booking.getPerformanceId()) > 0) {
-            throw new ApiException(ErrorCode.CANCEL_NOT_ALLOWED, Map.of("bookingId", bookingId));
-        }
-        String orderId = bookingRepository.findPaymentOrderId(booking.getPaymentId())
-                .orElseThrow(() -> new IllegalStateException("예매 " + bookingId + "의 결제가 없다"));
 
-        LocalDateTime now = dbClock.now();
-        booking.confirmedToCancelled(now);
+        booking.confirmedToCancelled(dbClock.now());
         SeatHold hold = seatHoldRepository.findById(booking.getHoldId())
                 .orElseThrow(() -> new IllegalStateException("예매 " + bookingId + "의 hold가 없다"));
         // 게이트 키를 지울 좌석 ID는 hold_id를 비우기 전에 읽어 둔다
         List<Seat> seats = seatRepository.lockSoldSeats(hold.getId());
         List<Long> seatIds = seats.stream().map(Seat::getId).toList();
         seats.forEach(Seat::soldToAvailable);
-        outboxWriter.write(OutboxTaskType.REFUND_REQUESTED, booking.getPaymentId(),
-                new RefundRequestedPayload(booking.getPaymentId(), orderId), now);
-        return BookingCancellation.cancelled(
-                new GateHold(booking.getPerformanceId(), hold.getHoldToken(), seatIds));
+        return Optional.of(new GateHold(booking.getPerformanceId(), hold.getHoldToken(), seatIds));
     }
 }

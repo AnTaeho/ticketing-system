@@ -104,55 +104,9 @@ public class TestDb {
                 + "FROM booking_payment WHERE payment_id = ?", Long.class, paymentId) / 1_000;
     }
 
-    public long outboxCount(String type, long aggregateId) {
-        return jdbcTemplate.queryForObject("SELECT COUNT(*) FROM outbox_task WHERE task_type = ? AND aggregate_id = ?",
-                Long.class, type, aggregateId);
-    }
-
-    public Map<String, Object> outboxTask(String type, long aggregateId) {
-        return jdbcTemplate.queryForMap("SELECT status, attempt, payload, last_error, next_attempt_at, locked_until "
-                + "FROM outbox_task WHERE task_type = ? AND aggregate_id = ?", type, aggregateId);
-    }
-
-    public long outboxTaskId(String type, long aggregateId) {
-        return jdbcTemplate.queryForObject("SELECT outbox_task_id FROM outbox_task WHERE task_type = ? AND aggregate_id = ?",
-                Long.class, type, aggregateId);
-    }
-
-    public void expireOutboxLock(long taskId) {
-        jdbcTemplate.update("UPDATE outbox_task SET locked_until = NOW(6) - INTERVAL 1 SECOND WHERE outbox_task_id = ?", taskId);
-    }
-
-    public void makeOutboxDue(long taskId) {
-        jdbcTemplate.update("UPDATE outbox_task SET next_attempt_at = NOW(6) - INTERVAL 1 SECOND WHERE outbox_task_id = ?",
-                taskId);
-    }
-
-    // 다음 시도까지 남은 시간(ms)
-    public long outboxRetryDelayMs(long taskId) {
-        return jdbcTemplate.queryForObject("SELECT TIMESTAMPDIFF(MICROSECOND, NOW(6), next_attempt_at) "
-                + "FROM outbox_task WHERE outbox_task_id = ?", Long.class, taskId) / 1_000;
-    }
-
     // 대사 테스트가 이전 테스트들이 남긴 결과 모름·요청 결제를 집지 않게 먼 미래로 미룬다(테스트 전용 DB)
     public void parkUnsettledPayments() {
         jdbcTemplate.update("UPDATE booking_payment SET next_check_at = " + FAR_FUTURE
                 + " WHERE status IN ('REQUESTED', 'UNKNOWN')");
-    }
-
-    // 이전 테스트가 남긴 미완료 작업을 먼 미래로 미뤄 이 테스트의 집기에 섞이지 않게 한다(테스트 전용 DB)
-    public void parkOutboxTasks() {
-        jdbcTemplate.update(parkOutboxSql(""));
-    }
-
-    // 넘긴 작업 하나만 남기고 미완료 작업을 미룬다
-    public void parkOutboxTasksExcept(String type, long aggregateId) {
-        jdbcTemplate.update(parkOutboxSql(" AND NOT (task_type = ? AND aggregate_id = ?)"), type, aggregateId);
-    }
-
-    private static String parkOutboxSql(String extraCondition) {
-        return "UPDATE outbox_task SET next_attempt_at = " + FAR_FUTURE + ", "
-                + "locked_until = IF(status = 'PROCESSING', " + FAR_FUTURE + ", locked_until) "
-                + "WHERE status IN ('PENDING', 'PROCESSING')" + extraCondition;
     }
 }

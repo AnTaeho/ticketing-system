@@ -44,8 +44,6 @@ import org.springframework.context.annotation.Import;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.jdbc.core.JdbcTemplate;
-import tools.jackson.databind.JsonNode;
-import tools.jackson.databind.json.JsonMapper;
 
 @IntegrationTest
 @Import(StubPgTestConfig.class)
@@ -75,8 +73,6 @@ class PaymentServiceTest {
     private TestDb db;
     @Autowired
     private TestRedis testRedis;
-    @Autowired
-    private JsonMapper jsonMapper;
 
     private StringRedisTemplate redis;
 
@@ -132,14 +128,6 @@ class PaymentServiceTest {
         });
         assertThat(copied.stream().mapToInt(row -> ((Number) row.get("price")).intValue()).sum())
                 .isEqualTo(held.totalAmount());
-
-        assertThat(db.outboxCount("TICKET_ISSUED", bookingId)).isEqualTo(1);
-        Map<String, Object> outbox = db.outboxTask("TICKET_ISSUED", bookingId);
-        assertThat(outbox).containsEntry("status", "PENDING").containsEntry("attempt", 0);
-        assertThat(outbox.get("locked_until")).isNull();
-        JsonNode payload = jsonMapper.readTree((String) outbox.get("payload"));
-        assertThat(payload.get("bookingId").asLong()).isEqualTo(bookingId);
-        assertThat(payload.size()).isEqualTo(1);
 
         assertThat(db.holdStatus(held.holdId())).isEqualTo("CONFIRMED");
         held.seatIds().forEach(seatId -> assertThat(db.seat(seatId)).containsEntry("status", "SOLD")

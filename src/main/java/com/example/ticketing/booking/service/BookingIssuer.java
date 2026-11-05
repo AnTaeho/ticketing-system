@@ -5,9 +5,6 @@ import com.example.ticketing.booking.domain.BookingNumber;
 import com.example.ticketing.booking.dto.IssueBookingCommand;
 import com.example.ticketing.booking.dto.IssuedBooking;
 import com.example.ticketing.booking.repository.BookingRepository;
-import com.example.ticketing.outbox.domain.OutboxTaskType;
-import com.example.ticketing.outbox.dto.TicketIssuedPayload;
-import com.example.ticketing.outbox.service.OutboxWriter;
 import java.util.Optional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
@@ -20,16 +17,13 @@ import org.springframework.transaction.annotation.Transactional;
 public class BookingIssuer {
 
     private final BookingRepository bookingRepository;
-    private final OutboxWriter outboxWriter;
 
-    // 좌석 SOLD 전이와 같은 트랜잭션이어야 좌석 사본과 발권 작업이 확정과 함께 남는다
+    // 좌석 SOLD 전이와 같은 트랜잭션이어야 예매와 좌석 사본이 확정과 함께 남는다
     @Transactional(propagation = Propagation.MANDATORY)
     public IssuedBooking issue(IssueBookingCommand command) {
         Booking booking = bookingRepository.save(Booking.confirmed(BookingNumber.of(command.dbNow(), command.holdId()),
                 command.holdId(), command.paymentId(), command.userId(), command.performanceId(),
                 command.totalAmount(), command.seats()));
-        outboxWriter.write(OutboxTaskType.TICKET_ISSUED, booking.getId(), new TicketIssuedPayload(booking.getId()),
-                command.dbNow());
         return new IssuedBooking(booking.getId(), booking.getBookingNumber());
     }
 

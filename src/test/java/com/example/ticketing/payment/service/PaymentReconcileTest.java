@@ -104,7 +104,6 @@ class PaymentReconcileTest {
         held.seatIds().forEach(seatId -> assertThat(db.seat(seatId)).containsEntry("status", "SOLD")
                 .containsEntry("hold_id", held.holdId()));
         long bookingId = db.bookingIdOfHold(held.holdId());
-        assertThat(db.outboxCount("TICKET_ISSUED", bookingId)).isEqualTo(1);
 
         for (long seatId : held.seatIds()) {
             assertThat(redis.opsForValue().get(RedisKeys.seat(held.pid(), seatId))).isEqualTo(held.holdToken());

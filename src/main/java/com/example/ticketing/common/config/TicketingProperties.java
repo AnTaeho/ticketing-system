@@ -19,7 +19,6 @@ public record TicketingProperties(
         @NotNull @Valid Hold hold,
         @NotNull @Valid Payment payment,
         @NotNull @Valid Gate gate,
-        @NotNull @Valid Outbox outbox,
         @NotNull @Valid Pg pg,
         @NotNull @Valid FakePg fakePg
 ) {
@@ -49,16 +48,6 @@ public record TicketingProperties(
 
     public record Gate(
             boolean enabled
-    ) {
-    }
-
-    public record Outbox(
-            boolean workerEnabled,
-            @Positive long pollIntervalMs, // @Scheduled 전용
-            @Positive int batchSize,
-            @NotNull @DurationMin(millis = 1) Duration lockDuration,
-            @Positive int maxAttempts,
-            @NotNull @DurationMin(seconds = 1) Duration maxBackoff
     ) {
     }
 

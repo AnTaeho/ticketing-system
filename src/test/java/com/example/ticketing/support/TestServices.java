@@ -1,6 +1,8 @@
 package com.example.ticketing.support;
 
+import com.example.ticketing.booking.service.BookingReader;
 import com.example.ticketing.booking.service.BookingService;
+import com.example.ticketing.booking.service.PaymentRefunder;
 import com.example.ticketing.booking.service.BookingTransaction;
 import com.example.ticketing.common.config.TicketingProperties;
 import com.example.ticketing.common.time.DbClock;
@@ -11,9 +13,6 @@ import com.example.ticketing.hold.service.HoldExpiryTransaction;
 import com.example.ticketing.hold.service.SeatGateReflector;
 import com.example.ticketing.hold.service.SeatHoldService;
 import com.example.ticketing.hold.service.SeatHoldTransaction;
-import com.example.ticketing.outbox.service.OutboxDispatchScheduler;
-import com.example.ticketing.outbox.service.OutboxHandler;
-import com.example.ticketing.outbox.service.OutboxTaskTransaction;
 import com.example.ticketing.payment.client.HttpPgClient;
 import com.example.ticketing.payment.client.PgClient;
 import com.example.ticketing.payment.service.PaymentGateReflector;
@@ -24,7 +23,6 @@ import com.example.ticketing.payment.service.PaymentTransaction;
 import com.example.ticketing.seat.service.SeatCatalog;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Clock;
-import java.util.List;
 import org.springframework.boot.test.context.TestComponent;
 import org.springframework.context.ApplicationContext;
 import org.springframework.core.env.Environment;
@@ -78,7 +76,8 @@ public class TestServices {
     }
 
     public BookingService bookingService(SeatGateReflector reflector) {
-        return new BookingService(bean(BookingTransaction.class), reflector);
+        return new BookingService(bean(BookingReader.class), bean(PaymentRefunder.class),
+                bean(BookingTransaction.class), reflector);
     }
 
     public static PaymentReconcileScheduler paymentReconcileScheduler(
@@ -93,19 +92,6 @@ public class TestServices {
     public PaymentReconcileScheduler paymentReconcileScheduler() {
         return paymentReconcileScheduler(bean(PaymentReader.class), bean(PaymentReconcileTransaction.class), bean(PaymentTransaction.class),
                 bean(PgClient.class), bean(SeatGateReflector.class), contextProperties(), meterRegistry());
-    }
-
-    public OutboxDispatchScheduler outboxDispatchScheduler() {
-        List<OutboxHandler<?>> handlers = context.getBeanProvider(OutboxHandler.class).orderedStream()
-                .<OutboxHandler<?>>map(handler -> handler)
-                .toList();
-        return outboxDispatchScheduler(handlers, contextProperties());
-    }
-
-    public OutboxDispatchScheduler outboxDispatchScheduler(List<OutboxHandler<?>> handlers,
-                                                           TicketingProperties properties) {
-        return new OutboxDispatchScheduler(bean(OutboxTaskTransaction.class), handlers, bean(JsonMapper.class),
-                System::nanoTime, properties, meterRegistry());
     }
 
     public HttpPgClient httpPgClient(TicketingProperties properties, Environment environment) {

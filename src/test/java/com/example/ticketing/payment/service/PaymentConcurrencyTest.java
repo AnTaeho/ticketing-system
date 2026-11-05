@@ -145,7 +145,6 @@ class PaymentConcurrencyTest {
         assertThat(db.bookingCountOfHold(held.holdId())).isEqualTo(1);
         assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM booking_seat WHERE booking_id = ?",
                 Long.class, bookingId)).isEqualTo(3);
-        assertThat(db.outboxCount("TICKET_ISSUED", bookingId)).isEqualTo(1);
         assertThat(db.payment(paymentId)).containsEntry("status", "APPROVED")
                 .containsEntry("pg_tx_id", "pg-tx-" + paymentId);
     }

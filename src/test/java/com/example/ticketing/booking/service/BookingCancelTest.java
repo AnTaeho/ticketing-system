@@ -10,7 +10,6 @@ import static org.mockito.Mockito.verify;
 import com.example.ticketing.booking.domain.BookingStatus;
 import com.example.ticketing.booking.dto.BookingResult;
 import com.example.ticketing.booking.dto.CancelResult;
-import com.example.ticketing.booking.dto.RefundStatus;
 import com.example.ticketing.common.config.TicketingProperties;
 import com.example.ticketing.common.error.ApiException;
 import com.example.ticketing.common.error.ErrorCode;
@@ -42,8 +41,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Import;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.jdbc.core.JdbcTemplate;
-import tools.jackson.databind.JsonNode;
-import tools.jackson.databind.json.JsonMapper;
 
 @IntegrationTest
 @Import(StubPgTestConfig.class)
@@ -68,8 +65,6 @@ class BookingCancelTest {
     @Autowired
     private JdbcTemplate jdbcTemplate;
     @Autowired
-    private JsonMapper jsonMapper;
-    @Autowired
     private TicketingProperties properties;
 
     private StringRedisTemplate redis;
@@ -86,7 +81,7 @@ class BookingCancelTest {
     }
 
     @Test
-    @DisplayName("확정 예매를 취소하면 좌석이 풀리고 환불 작업이 쌓여 다른 사용자가 바로 잡을 수 있다")
+    @DisplayName("확정 예매를 취소하면 PG 환불 뒤 좌석이 풀리고 결제가 CANCELLED가 되어 다른 사용자가 바로 잡을 수 있다")
     void cancelConfirmedBooking() {
         Confirmed c = fixtures.confirmed(2);
         c.seatIds().forEach(seatId -> assertThat(redis.opsForValue().get(RedisKeys.seat(c.pid(), seatId)))
@@ -94,22 +89,16 @@ class BookingCancelTest {
 
         CancelResult response = bookingService.cancel(c.userId(), c.bookingId());
 
-        assertThat(response)
-                .isEqualTo(new CancelResult(c.bookingId(), BookingStatus.CANCELLED, RefundStatus.REQUESTED));
+        assertThat(response).isEqualTo(new CancelResult(c.bookingId(), BookingStatus.CANCELLED));
         Map<String, Object> booking = jdbcTemplate.queryForMap(
                 "SELECT status, cancelled_at FROM booking WHERE booking_id = ?", c.bookingId());
         assertThat(booking).containsEntry("status", "CANCELLED");
         assertThat(booking.get("cancelled_at")).isNotNull();
         c.seatIds().forEach(seatId -> assertThat(db.seat(seatId)).containsEntry("status", "AVAILABLE")
                 .containsEntry("hold_id", null));
-        assertThat(db.outboxCount("REFUND_REQUESTED", c.paymentId())).isEqualTo(1);
-        Map<String, Object> task = db.outboxTask("REFUND_REQUESTED", c.paymentId());
-        assertThat(task).containsEntry("status", "PENDING").containsEntry("attempt", 0);
-        JsonNode payload = jsonMapper.readTree((String) task.get("payload"));
-        assertThat(payload.get("paymentId").asLong()).isEqualTo(c.paymentId());
-        assertThat(payload.get("orderId").asString()).isEqualTo(db.payment(c.paymentId()).get("order_id"));
+        assertThat(stubPg.cancelCalls()).isEqualTo(1);
         c.seatIds().forEach(seatId -> assertThat(redis.hasKey(RedisKeys.seat(c.pid(), seatId))).isFalse());
-        assertThat(db.payment(c.paymentId())).containsEntry("status", "APPROVED");
+        assertThat(db.payment(c.paymentId())).containsEntry("status", "CANCELLED");
         assertThat(db.holdStatus(c.holdId())).isEqualTo("CONFIRMED");
         assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM booking_seat WHERE booking_id = ?", Long.class,
                 c.bookingId())).isEqualTo(2);
@@ -133,7 +122,7 @@ class BookingCancelTest {
         CancelResult second = bookingService.cancel(c.userId(), c.bookingId());
 
         assertThat(second).isEqualTo(first);
-        assertThat(db.outboxCount("REFUND_REQUESTED", c.paymentId())).isEqualTo(1);
+        assertThat(stubPg.cancelCalls()).isEqualTo(1);
         assertThat(cancelledAt(c.bookingId())).isEqualTo(cancelledAt);
         assertThat(db.seat(c.seatIds().get(0))).containsEntry("status", "HELD")
                 .containsEntry("hold_id", retaken.holdId());
@@ -142,7 +131,7 @@ class BookingCancelTest {
     }
 
     @Test
-    @DisplayName("2스레드가 동시에 취소하면 둘 다 같은 응답을 받고 환불 작업은 1건이다")
+    @DisplayName("2스레드가 동시에 취소하면 둘 다 같은 응답을 받고 결제는 CANCELLED다")
     void cancelConcurrently() {
         Confirmed c = fixtures.confirmed(2);
 
@@ -152,9 +141,8 @@ class BookingCancelTest {
                 .run(i -> bookingService.cancel(c.userId(), c.bookingId()));
 
         assertThat(results.errors()).isEmpty();
-        assertThat(results.values()).hasSize(2).containsOnly(
-                new CancelResult(c.bookingId(), BookingStatus.CANCELLED, RefundStatus.REQUESTED));
-        assertThat(db.outboxCount("REFUND_REQUESTED", c.paymentId())).isEqualTo(1);
+        assertThat(results.values()).hasSize(2).containsOnly(new CancelResult(c.bookingId(), BookingStatus.CANCELLED));
+        assertThat(db.payment(c.paymentId())).containsEntry("status", "CANCELLED");
         c.seatIds().forEach(seatId -> assertThat(db.seat(seatId)).containsEntry("status", "AVAILABLE")
                 .containsEntry("hold_id", null));
         assertThat(testRedis.keys(c.pid())).isEmpty();
@@ -175,7 +163,7 @@ class BookingCancelTest {
         assertThat(jdbcTemplate.queryForMap("SELECT status, cancelled_at FROM booking WHERE booking_id = ?", c.bookingId()))
                 .containsEntry("status", "CONFIRMED").containsEntry("cancelled_at", null);
         assertThat(db.seat(c.seatIds().get(0))).containsEntry("status", "SOLD").containsEntry("hold_id", c.holdId());
-        assertThat(db.outboxCount("REFUND_REQUESTED", c.paymentId())).isZero();
+        assertThat(stubPg.cancelCalls()).isZero();
         assertThat(redis.opsForValue().get(RedisKeys.seat(c.pid(), c.seatIds().get(0)))).isEqualTo(c.holdToken());
         assertThat(bookingReader.find(c.userId(), c.bookingId()).cancellable()).isFalse();
     }
@@ -188,7 +176,7 @@ class BookingCancelTest {
         startPerformance(c.pid());
 
         assertThat(bookingService.cancel(c.userId(), c.bookingId())).isEqualTo(first);
-        assertThat(db.outboxCount("REFUND_REQUESTED", c.paymentId())).isEqualTo(1);
+        assertThat(stubPg.cancelCalls()).isEqualTo(1);
     }
 
     @Test
@@ -208,34 +196,36 @@ class BookingCancelTest {
         assertThat(jdbcTemplate.queryForObject("SELECT status FROM booking WHERE booking_id = ?", String.class, c.bookingId()))
                 .isEqualTo("CONFIRMED");
         assertThat(db.seat(c.seatIds().get(0))).containsEntry("status", "SOLD");
-        assertThat(db.outboxCount("REFUND_REQUESTED", c.paymentId())).isZero();
+        assertThat(stubPg.cancelCalls()).isZero();
     }
 
     @Test
-    @DisplayName("취소 → 환불 워커 처리 흐름에서 결제가 CANCELLED, 환불이 DONE이 된다")
-    void refundCompletesAfterCancel() {
+    @DisplayName("PG 환불이 결과 모름이면 503 REFUND_FAILED이고 예매·좌석·결제가 그대로이며, PG가 정상으로 돌아와 다시 보내면 취소된다")
+    void refundUnknownKeepsEverythingThenRetrySucceeds() {
         Confirmed c = fixtures.confirmed(2);
-        bookingService.cancel(c.userId(), c.bookingId());
-        assertThat(bookingReader.find(c.userId(), c.bookingId()).refund()).isEqualTo(RefundStatus.REQUESTED);
-        db.parkOutboxTasksExcept("REFUND_REQUESTED", c.paymentId());
+        stubPg.cancelWith(PgResult.unknown("read timeout 3s"));
+
+        ApiException e = catchApiException(() -> bookingService.cancel(c.userId(), c.bookingId()));
+
+        assertThat(e.getCode()).isEqualTo(ErrorCode.REFUND_FAILED);
+        assertThat(jdbcTemplate.queryForMap("SELECT status, cancelled_at FROM booking WHERE booking_id = ?", c.bookingId()))
+                .containsEntry("status", "CONFIRMED").containsEntry("cancelled_at", null);
+        c.seatIds().forEach(seatId -> assertThat(db.seat(seatId)).containsEntry("status", "SOLD")
+                .containsEntry("hold_id", c.holdId()));
+        assertThat(db.payment(c.paymentId())).containsEntry("status", "APPROVED");
+        c.seatIds().forEach(seatId -> assertThat(redis.opsForValue().get(RedisKeys.seat(c.pid(), seatId)))
+                .isEqualTo(c.holdToken()));
+
         stubPg.cancelWith(PgResult.of(PgStatus.CANCELLED, null));
+        CancelResult retried = bookingService.cancel(c.userId(), c.bookingId());
 
-        services.outboxDispatchScheduler().run();
-
-        assertThat(stubPg.cancelCalls()).isEqualTo(1);
+        assertThat(retried).isEqualTo(new CancelResult(c.bookingId(), BookingStatus.CANCELLED));
         assertThat(db.payment(c.paymentId())).containsEntry("status", "CANCELLED");
-        assertThat(db.outboxTask("REFUND_REQUESTED", c.paymentId())).containsEntry("status", "DONE");
-        assertThat(db.holdStatus(c.holdId())).isEqualTo("CONFIRMED");
         BookingResult detail = bookingReader.find(c.userId(), c.bookingId());
         assertThat(detail.status()).isEqualTo(BookingStatus.CANCELLED);
-        assertThat(detail.refund()).isEqualTo(RefundStatus.DONE);
         assertThat(detail.cancellable()).isFalse();
         assertThat(detail.seats()).hasSize(2);
-
-        // 환불이 끝난 뒤 다시 취소를 보내도 바뀌는 것 없이 DONE을 돌려준다
-        assertThat(bookingService.cancel(c.userId(), c.bookingId()))
-                .isEqualTo(new CancelResult(c.bookingId(), BookingStatus.CANCELLED, RefundStatus.DONE));
-        assertThat(db.outboxCount("REFUND_REQUESTED", c.paymentId())).isEqualTo(1);
+        c.seatIds().forEach(seatId -> assertThat(db.seat(seatId)).containsEntry("status", "AVAILABLE"));
     }
 
     @Test

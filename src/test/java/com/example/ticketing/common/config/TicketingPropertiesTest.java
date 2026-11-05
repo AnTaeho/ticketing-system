@@ -4,7 +4,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.example.ticketing.hold.service.HoldExpiryScheduler;
 import com.example.ticketing.hold.service.HoldExpiryTransaction;
-import com.example.ticketing.outbox.service.OutboxDispatchScheduler;
 import com.example.ticketing.payment.service.PaymentReconcileScheduler;
 import com.example.ticketing.support.IntegrationTest;
 import java.time.Duration;
@@ -32,24 +31,20 @@ class TicketingPropertiesTest {
         assertThat(properties.seed().enabled()).isFalse();
         assertThat(properties.hold().ttl()).isEqualTo(Duration.ofMinutes(5));
         assertThat(properties.hold().maxSeats()).isEqualTo(4);
-        assertThat(properties.outbox().lockDuration()).isEqualTo(Duration.ofSeconds(60));
         assertThat(properties.pg().baseUrl()).isEmpty();
         assertThat(properties.pg().readTimeout()).isEqualTo(Duration.ofSeconds(3));
         assertThat(properties.fakePg().declineRate()).isEqualTo(0.1);
         assertThat(properties.fakePg().slowDelay()).isEqualTo(Duration.ofSeconds(5));
         assertThat(properties.fakePg().delayMin()).isEqualTo(Duration.ofMillis(200));
         assertThat(properties.payment().processingRecheckAfter()).isEqualTo(Duration.ofSeconds(5));
-        assertThat(properties.outbox().maxBackoff()).isEqualTo(Duration.ofSeconds(60));
         assertThat(properties.hold().expiryEnabled()).isFalse();
         assertThat(properties.payment().reconcileEnabled()).isFalse();
-        assertThat(properties.outbox().workerEnabled()).isFalse();
     }
 
     @Test
     @DisplayName("스케줄러 스위치(*-enabled)가 꺼진 테스트 컨텍스트에는 스케줄러 빈이 없고 위임 대상 빈은 있다")
     void schedulerBeansDisabledInTests() {
-        List.of(HoldExpiryScheduler.class, PaymentReconcileScheduler.class,
-                        OutboxDispatchScheduler.class)
+        List.of(HoldExpiryScheduler.class, PaymentReconcileScheduler.class)
                 .forEach(type -> assertThat(context.getBeanProvider(type).getIfAvailable()).as(type.getSimpleName())
                         .isNull());
         assertThat(context.getBeanProvider(HoldExpiryTransaction.class).getIfAvailable()).isNotNull();
@@ -63,7 +58,7 @@ class TicketingPropertiesTest {
                 .withUserConfiguration(PropertiesOnly.class);
 
         runner.run(context -> assertThat(context).hasNotFailed().hasSingleBean(TicketingProperties.class));
-        List.of("ticketing.outbox.batch-size=0", "ticketing.hold.ttl=-1s", "ticketing.fake-pg.decline-rate=1.5")
+        List.of("ticketing.hold.expiry-batch-size=0", "ticketing.hold.ttl=-1s", "ticketing.fake-pg.decline-rate=1.5")
                 .forEach(invalid -> runner.withPropertyValues(invalid)
                         .run(context -> assertThat(context.getStartupFailure()).as(invalid)
                                 .hasRootCauseInstanceOf(BindValidationException.class)));

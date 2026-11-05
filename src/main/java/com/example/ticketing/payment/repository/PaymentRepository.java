@@ -22,6 +22,9 @@ public interface PaymentRepository extends JpaRepository<Payment, Long> {
 
     Optional<Payment> findByIdAndUserId(Long id, Long userId);
 
+    @Query("select p.orderId from Payment p where p.id = :id")
+    Optional<String> findOrderIdById(@Param("id") long id);
+
     // 엔티티를 영속성 컨텍스트에 올리지 않고 hold를 먼저 잠그려고 ID만 읽는다
     @Query("select p.holdId from Payment p where p.id = :id")
     Optional<Long> findHoldIdById(@Param("id") long id);
