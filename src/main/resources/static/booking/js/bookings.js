@@ -1,8 +1,6 @@
 (function () {
   'use strict';
 
-  var REFUND_POLL_MS = 5000;
-
   var list = document.getElementById('bk-list');
   var loading = document.getElementById('bk-loading');
   var error = document.getElementById('bk-error');
@@ -12,29 +10,14 @@
   // bookingId → 마지막으로 그린 예매
   var shown = {};
 
-  // 바뀔 예매가 있을 때만 다시 읽는다
-  var poller = bk.poller({
-    interval: function () { return needsRefresh() ? REFUND_POLL_MS : null; },
-    run: function () { return bk.get('/api/bookings'); },
-    // 실패하면 다음 차례에 다시 읽는다. 이미 그린 카드는 그대로 둔다
-    onData: render
-  });
-
   function stateTag(b) {
     if (b.status === 'CONFIRMED') return el('span', { class: 'tag open', text: '예매 확정' });
-    if (b.refund === 'DONE') return el('span', { class: 'tag', text: '취소됨 · 환불 완료' });
-    return el('span', { class: 'tag warn', text: '취소됨 · 환불 진행 중' });
+    return el('span', { class: 'tag', text: '취소됨 · 환불 완료' });
   }
 
   function message(b) {
-    if (b.status === 'CONFIRMED') {
-      return el('p', { class: 'bk-msg' + (b.notification ? '' : ' is-wait'),
-        text: b.notification || '예매 확정 알림을 보내고 있어요' });
-    }
-    if (b.refund === 'DONE') {
-      return el('p', { class: 'bk-msg is-done', text: '결제 금액 ' + bk.won(b.totalAmount) + '을 결제한 수단으로 돌려드렸어요' });
-    }
-    return el('p', { class: 'bk-msg is-refund', text: '결제 금액 ' + bk.won(b.totalAmount) + '을 돌려드리고 있어요. 끝나면 여기에 바로 나와요' });
+    if (b.status === 'CONFIRMED') return null;
+    return el('p', { class: 'bk-msg is-done', text: '결제 금액 ' + bk.won(b.totalAmount) + '을 결제한 수단으로 돌려드렸어요' });
   }
 
   function footer(b, card) {
@@ -87,7 +70,8 @@
       el('span', { class: 'num', text: bk.dateTime(b.startsAt) }), ' · ' + b.venueName));
     node.appendChild(seats);
     node.appendChild(facts);
-    node.appendChild(message(b));
+    var msg = message(b);
+    if (msg) node.appendChild(msg);
     node.appendChild(el('p', { class: 'alert bk-alert', role: 'alert', hidden: true }));
     var foot = footer(b, node);
     if (foot) node.appendChild(foot);
@@ -144,7 +128,6 @@
       var node = replaceCard(fresh, alertText);
       var focusTarget = node.querySelector('.bk-state');
       if (focusTarget) { focusTarget.setAttribute('tabindex', '-1'); focusTarget.focus({ preventScroll: true }); }
-      poller.later();
     }, function (e) {
       // 취소는 됐는데 다시 읽지 못했다. 목록을 다시 받아 맞춘다
       load(e.message);
@@ -181,19 +164,10 @@
     });
   }
 
-  // 환불이 끝나지 않았거나 확정 알림이 아직 없는 예매
-  function needsRefresh() {
-    return Object.keys(shown).some(function (id) {
-      var b = JSON.parse(shown[id]);
-      return b.refund === 'REQUESTED' || (b.status === 'CONFIRMED' && !b.notification);
-    });
-  }
-
   function load(alertText) {
     bk.get('/api/bookings').then(function (bookings) {
       render(bookings);
       if (alertText) { error.textContent = alertText; error.hidden = false; }
-      poller.later();
     }, function (e) {
       loading.hidden = true;
       error.textContent = e.message;
