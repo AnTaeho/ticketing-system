@@ -1,18 +1,16 @@
 /* 예매 화면 공통: 토큰, 머리, 단추, 알림, 상태 패널, 사실 목록, 확인 단계. 한 화면만 쓰는 모양은 그 화면 이름의 CSS에 둔다 */
 :root{
   --bg:#f4f4f1; --surface:#fff; --line:#e2e2dd; --line-strong:#cfcfc8;
-  --text:#1c1c1a; --text-soft:#45453f; --muted:#6a6a64; --faint:#9a9a92;
+  --text:#1c1c1a; --muted:#6a6a64; --faint:#9a9a92;
   --accent:#1f4fd6; --accent-ink:#173da8; --accent-soft:#e9eefc; --on-accent:#fff;
-  --accent-text:#1b2f6b; --accent-text-soft:#3b4f8a; --accent-band:#d5def8; --accent-pale:#cfd8f6; --accent-tint:rgba(31,79,214,.1);
+  --accent-text:#1b2f6b; --accent-text-soft:#3b4f8a; --accent-band:#d5def8; --accent-tint:rgba(31,79,214,.1);
   --warn:#c2410c; --warn-soft:#fdf0e8; --warn-text:#9a3a12;
-  --warn-line:#f0c9b2; --warn-rule:#f0d3c2; --warn-band:#f6d5c2;
+  --warn-band:#f6d5c2;
   --off:#d3d3cd; --off-soft:#ecece7; --track:#e7e7e2; --stage:#ebebe6;
-  --flash:#ffe08a; --veil:rgba(255,255,255,.6);
   --g-vip:#c27c0e; --g-r:#cf3f5a; --g-s:#2e8f63; --g-a:#7c5cc4;
   --title-xl:22px; --title-l:21px; --title-m:18px; --title-s:16px;
   --radius:8px;
   --sans:-apple-system,"Apple SD Gothic Neo","Noto Sans KR",sans-serif;
-  --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
   font-family:var(--sans);
 }
 *{box-sizing:border-box;margin:0;padding:0}
@@ -59,7 +57,6 @@ a{color:inherit}
 .empty{padding:28px 20px;text-align:center;color:var(--muted)}
 .tag{display:inline-block;font-size:12px;font-weight:700;line-height:20px;padding:0 7px;border-radius:4px;background:var(--off-soft);color:var(--muted);white-space:nowrap}
 .tag.open{background:var(--accent-soft);color:var(--accent-ink)}
-.tag.warn{background:var(--warn-soft);color:var(--warn)}
 
 /* 상태 패널: 화면 가운데 큰 안내 상자 */
 .state{padding:28px 20px 24px;margin-top:24px}
