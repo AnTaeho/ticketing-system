@@ -93,6 +93,11 @@ public class TestDb {
                 paymentId);
     }
 
+    public LocalDateTime paymentCreatedAt(long paymentId) {
+        return jdbcTemplate.queryForObject("SELECT created_at FROM booking_payment WHERE payment_id = ?",
+                LocalDateTime.class, paymentId);
+    }
+
     public void agePayment(long paymentId, int seconds) {
         jdbcTemplate.update("UPDATE booking_payment SET created_at = NOW(6) - INTERVAL ? SECOND WHERE payment_id = ?",
                 seconds, paymentId);

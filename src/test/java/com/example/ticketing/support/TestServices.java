@@ -1,5 +1,6 @@
 package com.example.ticketing.support;
 
+import com.example.ticketing.booking.service.BookingIssuer;
 import com.example.ticketing.booking.service.BookingReader;
 import com.example.ticketing.booking.service.BookingService;
 import com.example.ticketing.booking.service.PaymentRefunder;
@@ -15,9 +16,11 @@ import com.example.ticketing.hold.service.SeatHoldService;
 import com.example.ticketing.hold.service.SeatHoldTransaction;
 import com.example.ticketing.payment.client.HttpPgClient;
 import com.example.ticketing.payment.client.PgClient;
+import com.example.ticketing.payment.repository.PaymentRepository;
 import com.example.ticketing.payment.service.PaymentReader;
 import com.example.ticketing.payment.service.PaymentReconcileScheduler;
 import com.example.ticketing.payment.service.PaymentTransaction;
+import com.example.ticketing.seat.repository.SeatRepository;
 import com.example.ticketing.seat.service.SeatCatalog;
 import java.time.Clock;
 import org.springframework.boot.test.context.TestComponent;
@@ -65,6 +68,13 @@ public class TestServices {
 
     public HoldExpiryScheduler holdExpiryScheduler() {
         return holdExpiryScheduler(bean(HoldExpiryTransaction.class), bean(SeatGateReflector.class),
+                contextProperties());
+    }
+
+    // DB 시계를 바꿔 끼운 결제 트랜잭션. 판정 시각이 DbClock에서 오는지 볼 때 쓴다
+    public PaymentTransaction paymentTransaction(DbClock dbClock) {
+        return new PaymentTransaction(bean(PaymentRepository.class), bean(PaymentReader.class),
+                bean(SeatHoldRepository.class), bean(SeatRepository.class), bean(BookingIssuer.class), dbClock,
                 contextProperties());
     }
 

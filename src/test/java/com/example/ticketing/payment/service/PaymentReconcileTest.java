@@ -4,6 +4,7 @@ import static com.example.ticketing.support.ApiErrors.catchApiException;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.example.ticketing.common.error.ApiException;
+import com.example.ticketing.common.time.DbClock;
 import com.example.ticketing.common.redis.RedisKeys;
 import com.example.ticketing.payment.client.PgResult;
 import com.example.ticketing.payment.client.PgStatus;
@@ -20,7 +21,9 @@ import com.example.ticketing.support.StubPgTestConfig;
 import com.example.ticketing.support.TestDb;
 import com.example.ticketing.support.TestRedis;
 import com.example.ticketing.support.TestServices;
+import jakarta.persistence.EntityManager;
 import java.time.Duration;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -35,6 +38,8 @@ import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Import;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 // 스케줄러 빈은 꺼져 있다. 같은 빈들로 스케줄러를 직접 만들어 run()을 부른다
 @IntegrationTest
@@ -43,6 +48,10 @@ class PaymentReconcileTest {
 
     private static final long TOLERANCE_MS = 5_000;
 
+    @Autowired
+    private EntityManager entityManager;
+    @Autowired
+    private PlatformTransactionManager transactionManager;
     @Autowired
     private PaymentReader paymentReader;
     @Autowired
@@ -111,6 +120,29 @@ class PaymentReconcileTest {
         assertThat(db.seat(held.seatIds().get(0))).containsEntry("status", "HELD");
         assertThat(stubPg.queryCalls()).isEqualTo(1);
         assertThat(stubPg.cancelCalls()).isZero();
+    }
+
+    @Test
+    @DisplayName("결제 생성 시각은 DB 시계에서 와서 JVM 시계와 어긋나도 망취소 판정이 DB 기준이다")
+    void createdAtComesFromDbClock() {
+        Held held = fixtures.held(1);
+        DbClock dbBehindJvmBy60s = new DbClock(entityManager) {
+            @Override
+            public LocalDateTime now() {
+                return super.now().minusSeconds(60);
+            }
+        };
+        PaymentTransaction skewed = services.paymentTransaction(dbBehindJvmBy60s);
+        LocalDateTime jvmNow = LocalDateTime.now();
+
+        // new로 만든 객체에는 클래스의 @Transactional이 걸리지 않으므로 트랜잭션을 직접 연다
+        Started started = (Started) new TransactionTemplate(transactionManager)
+                .execute(status -> skewed.start(held.userId(), held.holdId(), key()));
+        db.makePaymentDue(started.paymentId());
+
+        assertThat(db.paymentCreatedAt(started.paymentId())).isBefore(jvmNow.minusSeconds(50));
+        assertThat(paymentReader.findDue(1000)).filteredOn(due -> due.paymentId() == started.paymentId())
+                .singleElement().satisfies(due -> assertThat(due.notFoundCancelDue()).isTrue());
     }
 
     @ParameterizedTest(name = "{0}")

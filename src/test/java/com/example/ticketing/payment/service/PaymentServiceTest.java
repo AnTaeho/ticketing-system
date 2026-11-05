@@ -407,12 +407,12 @@ class PaymentServiceTest {
         List<Long> created = new ArrayList<>();
         try {
             created.add(paymentRepository.save(Payment.requested(holdId, userId, key, orderId(), 1000,
-                    null)).getId());
+                    LocalDateTime.now(), null)).getId());
 
             DataIntegrityViolationException sameHold = catchDuplicate(() -> paymentRepository.save(
-                    Payment.requested(holdId, userId, key(), orderId(), 1000, null)));
+                    Payment.requested(holdId, userId, key(), orderId(), 1000, LocalDateTime.now(), null)));
             DataIntegrityViolationException sameKey = catchDuplicate(() -> paymentRepository.save(
-                    Payment.requested(holdId - 1, userId, key, orderId(), 1000, null)));
+                    Payment.requested(holdId - 1, userId, key, orderId(), 1000, LocalDateTime.now(), null)));
 
             assertThat(ConstraintViolations.matches(sameHold, Payment.UK_HOLD)).isTrue();
             assertThat(ConstraintViolations.matches(sameHold, Payment.UK_IDEMPOTENCY)).isFalse();

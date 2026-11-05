@@ -17,7 +17,6 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
-import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.annotation.LastModifiedDate;
 import org.springframework.data.jpa.domain.support.AuditingEntityListener;
 
@@ -74,7 +73,7 @@ public class Payment {
     @Column(name = "next_check_at")
     private LocalDateTime nextCheckAt;
 
-    @CreatedDate
+    // JVM 시계가 아니라 호출자가 같은 트랜잭션에서 읽은 DB 시각을 넣는다. 대사의 망취소 판정이 DB 시각으로 비교한다
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
@@ -83,7 +82,7 @@ public class Payment {
     private LocalDateTime updatedAt;
 
     public static Payment requested(Long holdId, Long userId, String idempotencyKey, String orderId,
-                                    int amount, LocalDateTime nextCheckAt) {
+                                    int amount, LocalDateTime createdAt, LocalDateTime nextCheckAt) {
         Payment payment = new Payment();
         payment.holdId = holdId;
         payment.userId = userId;
@@ -91,6 +90,7 @@ public class Payment {
         payment.orderId = orderId;
         payment.amount = amount;
         payment.status = PaymentStatus.REQUESTED;
+        payment.createdAt = createdAt;
         payment.nextCheckAt = nextCheckAt;
         return payment;
     }

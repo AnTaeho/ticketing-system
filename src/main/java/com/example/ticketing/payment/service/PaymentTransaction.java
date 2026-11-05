@@ -83,7 +83,7 @@ public class PaymentTransaction {
 
         String orderId = UUID.randomUUID().toString().replace("-", "");
         Payment payment = paymentRepository.save(Payment.requested(holdId, userId, idempotencyKey,
-                orderId, hold.getTotalAmount(), now.plus(requestedRecheckAfter)));
+                orderId, hold.getTotalAmount(), now, now.plus(requestedRecheckAfter)));
         return new Started(payment.getId(), orderId, hold.getTotalAmount());
     }
 
