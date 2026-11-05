@@ -105,8 +105,8 @@ public class SeatHoldService {
                     RedisFailures.describe(e));
             return;
         }
-        takenSeatId.ifPresent(seatId -> {
-            throw new ApiException(ErrorCode.SEAT_TAKEN, Map.of("seatId", seatId));
-        });
+        if (takenSeatId.isPresent()) {
+            throw new ApiException(ErrorCode.SEAT_TAKEN, Map.of("seatId", takenSeatId.get()));
+        }
     }
 }

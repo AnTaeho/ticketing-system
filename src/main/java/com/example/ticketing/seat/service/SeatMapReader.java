@@ -10,10 +10,10 @@ import java.time.Clock;
 import java.util.ArrayList;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
-import org.springframework.stereotype.Service;
+import org.springframework.stereotype.Component;
 
 // 좌석 화면이 부를 때마다 회차 좌석을 쿼리 한 번으로 읽어 구역·열·번호 순으로 묶는다. 회차가 없으면 404다
-@Service
+@Component
 @RequiredArgsConstructor
 public class SeatMapReader {
 

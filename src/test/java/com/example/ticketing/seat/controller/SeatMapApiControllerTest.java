@@ -1,6 +1,5 @@
 package com.example.ticketing.seat.controller;
 
-import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -9,7 +8,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.example.ticketing.support.Fixtures;
 import com.example.ticketing.support.IntegrationTest;
 import com.example.ticketing.support.TestMvc;
-import java.nio.charset.StandardCharsets;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -35,7 +33,7 @@ class SeatMapApiControllerTest {
 
     @Test
     @DisplayName("좌석맵을 조회하면 캐시하지 말라는 JSON으로 200을 준다")
-    void returnsSnapshotJson() throws Exception {
+    void returnsSeatMapJson() throws Exception {
         long pid = fixtures.newPerformance(1, 2, 3);
 
         mockMvc.perform(get(SEATS, pid))
