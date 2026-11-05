@@ -72,12 +72,6 @@ public class Fixtures {
         return pid;
     }
 
-    // 직접 고른 회차 ID의 키도 테스트가 끝나면 지운다
-    public long track(long performanceId) {
-        performances.add(performanceId);
-        return performanceId;
-    }
-
     public long newUser() {
         return userRepository.save(User.create("fx-" + shortId())).getId();
     }

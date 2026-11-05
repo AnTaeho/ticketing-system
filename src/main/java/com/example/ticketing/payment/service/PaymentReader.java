@@ -8,7 +8,7 @@ import com.example.ticketing.common.error.ErrorCode;
 import com.example.ticketing.hold.domain.SeatHold;
 import com.example.ticketing.hold.repository.SeatHoldRepository;
 import com.example.ticketing.payment.domain.Payment;
-import com.example.ticketing.payment.dto.ClaimedPayment;
+import com.example.ticketing.payment.dto.DuePayment;
 import com.example.ticketing.payment.dto.PaymentOutcome;
 import com.example.ticketing.payment.dto.PaymentResult;
 import com.example.ticketing.payment.dto.PaymentStart;
@@ -46,7 +46,7 @@ public class PaymentReader {
     }
 
     // 다음 확인 시각이 지난 REQUESTED·UNKNOWN 결제. 잠그지 않으므로 다른 호출이 먼저 결론을 낼 수 있다
-    public List<ClaimedPayment> findDue(int batch) {
+    public List<DuePayment> findDue(int batch) {
         return paymentRepository.findDue(notFoundCancelAfterNanos, Limit.of(batch));
     }
 

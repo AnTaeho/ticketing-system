@@ -1,7 +1,7 @@
 package com.example.ticketing.payment.repository;
 
 import com.example.ticketing.payment.domain.Payment;
-import com.example.ticketing.payment.dto.ClaimedPayment;
+import com.example.ticketing.payment.dto.DuePayment;
 import jakarta.persistence.LockModeType;
 import java.util.List;
 import java.util.Optional;
@@ -36,12 +36,12 @@ public interface PaymentRepository extends JpaRepository<Payment, Long> {
 
     // HQL은 Duration 파라미터를 시각에 더하지 못해 기간을 나노초로 넘기고 nanosecond 단위로 더한다
     @Query("""
-            select new com.example.ticketing.payment.dto.ClaimedPayment(p.id, p.orderId,
+            select new com.example.ticketing.payment.dto.DuePayment(p.id, p.orderId,
                    case when p.createdAt <= current_timestamp - (:notFoundCancelAfterNanos) nanosecond then true else false end)
               from Payment p
              where p.status in (REQUESTED, UNKNOWN) and p.nextCheckAt <= current_timestamp
              order by p.id""")
-    List<ClaimedPayment> findDue(@Param("notFoundCancelAfterNanos") long notFoundCancelAfterNanos, Limit limit);
+    List<DuePayment> findDue(@Param("notFoundCancelAfterNanos") long notFoundCancelAfterNanos, Limit limit);
 
     // 대사가 다음 확인 시각을 정한다. 결제를 잠그지 않아 확정과 겹칠 수 있어 열린 결제만 바꾼다. 넘긴 오류가 없으면 이전 last_error를 둔다
     @Modifying(clearAutomatically = true, flushAutomatically = true)

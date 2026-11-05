@@ -52,7 +52,7 @@ class BookingApiControllerTest {
     }
 
     @Test
-    @DisplayName("예매 목록은 내 예매만 최신순으로 좌석과 알림 문구를 담아 돌려준다")
+    @DisplayName("예매 목록은 내 예매만 최신순으로 좌석을 담아 돌려준다")
     void listIsNewestFirst() throws Exception {
         long userId = fixtures.newUser();
         Confirmed older = confirmed(userId, 2);

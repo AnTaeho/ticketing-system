@@ -7,7 +7,7 @@ import com.example.ticketing.common.error.ApiException;
 import com.example.ticketing.common.redis.RedisKeys;
 import com.example.ticketing.payment.client.PgResult;
 import com.example.ticketing.payment.client.PgStatus;
-import com.example.ticketing.payment.dto.ClaimedPayment;
+import com.example.ticketing.payment.dto.DuePayment;
 import com.example.ticketing.payment.dto.PayCommand;
 import com.example.ticketing.payment.dto.PaymentStart.Started;
 import com.example.ticketing.support.Concurrently;
@@ -161,7 +161,7 @@ class PaymentReconcileTest {
         assertThat(db.seat(held.seatIds().get(0))).containsEntry("status", "HELD")
                 .containsEntry("hold_id", held.holdId());
         assertThat(stubPg.cancelCalls()).isEqualTo(1);
-        assertThat(paymentReader.findDue(20)).extracting(ClaimedPayment::paymentId)
+        assertThat(paymentReader.findDue(20)).extracting(DuePayment::paymentId)
                 .doesNotContain(paymentId);
     }
 
@@ -172,8 +172,8 @@ class PaymentReconcileTest {
         long paymentId = unknownPayment(held);
         stubPg.queryWith(PgResult.of(PgStatus.APPROVED, "pg-twice-1"));
         db.makePaymentDue(paymentId);
-        List<ClaimedPayment> claimed = paymentReader.findDue(20);
-        assertThat(claimed).extracting(ClaimedPayment::paymentId).containsExactly(paymentId);
+        List<DuePayment> claimed = paymentReader.findDue(20);
+        assertThat(claimed).extracting(DuePayment::paymentId).containsExactly(paymentId);
 
         Results<Void> results = Concurrently.of(2).readyWithin(Duration.ofSeconds(10)).within(Duration.ofSeconds(30))
                 .runAll(i -> scheduler.reconcile(claimed.get(0)));

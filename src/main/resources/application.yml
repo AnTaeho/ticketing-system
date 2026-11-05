@@ -40,7 +40,7 @@ ticketing:
     reconcile-scan-ms: 2000
     reconcile-batch-size: 20
   gate:
-    enabled: true              # 부하 테스트 비교 스위치
+    enabled: true              # 게이트를 끄고 DB 판정만으로 잡아 보기
   pg:
     base-url: ""               # 비우면 http://localhost:${local.server.port}/fake-pg
     connect-timeout: 500ms

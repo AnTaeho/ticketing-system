@@ -3,7 +3,7 @@ package com.example.ticketing.payment.service;
 import com.example.ticketing.common.config.TicketingProperties;
 import com.example.ticketing.payment.client.PgClient;
 import com.example.ticketing.payment.client.PgResult;
-import com.example.ticketing.payment.dto.ClaimedPayment;
+import com.example.ticketing.payment.dto.DuePayment;
 import com.example.ticketing.payment.dto.PaymentResult;
 import com.example.ticketing.payment.dto.PaymentSettlement;
 import java.time.Duration;
@@ -43,8 +43,8 @@ public class PaymentReconcileScheduler {
 
     @Scheduled(fixedDelayString = "${ticketing.payment.reconcile-scan-ms}")
     public void run() {
-        List<ClaimedPayment> claimed = paymentReader.findDue(batchSize);
-        for (ClaimedPayment payment : claimed) {
+        List<DuePayment> claimed = paymentReader.findDue(batchSize);
+        for (DuePayment payment : claimed) {
             try {
                 reconcile(payment);
             } catch (RuntimeException e) {
@@ -55,7 +55,7 @@ public class PaymentReconcileScheduler {
     }
 
     // 건마다 트랜잭션 밖에서 PG를 조회하고, 결론이 나면 트랜잭션 메서드가 커밋한 뒤 Redis에 반영한다
-    void reconcile(ClaimedPayment payment) {
+    void reconcile(DuePayment payment) {
         PgResult pg = pgClient.query(payment.orderId());
         switch (pg.status()) {
             case APPROVED -> settle(paymentTransaction.openToApproved(payment.paymentId(), pg.pgTxId()));
@@ -68,7 +68,7 @@ public class PaymentReconcileScheduler {
     }
 
     // 묘비 덕분에 망취소 뒤 늦게 온 승인은 거절되므로, 생성 후 일정 시간이 지나면 취소한다
-    private void notFound(ClaimedPayment payment) {
+    private void notFound(DuePayment payment) {
         if (!payment.notFoundCancelDue()) {
             recheck(payment, recheckAfter, null);
             return;
@@ -77,12 +77,11 @@ public class PaymentReconcileScheduler {
         switch (cancel.status()) {
             case CANCELLED -> settle(paymentTransaction.openToCancelled(payment.paymentId()));
             case DECLINED -> settle(paymentTransaction.openToDeclined(payment.paymentId()));
-            case CONFLICT -> recheck(payment, recheckAfter, cancel.describe("PG 취소"));
             default -> recheck(payment, recheckAfter, cancel.describe("PG 취소"));
         }
     }
 
-    // 요청 스레드나 다른 서버가 먼저 결론을 냈으면 반영도 그쪽 몫이다
+    // 요청 스레드가 먼저 결론을 냈으면 반영도 그쪽 몫이다
     private void settle(PaymentSettlement settlement) {
         PaymentResult result = settlement.result();
         if (!settlement.changedSeats()) {
@@ -93,7 +92,7 @@ public class PaymentReconcileScheduler {
         log.info("[reconcile] 결제 결론을 반영했다 paymentId={} outcome={}", result.paymentId(), result.outcome());
     }
 
-    private void recheck(ClaimedPayment payment, Duration delay, String lastError) {
+    private void recheck(DuePayment payment, Duration delay, String lastError) {
         reconcileTransaction.reschedule(payment.paymentId(), delay, lastError);
     }
 }

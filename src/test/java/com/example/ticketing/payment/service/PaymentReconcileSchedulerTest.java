@@ -20,7 +20,7 @@ import com.example.ticketing.payment.client.PgClient;
 import com.example.ticketing.payment.client.PgResult;
 import com.example.ticketing.payment.client.PgStatus;
 import com.example.ticketing.payment.domain.PaymentStatus;
-import com.example.ticketing.payment.dto.ClaimedPayment;
+import com.example.ticketing.payment.dto.DuePayment;
 import com.example.ticketing.payment.dto.PaymentOutcome;
 import com.example.ticketing.payment.dto.PaymentResult;
 import com.example.ticketing.payment.dto.PaymentSettlement;
@@ -139,8 +139,8 @@ class PaymentReconcileSchedulerTest {
                 reflector, properties);
     }
 
-    private static ClaimedPayment claimed(long paymentId, String orderId, boolean cancelDue) {
-        return new ClaimedPayment(paymentId, orderId, cancelDue);
+    private static DuePayment claimed(long paymentId, String orderId, boolean cancelDue) {
+        return new DuePayment(paymentId, orderId, cancelDue);
     }
 
     private static PaymentSettlement seatsChanged(long paymentId, PaymentOutcome outcome) {
