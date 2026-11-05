@@ -3,6 +3,7 @@ package com.example.ticketing.payment.service;
 import com.example.ticketing.common.error.ApiException;
 import com.example.ticketing.common.error.ErrorCode;
 import com.example.ticketing.common.jdbc.ConstraintViolations;
+import com.example.ticketing.hold.service.SeatGateReflector;
 import com.example.ticketing.payment.client.PgClient;
 import com.example.ticketing.payment.client.PgResult;
 import com.example.ticketing.payment.domain.Payment;
@@ -28,14 +29,14 @@ public class PaymentService {
     private final PaymentTransaction paymentTransaction;
     private final PaymentReader paymentReader;
     private final PgClient pgClient;
-    private final PaymentGateReflector reflector;
+    private final SeatGateReflector gate;
 
     public PaymentService(PaymentTransaction paymentTransaction, PaymentReader paymentReader, PgClient pgClient,
-                          PaymentGateReflector reflector) {
+                          SeatGateReflector gate) {
         this.paymentTransaction = paymentTransaction;
         this.paymentReader = paymentReader;
         this.pgClient = pgClient;
-        this.reflector = reflector;
+        this.gate = gate;
     }
 
     public PaymentResult pay(PayCommand command) {
@@ -54,7 +55,7 @@ public class PaymentService {
             case DECLINED -> paymentTransaction.openToDeclined(started.paymentId());
             default -> paymentTransaction.requestedToUnknown(started.paymentId(), unknownCause(pg));
         };
-        reflector.reflect(settlement);
+        settlement.gateToRelease().ifPresent(gate::release);
         return successOrThrow(settlement.result());
     }
 

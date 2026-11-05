@@ -1,6 +1,7 @@
 package com.example.ticketing.payment.service;
 
 import com.example.ticketing.common.config.TicketingProperties;
+import com.example.ticketing.hold.service.SeatGateReflector;
 import com.example.ticketing.payment.client.PgClient;
 import com.example.ticketing.payment.client.PgResult;
 import com.example.ticketing.payment.dto.DuePayment;
@@ -23,19 +24,19 @@ public class PaymentReconcileScheduler {
     private final PaymentReconcileTransaction reconcileTransaction;
     private final PaymentTransaction paymentTransaction;
     private final PgClient pgClient;
-    private final PaymentGateReflector reflector;
+    private final SeatGateReflector gate;
     private final int batchSize;
     private final Duration recheckAfter;
     private final Duration processingRecheckAfter;
 
     public PaymentReconcileScheduler(PaymentReader paymentReader, PaymentReconcileTransaction reconcileTransaction,
                                      PaymentTransaction paymentTransaction, PgClient pgClient,
-                                     PaymentGateReflector reflector, TicketingProperties properties) {
+                                     SeatGateReflector gate, TicketingProperties properties) {
         this.paymentReader = paymentReader;
         this.reconcileTransaction = reconcileTransaction;
         this.paymentTransaction = paymentTransaction;
         this.pgClient = pgClient;
-        this.reflector = reflector;
+        this.gate = gate;
         this.batchSize = properties.payment().reconcileBatchSize();
         this.recheckAfter = properties.payment().unknownRecheckAfter();
         this.processingRecheckAfter = properties.payment().processingRecheckAfter();
@@ -88,7 +89,7 @@ public class PaymentReconcileScheduler {
             log.debug("[reconcile] 결제는 이미 결론이 났다 paymentId={} outcome={}", result.paymentId(), result.outcome());
             return;
         }
-        reflector.reflect(settlement);
+        settlement.gateToRelease().ifPresent(gate::release);
         log.info("[reconcile] 결제 결론을 반영했다 paymentId={} outcome={}", result.paymentId(), result.outcome());
     }
 

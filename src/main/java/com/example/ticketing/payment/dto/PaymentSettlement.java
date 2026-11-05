@@ -18,4 +18,10 @@ public record PaymentSettlement(PaymentResult result, Optional<GateHold> changed
     public boolean changedSeats() {
         return changedGate.isPresent();
     }
+
+    // 확정 좌석의 키는 TTL로 사라지고 SOLD 좌석은 DB가 막는다. 거절·취소로 좌석을 푼 호출만 키를 지운다
+    public Optional<GateHold> gateToRelease() {
+        PaymentOutcome outcome = result.outcome();
+        return outcome == PaymentOutcome.DECLINED || outcome == PaymentOutcome.CANCELLED ? changedGate : Optional.empty();
+    }
 }

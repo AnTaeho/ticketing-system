@@ -15,7 +15,6 @@ import com.example.ticketing.hold.service.SeatHoldService;
 import com.example.ticketing.hold.service.SeatHoldTransaction;
 import com.example.ticketing.payment.client.HttpPgClient;
 import com.example.ticketing.payment.client.PgClient;
-import com.example.ticketing.payment.service.PaymentGateReflector;
 import com.example.ticketing.payment.service.PaymentReader;
 import com.example.ticketing.payment.service.PaymentReconcileScheduler;
 import com.example.ticketing.payment.service.PaymentReconcileTransaction;
@@ -83,7 +82,7 @@ public class TestServices {
             PaymentTransaction paymentTransaction, PgClient pgClient,
             SeatGateReflector reflector, TicketingProperties properties) {
         return new PaymentReconcileScheduler(paymentReader, reconcileTransaction, paymentTransaction, pgClient,
-                new PaymentGateReflector(reflector), properties);
+                reflector, properties);
     }
 
     // 컨텍스트의 PG 클라이언트(대역이 있으면 대역)로 만든다
