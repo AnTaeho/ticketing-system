@@ -131,9 +131,7 @@ public class TestServices {
             SeatGateRedisStore gate = gateStore != null ? gateStore : bean(SeatGateRedisStore.class);
             return new SeatHoldService(bean(SeatCatalog.class),
                     transaction != null ? transaction : bean(SeatHoldTransaction.class),
-                    bean(SeatHoldRepository.class),
-                    bean(DbClock.class), Clock.systemDefaultZone(), gate, gateReflector(gate, resolved),
-                    resolved);
+                    Clock.systemDefaultZone(), gate, gateReflector(gate, resolved), resolved);
         }
     }
 }

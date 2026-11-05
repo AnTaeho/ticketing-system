@@ -5,16 +5,11 @@ import com.example.ticketing.common.error.ApiException;
 import com.example.ticketing.common.error.ErrorCode;
 import com.example.ticketing.common.redis.RedisFailures;
 import com.example.ticketing.common.redis.RedisUnavailableException;
-import com.example.ticketing.common.time.DbClock;
 import com.example.ticketing.hold.domain.GateHold;
-import com.example.ticketing.hold.domain.SeatHold;
-import com.example.ticketing.hold.dto.ActiveHoldResult;
 import com.example.ticketing.hold.dto.CreateHoldCommand;
 import com.example.ticketing.hold.dto.CreateHoldResult;
-import com.example.ticketing.hold.dto.HoldDetailResult;
 import com.example.ticketing.hold.dto.HoldPlacement;
 import com.example.ticketing.hold.repository.SeatGateRedisStore;
-import com.example.ticketing.hold.repository.SeatHoldRepository;
 import com.example.ticketing.seat.dto.SeatSelection;
 import com.example.ticketing.seat.service.SeatCatalog;
 import java.time.Clock;
@@ -33,21 +28,16 @@ public class SeatHoldService {
 
     private final SeatCatalog seatCatalog;
     private final SeatHoldTransaction seatHoldTransaction;
-    private final SeatHoldRepository seatHoldRepository;
-    private final DbClock dbClock;
     private final Clock clock;
     private final SeatGateRedisStore gateStore;
     private final SeatGateReflector gateReflector;
     private final Duration holdTtl;
 
     public SeatHoldService(SeatCatalog seatCatalog, SeatHoldTransaction seatHoldTransaction,
-                           SeatHoldRepository seatHoldRepository, DbClock dbClock, Clock clock,
-                           SeatGateRedisStore gateStore, SeatGateReflector gateReflector,
+                           Clock clock, SeatGateRedisStore gateStore, SeatGateReflector gateReflector,
                            TicketingProperties properties) {
         this.seatCatalog = seatCatalog;
         this.seatHoldTransaction = seatHoldTransaction;
-        this.seatHoldRepository = seatHoldRepository;
-        this.dbClock = dbClock;
         this.clock = clock;
         this.gateStore = gateStore;
         this.gateReflector = gateReflector;
@@ -70,21 +60,6 @@ public class SeatHoldService {
         }
         return new CreateHoldResult(placement.holdId(), placement.expiresAt(),
                 selection.seats(), selection.totalAmount());
-    }
-
-    public HoldDetailResult getHold(long userId, long holdId) {
-        SeatHold hold = seatHoldRepository.findByIdAndUserId(holdId, userId)
-                .orElseThrow(() -> new ApiException(ErrorCode.HOLD_NOT_FOUND, Map.of("holdId", holdId)));
-        return HoldDetailResult.from(hold,
-                seatCatalog.seatsOfHold(hold.getPerformanceId(), holdId),
-                seatHoldRepository.findPaymentIdByHoldId(holdId).orElse(null), dbClock.now());
-    }
-
-    // 이미 잡아 둔 자리가 있다는 응답을 받은 화면이 결제 화면으로 이어 가려고 쓴다
-    public ActiveHoldResult getActiveHold(long userId, long performanceId) {
-        return seatHoldRepository.findActive(userId, performanceId)
-                .orElseThrow(() -> new ApiException(ErrorCode.HOLD_NOT_FOUND,
-                        Map.of("performanceId", performanceId)));
     }
 
     // 커밋이 끝난 뒤 게이트 키를 지운다

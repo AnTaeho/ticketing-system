@@ -23,7 +23,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 import tools.jackson.databind.JsonNode;
 
-// 판정은 SeatHoldServiceTest·SeatCatalogTest가 본다. 여기서는 HTTP 연결만 본다
+// 판정은 SeatHoldServiceTest·SeatHoldReaderTest·SeatCatalogTest가 본다. 여기서는 HTTP 연결만 본다
 @IntegrationTest
 class HoldApiControllerTest {
 

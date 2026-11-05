@@ -5,6 +5,7 @@ import com.example.ticketing.hold.dto.ActiveHoldResult;
 import com.example.ticketing.hold.dto.CreateHoldRequest;
 import com.example.ticketing.hold.dto.CreateHoldResult;
 import com.example.ticketing.hold.dto.HoldDetailResult;
+import com.example.ticketing.hold.service.SeatHoldReader;
 import com.example.ticketing.hold.service.SeatHoldService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -21,6 +22,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class HoldApiController {
 
     private final SeatHoldService seatHoldService;
+    private final SeatHoldReader seatHoldReader;
 
     @PostMapping("/api/performances/{performanceId}/holds")
     @ResponseStatus(HttpStatus.CREATED)
@@ -31,12 +33,12 @@ public class HoldApiController {
 
     @GetMapping("/api/performances/{performanceId}/holds/mine")
     public ActiveHoldResult mine(@CurrentUser Long userId, @PathVariable long performanceId) {
-        return seatHoldService.getActiveHold(userId, performanceId);
+        return seatHoldReader.getActiveHold(userId, performanceId);
     }
 
     @GetMapping("/api/holds/{holdId}")
     public HoldDetailResult get(@CurrentUser Long userId, @PathVariable long holdId) {
-        return seatHoldService.getHold(userId, holdId);
+        return seatHoldReader.getHold(userId, holdId);
     }
 
     @DeleteMapping("/api/holds/{holdId}")
