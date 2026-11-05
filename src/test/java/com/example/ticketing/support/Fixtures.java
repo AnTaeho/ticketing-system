@@ -2,7 +2,6 @@ package com.example.ticketing.support;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.example.ticketing.common.config.TicketingProperties;
 import com.example.ticketing.common.time.DbClock;
 import com.example.ticketing.hold.dto.CreateHoldCommand;
 import com.example.ticketing.hold.dto.CreateHoldResult;
@@ -38,7 +37,6 @@ public class Fixtures {
     private final PaymentService paymentService;
     private final TestDb db;
     private final TestRedis testRedis;
-    private final TicketingProperties properties;
     private final Set<Long> performances = ConcurrentHashMap.newKeySet();
 
     public LocalDateTime dbNow() {

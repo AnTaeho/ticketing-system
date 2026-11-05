@@ -5,7 +5,7 @@ import jakarta.persistence.FlushModeType;
 import java.time.LocalDateTime;
 import org.springframework.stereotype.Component;
 
-// 서버마다 시계가 달라도 만료 판정이 갈리지 않게 DB 시각을 기준으로 쓴다
+// 앱 서버와 DB의 시계가 다를 수 있어 만료 판정은 DB 시각 한곳에 모은다
 @Component
 public class DbClock {
 

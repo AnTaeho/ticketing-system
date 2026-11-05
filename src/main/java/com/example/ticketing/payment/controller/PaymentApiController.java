@@ -75,13 +75,7 @@ public class PaymentApiController {
         if (!demo || header == null || header.isBlank()) {
             return Optional.empty();
         }
-        String name = header.trim();
-        for (PgScenario scenario : PgScenario.values()) {
-            if (scenario.name().equalsIgnoreCase(name)) {
-                return Optional.of(scenario);
-            }
-        }
-        throw new ApiException(ErrorCode.INVALID_REQUEST,
-                Map.of("header", HttpNames.PG_SCENARIO_HEADER, "value", name));
+        return Optional.of(PgScenario.parse(header).orElseThrow(() -> new ApiException(ErrorCode.INVALID_REQUEST,
+                Map.of("header", HttpNames.PG_SCENARIO_HEADER, "value", header.trim()))));
     }
 }
