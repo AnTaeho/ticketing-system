@@ -51,8 +51,7 @@ class PageControllerTest {
             "/booking/performances/9/queue, booking/queue",
             "/booking/performances/9/seats, booking/seats",
             "/booking/holds/5/checkout, booking/checkout",
-            "/booking/bookings, booking/bookings",
-            "/booking/ops/performances/9, booking/ops"
+            "/booking/bookings, booking/bookings"
     })
     @DisplayName("각 화면 경로는 200으로 해당 뷰를 그린다")
     void rendersPage(String path, String viewName) throws Exception {
@@ -75,7 +74,6 @@ class PageControllerTest {
                 .andExpect(model().attribute("holdId", 5L))
                 .andExpect(model().attribute("demoPg", true))
                 .andExpect(content().string(containsString("name=\"scenario\" value=\"SLOW_SUCCESS\"")));
-        mockMvc.perform(get("/booking/ops/performances/9")).andExpect(model().attribute("performanceId", 9L));
     }
 
     @Test
@@ -104,8 +102,7 @@ class PageControllerTest {
             "/booking/shows/abc",
             "/booking/performances/x/queue",
             "/booking/performances/1.5/seats",
-            "/booking/holds/abc/checkout",
-            "/booking/ops/performances/abc"
+            "/booking/holds/abc/checkout"
     })
     @DisplayName("화면 경로의 번호가 숫자가 아니면 404 오류 화면을 보여 준다")
     void badNumberInPagePathShowsErrorPage(String path) throws Exception {

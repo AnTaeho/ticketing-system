@@ -1,6 +1,5 @@
 package com.example.ticketing.web;
 
-import com.example.ticketing.web.controller.OpsPageController;
 import com.example.ticketing.web.controller.PageController;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.Ordered;
@@ -14,7 +13,7 @@ import org.springframework.web.servlet.ModelAndView;
 // 화면 경로의 오류는 JSON 대신 화면으로 답한다. 맡을 화면 컨트롤러를 타입으로 정한다
 @Slf4j
 @Order(Ordered.HIGHEST_PRECEDENCE)
-@ControllerAdvice(assignableTypes = {PageController.class, OpsPageController.class})
+@ControllerAdvice(assignableTypes = {PageController.class})
 public class PageExceptionHandler {
 
     static final String VIEW = "booking/page-error";

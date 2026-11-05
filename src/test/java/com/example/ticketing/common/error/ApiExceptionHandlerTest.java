@@ -11,7 +11,6 @@ import com.example.ticketing.booking.controller.BookingApiController;
 import com.example.ticketing.common.web.HttpNames;
 import com.example.ticketing.fakepg.controller.FakePgController;
 import com.example.ticketing.hold.controller.HoldApiController;
-import com.example.ticketing.ops.controller.OpsApiController;
 import com.example.ticketing.payment.controller.PaymentApiController;
 import com.example.ticketing.queue.controller.QueueApiController;
 import com.example.ticketing.seat.controller.SeatMapApiController;
@@ -22,7 +21,6 @@ import com.example.ticketing.support.ProbeConfig;
 import com.example.ticketing.support.TestMvc;
 import com.example.ticketing.user.controller.DemoLoginApiController;
 import com.example.ticketing.web.PageExceptionHandler;
-import com.example.ticketing.web.controller.OpsPageController;
 import com.example.ticketing.web.controller.PageController;
 import jakarta.servlet.http.Cookie;
 import java.util.List;
@@ -134,10 +132,10 @@ class ApiExceptionHandlerTest {
         List<Class<?>> restControllers = context.getBeansWithAnnotation(RestController.class).values().stream()
                 .<Class<?>>map(ClassUtils::getUserClass)
                 .toList();
-        List<Class<?>> pageControllers = List.of(PageController.class, OpsPageController.class);
+        List<Class<?>> pageControllers = List.of(PageController.class);
 
         assertThat(restControllers).contains(BookingApiController.class, DemoLoginApiController.class,
-                FakePgController.class, HoldApiController.class, OpsApiController.class, PaymentApiController.class,
+                FakePgController.class, HoldApiController.class, PaymentApiController.class,
                 QueueApiController.class, SeatMapApiController.class, ShowAdminApiController.class,
                 ShowApiController.class);
         assertThat(restControllers).allSatisfy(type -> {
