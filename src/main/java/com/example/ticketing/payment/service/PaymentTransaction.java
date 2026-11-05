@@ -35,6 +35,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 // 락 순서: seat_hold → booking_payment → seat(id 오름차순). 잠근 행은 엔티티 메서드로, 잠근 좌석 여러 개는 UPDATE 한 문장으로 바꾼다. 이 안에서는 PG·Redis를 부르지 않는다
 @Component
+@Transactional(isolation = Isolation.READ_COMMITTED)
 public class PaymentTransaction {
 
     private final PaymentRepository paymentRepository;
@@ -61,7 +62,6 @@ public class PaymentTransaction {
     }
 
     // hold 행 락이 같은 hold의 결제 시작을 줄 세운다. READ_COMMITTED라 기다린 동안 커밋된 결제가 락 뒤의 findByHoldId에서 보인다
-    @Transactional(isolation = Isolation.READ_COMMITTED)
     public PaymentStart start(long userId, long holdId, String idempotencyKey) {
         Optional<Payment> sameKey = paymentRepository.findByUserIdAndIdempotencyKey(userId, idempotencyKey);
         if (sameKey.isPresent()) {
@@ -88,7 +88,6 @@ public class PaymentTransaction {
     }
 
     // 요청 스레드와 대사가 동시에 불러도 hold 락 뒤 PAYING 확인으로 한 번만 효과가 있다
-    @Transactional(isolation = Isolation.READ_COMMITTED)
     public PaymentSettlement openToApproved(long paymentId, String pgTxId) {
         Locked locked = lock(paymentId);
         if (!locked.paying()) {
@@ -112,19 +111,16 @@ public class PaymentTransaction {
                 gateOf(hold, seatIds));
     }
 
-    @Transactional(isolation = Isolation.READ_COMMITTED)
     public PaymentSettlement openToDeclined(long paymentId) {
         return payingToReleased(paymentId, PaymentStatus.DECLINED);
     }
 
     // 망취소가 PG에서 확정된 뒤 대사가 부른다
-    @Transactional(isolation = Isolation.READ_COMMITTED)
     public PaymentSettlement openToCancelled(long paymentId) {
         return payingToReleased(paymentId, PaymentStatus.CANCELLED);
     }
 
     // 결과를 모를 때는 hold·좌석을 그대로 두고 대사가 조회로 확정하게 한다
-    @Transactional(isolation = Isolation.READ_COMMITTED)
     public PaymentSettlement requestedToUnknown(long paymentId, String detail) {
         paymentRepository.requestedToUnknown(paymentId, Texts.abbreviate(detail, Payment.MAX_LAST_ERROR),
                 unknownRecheckNanos);
@@ -133,7 +129,6 @@ public class PaymentTransaction {
     }
 
     // PG 환불 확정 뒤 부른다. 다시 불려도 락 뒤 상태를 보고 두 번째는 아무것도 바꾸지 않는다
-    @Transactional(isolation = Isolation.READ_COMMITTED)
     public void approvedToCancelled(long paymentId) {
         Locked locked = lock(paymentId);
         // 예매 취소의 환불은 hold가 CONFIRMED라 hold를 그대로 둔다
@@ -143,7 +138,6 @@ public class PaymentTransaction {
     }
 
     // 대사가 다음 확인 시각을 정한다. 끝난 결제는 건드리지 않는다. 바꿨으면 true
-    @Transactional(isolation = Isolation.READ_COMMITTED)
     public boolean reschedule(long paymentId, Duration delay, String lastError) {
         return paymentRepository.reschedule(paymentId, delay.toNanos(),
                 Texts.abbreviate(lastError, Payment.MAX_LAST_ERROR)) == 1;

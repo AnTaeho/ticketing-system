@@ -21,6 +21,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 // 락 순서: booking → seat(id 오름차순). 확정된 hold를 바꾸는 경로가 없어 hold 행은 잠그지 않는다. 이 안에서는 Redis·PG를 부르지 않는다
 @Component
+@Transactional(isolation = Isolation.READ_COMMITTED)
 @RequiredArgsConstructor
 public class BookingTransaction {
 
@@ -31,7 +32,6 @@ public class BookingTransaction {
 
     // PG 환불이 끝난 뒤 부르므로 회차 시작은 다시 보지 않는다. booking 락이 같은 예매의 취소를 줄 세우고,
     // 이미 취소된 예매는 아무것도 바꾸지 않아 빈 값을 돌려준다. 값이 있으면 커밋 뒤 지울 좌석 게이트 키다
-    @Transactional(isolation = Isolation.READ_COMMITTED)
     public Optional<GateHold> confirmedToCancelled(long userId, long bookingId) {
         Booking booking = bookingRepository.lockByIdAndUserId(bookingId, userId)
                 .orElseThrow(() -> new ApiException(ErrorCode.BOOKING_NOT_FOUND, Map.of("bookingId", bookingId)));
