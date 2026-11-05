@@ -6,7 +6,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import com.example.ticketing.seat.repository.SeatMapRedisStore;
 import com.example.ticketing.support.Fixtures;
 import com.example.ticketing.support.IntegrationTest;
 import com.example.ticketing.support.TestMvc;
@@ -27,8 +26,6 @@ class SeatMapApiControllerTest {
     private TestMvc testMvc;
     @Autowired
     private Fixtures fixtures;
-    @Autowired
-    private SeatMapRedisStore seatMapRedisStore;
 
     private MockMvc mockMvc;
 
@@ -38,7 +35,7 @@ class SeatMapApiControllerTest {
     }
 
     @Test
-    @DisplayName("좌석맵을 조회하면 캐시하지 말라는 JSON 스냅샷으로 200을 준다")
+    @DisplayName("좌석맵을 조회하면 캐시하지 말라는 JSON으로 200을 준다")
     void returnsSnapshotJson() throws Exception {
         long pid = fixtures.newPerformance(1, 2, 3);
 
@@ -60,22 +57,6 @@ class SeatMapApiControllerTest {
                 .andExpect(jsonPath("$.sections[0].rows[0].seats[0].s").value("A"))
                 .andReturn();
 
-        String body = result.getResponse().getContentAsString(StandardCharsets.UTF_8);
-        assertThat(seatMapRedisStore.get(pid)).isEqualTo(body);
-    }
-
-    @Test
-    @DisplayName("Redis에 든 스냅샷 문자열을 바꾸지 않고 그대로 낸다")
-    void writesStoredStringVerbatim() throws Exception {
-        long pid = fixtures.newPerformance(1, 2, 3);
-        String stored = "{\"performanceId\":" + pid + ",\"generatedAt\":42,\"sections\":[],\"note\":\"좌석\"}";
-        seatMapRedisStore.put(pid, stored);
-
-        MvcResult result = mockMvc.perform(get(SEATS, pid))
-                .andExpect(status().isOk())
-                .andReturn();
-
-        assertThat(result.getResponse().getContentAsString(StandardCharsets.UTF_8)).isEqualTo(stored);
     }
 
     @Test

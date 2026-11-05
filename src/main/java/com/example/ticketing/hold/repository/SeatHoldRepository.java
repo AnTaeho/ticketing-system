@@ -1,7 +1,6 @@
 package com.example.ticketing.hold.repository;
 
 import com.example.ticketing.hold.domain.ClaimedHold;
-import com.example.ticketing.hold.domain.LiveGateSeat;
 import com.example.ticketing.hold.domain.SeatHold;
 import com.example.ticketing.hold.dto.ActiveHoldResult;
 import jakarta.persistence.LockModeType;
@@ -41,23 +40,6 @@ public interface SeatHoldRepository extends JpaRepository<SeatHold, Long> {
     // 결제 테이블은 읽기만 한다. 결제 기능이 hold 기능을 부르므로 결제 서비스를 부르면 순환이 된다
     @Query("select p.id from Payment p where p.holdId = :holdId")
     Optional<Long> findPaymentIdByHoldId(@Param("holdId") long holdId);
-
-    // 좌석 행이 이 토큰의 hold를 가리키는 HELD·SOLD 좌석
-    @Query("""
-            select new com.example.ticketing.hold.domain.LiveGateSeat(h.holdToken, s.id)
-              from SeatHold h
-              join Seat s on s.holdId = h.id
-             where h.performanceId = :performanceId and h.holdToken in :tokens
-               and s.performanceId = :performanceId and s.status in (HELD, SOLD)""")
-    List<LiveGateSeat> findLiveGateSeats(@Param("performanceId") long performanceId,
-                                         @Param("tokens") Collection<String> tokens);
-
-    // HELD·PAYING hold의 토큰만 userhold 키가 살아 있다
-    @Query("""
-            select h.holdToken from SeatHold h
-             where h.performanceId = :performanceId and h.holdToken in :tokens and h.status in (HELD, PAYING)""")
-    List<String> findLiveUserHoldTokens(@Param("performanceId") long performanceId,
-                                        @Param("tokens") Collection<String> tokens);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select h from SeatHold h where h.id = :id and h.userId = :userId")

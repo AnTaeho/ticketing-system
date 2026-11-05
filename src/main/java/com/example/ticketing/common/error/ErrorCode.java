@@ -35,8 +35,7 @@ public enum ErrorCode {
     PAYMENT_CANCELLED(HttpStatus.CONFLICT, "결제가 취소됐어요. 자리는 풀렸어요"),
     CANCEL_NOT_ALLOWED(HttpStatus.CONFLICT, "공연이 시작돼 예매를 취소할 수 없어요"),
 
-    BUSY(HttpStatus.SERVICE_UNAVAILABLE, "사람이 많아 잠시 막혔어요. 잠시 뒤 다시 눌러 주세요"),
-    SEATMAP_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "자리 정보를 불러오지 못했어요. 잠시 뒤 다시 열어 주세요");
+    BUSY(HttpStatus.SERVICE_UNAVAILABLE, "사람이 많아 잠시 막혔어요. 잠시 뒤 다시 눌러 주세요");
 
     private final HttpStatus status;
     private final String defaultMessage;

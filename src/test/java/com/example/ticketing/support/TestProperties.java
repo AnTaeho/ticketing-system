@@ -23,7 +23,7 @@ public final class TestProperties {
     // 컨텍스트 없는 단위 테스트용. 쓰는 묶음만 채운다
     public static TestProperties empty() {
         return new TestProperties(
-                new TicketingProperties(null, null, null, null, null, null, null, null));
+                new TicketingProperties(null, null, null, null, null, null, null));
     }
 
     public TestProperties hold(Hold hold) {
@@ -44,12 +44,12 @@ public final class TestProperties {
 
     public TestProperties gateEnabled(boolean enabled) {
         Gate g = p.gate();
-        return gate(new Gate(enabled, g.fallbackMaxConcurrency(), g.reconcileEnabled(), g.reconcileScanMs()));
+        return gate(new Gate(enabled, g.fallbackMaxConcurrency()));
     }
 
     public TestProperties fallbackMaxConcurrency(int max) {
         Gate g = p.gate();
-        return gate(new Gate(g.enabled(), max, g.reconcileEnabled(), g.reconcileScanMs()));
+        return gate(new Gate(g.enabled(), max));
     }
 
     public TestProperties outboxBatchSize(int batchSize) {
@@ -69,7 +69,7 @@ public final class TestProperties {
     }
 
     private TestProperties with(Hold hold, Payment payment, Gate gate, Outbox outbox, Pg pg) {
-        p = new TicketingProperties(p.seed(), hold, payment, gate, p.seatmap(), outbox, pg, p.fakePg());
+        p = new TicketingProperties(p.seed(), hold, payment, gate, outbox, pg, p.fakePg());
         return this;
     }
 }

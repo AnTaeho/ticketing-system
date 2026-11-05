@@ -14,16 +14,8 @@ public final class RedisKeys {
         return "seat:" + tag(performanceId) + ":" + seatId;
     }
 
-    public static String seatPattern(long performanceId) {
-        return "seat:" + tag(performanceId) + ":*";
-    }
-
     public static String userHold(long userId, long performanceId) {
         return "userhold:" + tag(performanceId) + ":" + userId;
-    }
-
-    public static String userHoldPattern(long performanceId) {
-        return "userhold:" + tag(performanceId) + ":*";
     }
 
     public static String rehold(long userId, long performanceId, long seatId) {
@@ -33,23 +25,5 @@ public final class RedisKeys {
     // seat·rehold 키 모두 마지막 구간이 좌석 ID다
     public static long seatIdOf(String key) {
         return Long.parseLong(key.substring(key.lastIndexOf(':') + 1));
-    }
-
-    public static String seatMap(long performanceId) {
-        return "seatmap:" + tag(performanceId);
-    }
-
-    // 좌석맵 스냅샷과 함께 쓰는 매진 표시("1"이면 모든 좌석이 SOLD)
-    public static String seatMapSoldOut(long performanceId) {
-        return "seatmap:soldout:" + tag(performanceId);
-    }
-
-    public static String seatMapLease(long performanceId) {
-        return "seatmap:lease:" + tag(performanceId);
-    }
-
-    // 회차에 묶이지 않은 서버 전체 리스라 해시 태그가 없다
-    public static String schedulerLease(String name) {
-        return "sched:lease:" + name;
     }
 }

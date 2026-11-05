@@ -18,7 +18,7 @@ public class SeatMapApiController {
 
     private final SeatMapQueryService seatMapQueryService;
 
-    // 스냅샷 JSON을 다시 파싱하지 않고 그대로 낸다. 매초 바뀌므로 브라우저가 저장해 두지 않게 한다
+    // 만든 JSON을 다시 파싱하지 않고 그대로 낸다. 좌석 상태가 바뀌므로 브라우저가 저장해 두지 않게 한다
     @GetMapping("/api/performances/{performanceId}/seats")
     public ResponseEntity<String> seats(@PathVariable long performanceId) {
         return ResponseEntity.ok()

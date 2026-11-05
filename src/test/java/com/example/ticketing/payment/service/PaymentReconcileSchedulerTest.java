@@ -130,7 +130,7 @@ class PaymentReconcileSchedulerTest {
                 .payment(new Payment(Duration.ofMinutes(10), Duration.ofMinutes(1), Duration.ofSeconds(30),
                         Duration.ofSeconds(5), RECHECK, Duration.ofSeconds(30), true, 2000, BATCH,
                         Duration.ofSeconds(30)))
-                .gate(new Gate(gateEnabled, 20, false, 30000))
+                .gate(new Gate(gateEnabled, 20))
                 .build();
         SeatGateReflector reflector = TestServices.gateReflector(seatGateRedisStore, properties, meterRegistry);
         return TestServices.paymentReconcileScheduler(paymentReconcileTransaction, paymentTransaction, pgClient,

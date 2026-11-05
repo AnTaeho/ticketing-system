@@ -143,24 +143,6 @@ class SeatCatalogTest {
     }
 
     @Test
-    @DisplayName("예매 중인 회차 목록은 예매 기간 안의 회차만 담고 10초 동안 다시 읽지 않는다")
-    void openPerformanceIds() {
-        SeatCatalog fresh = services.freshCatalog();
-        long showId = fixtures.newShow();
-        LocalDateTime now = fixtures.dbNow();
-        long open = fixtures.newPerformance(showId, now.minusMinutes(1), now.plusDays(1), 1, 1, 1);
-        long beforeOpen = fixtures.newPerformance(showId, now.plusHours(1), now.plusDays(1), 1, 1, 1);
-        long closed = fixtures.newPerformance(showId, now.minusDays(2), now.minusMinutes(1), 1, 1, 1);
-
-        List<Long> first = fresh.openPerformanceIds();
-        long openedLater = fixtures.newPerformance(showId, now.minusMinutes(1), now.plusDays(1), 1, 1, 1);
-        List<Long> second = fresh.openPerformanceIds();
-
-        assertThat(first).contains(open).doesNotContain(beforeOpen, closed);
-        assertThat(second).isEqualTo(first).doesNotContain(openedLater);
-    }
-
-    @Test
     @DisplayName("예매 확인(requireOpen)은 넘긴 시각이 예매 기간 밖이면 409다")
     void requireOpenUsesGivenTime() {
         long pid = fixtures.newPerformance(1, 1, 1);

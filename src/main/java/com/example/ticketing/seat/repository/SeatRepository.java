@@ -46,13 +46,6 @@ public interface SeatRepository extends JpaRepository<Seat, Long> {
              order by s.id""")
     List<SeatInfo> findSeatInfos(@Param("performanceId") long performanceId);
 
-    // 예매 중인 회차: open_at <= DB 시각 < starts_at
-    @Query("""
-            select p.id from Performance p
-             where p.openAt <= current_timestamp and p.startsAt > current_timestamp
-             order by p.id""")
-    List<Long> findOpenPerformanceIds();
-
     // 구역 → 열 → 번호 순이다
     @Query("""
             select new com.example.ticketing.seat.domain.SeatMapSeat(

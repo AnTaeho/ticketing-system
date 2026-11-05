@@ -19,7 +19,6 @@ public record TicketingProperties(
         @NotNull @Valid Hold hold,
         @NotNull @Valid Payment payment,
         @NotNull @Valid Gate gate,
-        @NotNull @Valid Seatmap seatmap,
         @NotNull @Valid Outbox outbox,
         @NotNull @Valid Pg pg,
         @NotNull @Valid FakePg fakePg
@@ -54,16 +53,7 @@ public record TicketingProperties(
 
     public record Gate(
             boolean enabled,
-            @Positive int fallbackMaxConcurrency,
-            boolean reconcileEnabled,
-            @Positive long reconcileScanMs // @Scheduled 전용
-    ) {
-    }
-
-    // 로컬 캐시와 스케줄러 리스 길이는 주기에서 정한다
-    public record Seatmap(
-            boolean snapshotEnabled,
-            @Positive long snapshotIntervalMs
+            @Positive int fallbackMaxConcurrency
     ) {
     }
 

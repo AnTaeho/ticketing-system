@@ -63,11 +63,6 @@ ticketing:
   gate:
     enabled: true              # 부하 테스트 비교 스위치
     fallback-max-concurrency: 8      # Hikari 풀(10)보다 작게
-    reconcile-enabled: true
-    reconcile-scan-ms: 30000
-  seatmap:
-    snapshot-enabled: true
-    snapshot-interval-ms: 1000
   outbox:
     worker-enabled: true
     poll-interval-ms: 500

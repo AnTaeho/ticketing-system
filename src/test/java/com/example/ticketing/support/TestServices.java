@@ -3,12 +3,9 @@ package com.example.ticketing.support;
 import com.example.ticketing.booking.service.BookingService;
 import com.example.ticketing.booking.service.BookingTransaction;
 import com.example.ticketing.common.config.TicketingProperties;
-import com.example.ticketing.common.redis.InstanceId;
-import com.example.ticketing.common.redis.SchedulerLease;
 import com.example.ticketing.common.time.DbClock;
 import com.example.ticketing.hold.repository.SeatGateRedisStore;
 import com.example.ticketing.hold.repository.SeatHoldRepository;
-import com.example.ticketing.hold.service.GateKeyReconcileScheduler;
 import com.example.ticketing.hold.service.HoldExpiryScheduler;
 import com.example.ticketing.hold.service.HoldExpiryTransaction;
 import com.example.ticketing.hold.service.HoldMetrics;
@@ -25,11 +22,8 @@ import com.example.ticketing.payment.service.PaymentReconcileScheduler;
 import com.example.ticketing.payment.service.PaymentReconcileTransaction;
 import com.example.ticketing.payment.service.PaymentTransaction;
 import com.example.ticketing.seat.repository.SeatRepository;
-import com.example.ticketing.seat.repository.SeatMapRedisStore;
 import com.example.ticketing.seat.service.SeatCatalog;
 import com.example.ticketing.seat.service.SeatMapBuilder;
-import com.example.ticketing.seat.service.SeatMapQueryService;
-import com.example.ticketing.seat.service.SeatMapSnapshotScheduler;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Clock;
 import java.util.Collection;
@@ -77,79 +71,8 @@ public class TestServices {
         return new SeatGateRedisStore(redis);
     }
 
-    public static SeatMapRedisStore seatMapStore(StringRedisTemplate redis) {
-        return new SeatMapRedisStore(redis);
-    }
-
     public SeatHoldServiceBuilder seatHoldService() {
         return new SeatHoldServiceBuilder();
-    }
-
-    // 운영 카탈로그는 예매 중 회차 목록을 10초 묶어 두므로 방금 만든 회차가 빠질 수 있다. 캐시 없는 새 카탈로그다
-    public SeatCatalog freshCatalog() {
-        return new SeatCatalog(bean(SeatRepository.class), contextProperties(), System::nanoTime);
-    }
-
-    // 예매 중 회차 목록을 넘긴 값으로 고정한다
-    public SeatCatalog catalogOf(List<Long> openIds) {
-        return new SeatCatalog(bean(SeatRepository.class), contextProperties(), System::nanoTime) {
-            @Override
-            public List<Long> openPerformanceIds() {
-                return openIds;
-            }
-        };
-    }
-
-    // DB로 고른 예매 중 회차 중에서 넘긴 회차만 남긴다. 다른 테스트가 만든 회차를 건드리지 않게 한다
-    public SeatCatalog openCatalogAmong(Collection<Long> performanceIds) {
-        return new SeatCatalog(bean(SeatRepository.class), contextProperties(), System::nanoTime) {
-            @Override
-            public List<Long> openPerformanceIds() {
-                return super.openPerformanceIds().stream().filter(performanceIds::contains).toList();
-            }
-        };
-    }
-
-    public SchedulerLease lease(StringRedisTemplate redis) {
-        return new SchedulerLease(redis, new InstanceId());
-    }
-
-    public SchedulerLease newLease() {
-        return lease(bean(StringRedisTemplate.class));
-    }
-
-    public GateKeyReconcileSchedulerBuilder gateKeyReconcileScheduler() {
-        return new GateKeyReconcileSchedulerBuilder();
-    }
-
-    public SeatMapQueryService seatMapQueryService(SeatMapRedisStore store, SeatMapBuilder builder) {
-        return new SeatMapQueryService(bean(SeatCatalog.class), builder, store, System::nanoTime,
-                contextProperties(), meterRegistry());
-    }
-
-    // 동시 요청이 빌드 잠금 앞에서 겹치도록 빌드를 늦춘다
-    public SeatMapBuilder slowSeatMapBuilder(long delayMs) {
-        return new SeatMapBuilder(bean(SeatRepository.class), bean(JsonMapper.class), Clock.systemDefaultZone()) {
-            @Override
-            public Optional<String> build(long performanceId) {
-                try {
-                    Thread.sleep(delayMs);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                }
-                return super.build(performanceId);
-            }
-        };
-    }
-
-    public SeatMapSnapshotScheduler seatMapSnapshotScheduler(InstanceId instanceId, SeatCatalog catalog) {
-        return seatMapSnapshotScheduler(instanceId, catalog, bean(SeatMapRedisStore.class));
-    }
-
-    public SeatMapSnapshotScheduler seatMapSnapshotScheduler(InstanceId instanceId, SeatCatalog catalog,
-                                                             SeatMapRedisStore store) {
-        return new SeatMapSnapshotScheduler(catalog, bean(SeatMapBuilder.class), store, instanceId, System::nanoTime,
-                contextProperties(), meterRegistry());
     }
 
     public static HoldExpiryScheduler holdExpiryScheduler(HoldExpiryTransaction expiryTransaction,
@@ -227,43 +150,6 @@ public class TestServices {
                     bean(SeatHoldRepository.class),
                     bean(DbClock.class), Clock.systemDefaultZone(), gate, gateReflector(gate, resolved),
                     new HoldMetrics(meterRegistry()), System::nanoTime, resolved);
-        }
-    }
-
-    public final class GateKeyReconcileSchedulerBuilder {
-
-        private SchedulerLease lease;
-        private SeatGateRedisStore gateStore;
-        private SeatHoldRepository holds;
-        private SeatCatalog catalog;
-
-        public GateKeyReconcileSchedulerBuilder lease(SchedulerLease lease) {
-            this.lease = lease;
-            return this;
-        }
-
-        public GateKeyReconcileSchedulerBuilder gateStore(SeatGateRedisStore gateStore) {
-            this.gateStore = gateStore;
-            return this;
-        }
-
-        // 대사의 DB 조회에 끼어들 때 쓴다
-        public GateKeyReconcileSchedulerBuilder holds(SeatHoldRepository holds) {
-            this.holds = holds;
-            return this;
-        }
-
-        public GateKeyReconcileSchedulerBuilder catalog(SeatCatalog catalog) {
-            this.catalog = catalog;
-            return this;
-        }
-
-        public GateKeyReconcileScheduler build() {
-            return new GateKeyReconcileScheduler(lease != null ? lease : bean(SchedulerLease.class),
-                    gateStore != null ? gateStore : bean(SeatGateRedisStore.class),
-                    holds != null ? holds : bean(SeatHoldRepository.class),
-                    catalog != null ? catalog : bean(SeatCatalog.class), System::nanoTime, contextProperties(),
-                    meterRegistry());
         }
     }
 }

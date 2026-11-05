@@ -8,7 +8,6 @@ import com.example.ticketing.seat.domain.SeatInfo;
 import com.example.ticketing.seat.dto.SeatSelection;
 import com.example.ticketing.seat.repository.SeatRepository;
 import com.example.ticketing.show.domain.PerformanceState;
-import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.Collection;
 import java.util.List;
@@ -17,27 +16,20 @@ import java.util.Objects;
 import java.util.TreeSet;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
-import java.util.function.LongSupplier;
 import org.springframework.stereotype.Component;
 
 // 회차 시각과 좌석 위치·가격은 생성 뒤 바뀌지 않으므로 처음 조회 때 한 번 읽어 인스턴스에 둔다
 @Component
 public class SeatCatalog {
 
-    private static final long OPEN_IDS_TTL_NANOS = Duration.ofSeconds(10).toNanos();
-
     private final SeatRepository seatRepository;
     private final int maxSeats;
-    private final LongSupplier nanoClock;
 
     private final ConcurrentMap<Long, PerformanceInfo> performances = new ConcurrentHashMap<>();
-    private volatile OpenIds openIds;
 
-    public SeatCatalog(SeatRepository seatRepository, TicketingProperties properties,
-                       LongSupplier nanoClock) {
+    public SeatCatalog(SeatRepository seatRepository, TicketingProperties properties) {
         this.seatRepository = seatRepository;
         this.maxSeats = properties.hold().maxSeats();
-        this.nanoClock = nanoClock;
     }
 
     // 맵 잠금을 쥔 채 DB를 읽지 않으려고 computeIfAbsent를 쓰지 않는다. 겹쳐 읽어도 같은 값이다
@@ -88,21 +80,7 @@ public class SeatCatalog {
         return seatRepository.findSeatIdsOfHold(performanceId, holdId).stream().map(seats::get).toList();
     }
 
-    // 스케줄러가 매 주기 부르므로 10초 묶어 둔다. 스케줄러끼리 겹쳐 한 번 더 읽어도 결과는 같다
-    public List<Long> openPerformanceIds() {
-        long now = nanoClock.getAsLong();
-        OpenIds current = openIds;
-        if (current == null || now - current.loadedAtNanos() >= OPEN_IDS_TTL_NANOS) {
-            current = new OpenIds(List.copyOf(seatRepository.findOpenPerformanceIds()), now);
-            openIds = current;
-        }
-        return current.ids();
-    }
-
     private static ApiException invalidSelection(Map<String, Object> detail) {
         return new ApiException(ErrorCode.INVALID_SEAT_SELECTION, detail);
-    }
-
-    private record OpenIds(List<Long> ids, long loadedAtNanos) {
     }
 }

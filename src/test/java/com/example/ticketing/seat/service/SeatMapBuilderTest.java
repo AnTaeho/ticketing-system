@@ -34,7 +34,7 @@ class SeatMapBuilderTest {
         long pid = fixtures.newPerformance(2, 3, 4);
         long before = System.currentTimeMillis();
 
-        String json = seatMapBuilder.build(pid).orElseThrow();
+        String json = seatMapBuilder.build(pid);
 
         JsonNode root = jsonMapper.readTree(json);
         assertThat(root.get("performanceId").asLong()).isEqualTo(pid);
@@ -69,19 +69,19 @@ class SeatMapBuilderTest {
         long pid = fixtures.newPerformance(1, 1, 4);
         List<Long> seatIds = db.seatIdsInLayoutOrder(pid);
 
-        assertThat(statuses(seatMapBuilder.build(pid).orElseThrow())).containsExactly("A", "A", "A", "A");
+        assertThat(statuses(seatMapBuilder.build(pid))).containsExactly("A", "A", "A", "A");
 
         jdbcTemplate.update("UPDATE seat SET status = 'HELD', held_until = NOW(6) + INTERVAL 5 MINUTE WHERE seat_id = ?",
                 seatIds.get(1));
         jdbcTemplate.update("UPDATE seat SET status = 'SOLD' WHERE seat_id = ?", seatIds.get(3));
 
-        assertThat(statuses(seatMapBuilder.build(pid).orElseThrow())).containsExactly("A", "H", "A", "S");
+        assertThat(statuses(seatMapBuilder.build(pid))).containsExactly("A", "H", "A", "S");
     }
 
     @Test
-    @DisplayName("좌석이 없는 회차면 빈 결과를 돌려준다")
-    void emptyWhenNoSeats() {
-        assertThat(seatMapBuilder.build(Long.MAX_VALUE)).isEmpty();
+    @DisplayName("좌석이 없는 회차면 구역이 빈 좌석맵을 돌려준다")
+    void emptySectionsWhenNoSeats() {
+        assertThat(jsonMapper.readTree(seatMapBuilder.build(Long.MAX_VALUE)).get("sections")).isEmpty();
     }
 
     @Test
@@ -89,7 +89,7 @@ class SeatMapBuilderTest {
     void buildsAll800Seats() {
         long pid = fixtures.newPerformance(4, 10, 20);
 
-        String json = seatMapBuilder.build(pid).orElseThrow();
+        String json = seatMapBuilder.build(pid);
 
         assertThat(statuses(json)).hasSize(800);
     }

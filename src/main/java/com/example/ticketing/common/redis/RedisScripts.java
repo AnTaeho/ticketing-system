@@ -15,7 +15,6 @@ public final class RedisScripts {
     public static final RedisScript<Long> EXTEND = load("extend.lua", Long.class);
     public static final RedisScript<Long> CONFIRM = load("confirm.lua", Long.class);
     public static final RedisScript<Long> DELETE_IF_EQUALS = load("delete_if_equals.lua", Long.class);
-    public static final RedisScript<Long> SEATMAP_LEASE = load("seatmap_lease.lua", Long.class);
 
     private RedisScripts() {
     }
