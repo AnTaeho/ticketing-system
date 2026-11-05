@@ -15,15 +15,15 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
-// 집기와 상태 변경을 한 트랜잭션에서 한다. 트랜잭션 밖의 SKIP LOCKED는 락이 바로 풀려 서버끼리 같은 행을 집는다
+// 집기와 상태 변경을 한 트랜잭션에서 한다. 트랜잭션 밖의 SKIP LOCKED는 락이 바로 풀려 의미가 없다
 @Component
+@Transactional(isolation = Isolation.READ_COMMITTED)
 @RequiredArgsConstructor
 public class HoldExpiryTransaction {
 
     private final SeatHoldRepository seatHoldRepository;
     private final SeatRepository seatRepository;
 
-    @Transactional(isolation = Isolation.READ_COMMITTED)
     public List<HoldExpiry> claimAndExpire(int batch) {
         List<ClaimedHold> claimed = seatHoldRepository.claimExpired(Limit.of(batch));
         if (claimed.isEmpty()) {

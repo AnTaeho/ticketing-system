@@ -49,7 +49,7 @@ public interface SeatHoldRepository extends JpaRepository<SeatHold, Long> {
     @Query("select h from SeatHold h where h.id = :id")
     Optional<SeatHold> lockById(@Param("id") long id);
 
-    // 잠금 시간 -2는 Hibernate에서 FOR UPDATE SKIP LOCKED다. 트랜잭션 밖에서는 락이 바로 풀려 서버끼리 같은 행을 집으므로 상태 변경과 같은 트랜잭션에서만 부른다
+    // 잠금 시간 -2는 Hibernate에서 FOR UPDATE SKIP LOCKED다. 트랜잭션 밖에서는 락이 바로 풀려 의미가 없으므로 상태 변경과 같은 트랜잭션에서만 부른다
     @Transactional(propagation = Propagation.MANDATORY)
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @QueryHints(@QueryHint(name = "jakarta.persistence.lock.timeout", value = "-2"))

@@ -23,6 +23,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 // 락 순서: users → seat_hold → seat(id 오름차순). 이 안에서는 Redis를 부르지 않는다
 @Component
+@Transactional(isolation = Isolation.READ_COMMITTED)
 public class SeatHoldTransaction {
 
     private final UserRepository userRepository;
@@ -43,7 +44,6 @@ public class SeatHoldTransaction {
         this.holdTtl = properties.hold().ttl();
     }
 
-    @Transactional(isolation = Isolation.READ_COMMITTED)
     public HoldPlacement persistHold(long userId, SeatSelection selection, String holdToken) {
         long performanceId = selection.performanceId();
         if (userRepository.lockById(userId).isEmpty()) {
@@ -68,7 +68,6 @@ public class SeatHoldTransaction {
     }
 
     // 게이트 키를 지울 좌석 ID는 좌석을 풀기 전에 읽어 둔다. 반환은 커밋 뒤 지울 게이트 키다
-    @Transactional(isolation = Isolation.READ_COMMITTED)
     public GateHold heldToReleased(long userId, long holdId) {
         SeatHold hold = seatHoldRepository.lockByIdAndUserId(holdId, userId)
                 .orElseThrow(() -> new ApiException(ErrorCode.HOLD_NOT_FOUND, Map.of("holdId", holdId)));

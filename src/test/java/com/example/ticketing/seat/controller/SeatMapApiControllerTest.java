@@ -1,6 +1,5 @@
 package com.example.ticketing.seat.controller;
 
-import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -9,13 +8,11 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.example.ticketing.support.Fixtures;
 import com.example.ticketing.support.IntegrationTest;
 import com.example.ticketing.support.TestMvc;
-import java.nio.charset.StandardCharsets;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.test.web.servlet.MockMvc;
-import org.springframework.test.web.servlet.MvcResult;
 
 @IntegrationTest
 class SeatMapApiControllerTest {
@@ -36,10 +33,10 @@ class SeatMapApiControllerTest {
 
     @Test
     @DisplayName("좌석맵을 조회하면 캐시하지 말라는 JSON으로 200을 준다")
-    void returnsSnapshotJson() throws Exception {
+    void returnsSeatMapJson() throws Exception {
         long pid = fixtures.newPerformance(1, 2, 3);
 
-        MvcResult result = mockMvc.perform(get(SEATS, pid))
+        mockMvc.perform(get(SEATS, pid))
                 .andExpect(status().isOk())
                 .andExpect(header().string("Content-Type", "application/json;charset=UTF-8"))
                 .andExpect(header().string("Cache-Control", "no-store"))
@@ -54,9 +51,7 @@ class SeatMapApiControllerTest {
                 .andExpect(jsonPath("$.sections[0].rows[0].seats[0].no").value(1))
                 .andExpect(jsonPath("$.sections[0].rows[0].seats[0].grade").value("VIP"))
                 .andExpect(jsonPath("$.sections[0].rows[0].seats[0].price").value(180_000))
-                .andExpect(jsonPath("$.sections[0].rows[0].seats[0].s").value("A"))
-                .andReturn();
-
+                .andExpect(jsonPath("$.sections[0].rows[0].seats[0].s").value("A"));
     }
 
     @Test

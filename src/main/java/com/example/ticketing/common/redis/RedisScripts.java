@@ -21,11 +21,6 @@ public final class RedisScripts {
         return RedisScript.of(read(name), resultType);
     }
 
-    // 돌려주는 값이 없는 스크립트
-    private static RedisScript<Void> load(String name) {
-        return RedisScript.of(read(name));
-    }
-
     private static String read(String name) {
         ClassPathResource resource = new ClassPathResource("scripts/booking/" + name);
         try {

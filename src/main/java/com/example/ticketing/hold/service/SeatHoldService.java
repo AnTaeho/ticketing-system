@@ -7,7 +7,6 @@ import com.example.ticketing.common.redis.RedisFailures;
 import com.example.ticketing.common.redis.RedisUnavailableException;
 import com.example.ticketing.common.time.DbClock;
 import com.example.ticketing.hold.domain.GateHold;
-import com.example.ticketing.hold.domain.GateResult;
 import com.example.ticketing.hold.domain.SeatHold;
 import com.example.ticketing.hold.dto.ActiveHoldResult;
 import com.example.ticketing.hold.dto.CreateHoldCommand;
@@ -22,6 +21,7 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -97,16 +97,16 @@ public class SeatHoldService {
         if (!gateReflector.enabled()) {
             return;
         }
-        GateResult result;
+        Optional<Long> takenSeatId;
         try {
-            result = gateStore.tryHold(gateHold, holdTtl);
+            takenSeatId = gateStore.tryHold(gateHold, holdTtl);
         } catch (RedisUnavailableException e) {
             log.warn("[hold] Redis 게이트 실패 performanceId={} cause={}", gateHold.performanceId(),
                     RedisFailures.describe(e));
             return;
         }
-        if (result.type() == GateResult.Type.SEAT_TAKEN) {
-            throw new ApiException(ErrorCode.SEAT_TAKEN, Map.of("seatId", result.seatId()));
+        if (takenSeatId.isPresent()) {
+            throw new ApiException(ErrorCode.SEAT_TAKEN, Map.of("seatId", takenSeatId.get()));
         }
     }
 }

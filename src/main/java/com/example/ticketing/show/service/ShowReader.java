@@ -38,7 +38,7 @@ public class ShowReader {
                 .toList();
     }
 
-    public ShowDetailResult getShow(Long showId) {
+    public ShowDetailResult getShow(long showId) {
         Show show = showRepository.findById(showId)
                 .orElseThrow(() -> new ApiException(ErrorCode.SHOW_NOT_FOUND, Map.of("showId", showId)));
         LocalDateTime now = dbClock.now();

@@ -74,7 +74,7 @@ public interface SeatRepository extends JpaRepository<Seat, Long> {
     @Query("update Seat s set s.status = SOLD where s.holdId = :holdId and s.status = HELD")
     int heldToSold(@Param("holdId") long holdId);
 
-    // hold_id 조건 덕분에 남이 이미 가져간 좌석은 건드리지 않는다
+    // 이 hold가 쥔 HELD 좌석만 푼다
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("""
             update Seat s set s.status = AVAILABLE, s.holdId = null

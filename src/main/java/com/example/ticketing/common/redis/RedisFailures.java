@@ -21,13 +21,6 @@ public final class RedisFailures {
         }
     }
 
-    public static void translate(Runnable call) {
-        translate(() -> {
-            call.run();
-            return null;
-        });
-    }
-
     // 로그에는 번역 전 원인 문자열을 남긴다
     public static String describe(Throwable e) {
         if (e instanceof RedisUnavailableException && e.getCause() != null) {

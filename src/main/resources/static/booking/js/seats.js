@@ -106,9 +106,9 @@
   // ---- 좌석맵 정리 ----
 
   // 좌석을 bk.seat 모양으로 바꿔 줄 안에 그대로 두고 id로도 찾게 한다
-  function index(snapshot) {
+  function index(seatMap) {
     state.seatsById = {};
-    snapshot.sections.forEach(function (sec) {
+    seatMap.sections.forEach(function (sec) {
       sec.rows.forEach(function (row) {
         row.seats = row.seats.map(function (raw) {
           var seat = bk.seat(raw, sec.section, row.rowNo);
@@ -408,10 +408,10 @@
 
   // ---- 좌석맵 받기 ----
 
-  function render(snapshot) {
-    if (state.map && snapshot.generatedAt === state.map.generatedAt) return;
-    state.map = snapshot;
-    index(snapshot);
+  function render(seatMap) {
+    if (state.map && seatMap.generatedAt === state.map.generatedAt) return;
+    state.map = seatMap;
+    index(seatMap);
     if (state.map.sections.length === 0) {
       showMapMessage('고를 수 있는 자리가 없어요');
       ui.grid.hidden = true;
@@ -430,10 +430,10 @@
     if (then) then();
   }
 
-  function mapLoaded(snapshot) {
+  function mapLoaded(seatMap) {
     state.failures = 0;
     note.clear('map');
-    render(snapshot);
+    render(seatMap);
     runAfterMap();
   }
 
