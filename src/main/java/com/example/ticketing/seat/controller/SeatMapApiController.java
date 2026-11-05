@@ -1,6 +1,7 @@
 package com.example.ticketing.seat.controller;
 
-import com.example.ticketing.seat.service.SeatMapQueryService;
+import com.example.ticketing.seat.dto.SeatMapResult;
+import com.example.ticketing.seat.service.SeatMapReader;
 import java.nio.charset.StandardCharsets;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.CacheControl;
@@ -16,14 +17,14 @@ public class SeatMapApiController {
 
     private static final MediaType JSON_UTF8 = new MediaType(MediaType.APPLICATION_JSON, StandardCharsets.UTF_8);
 
-    private final SeatMapQueryService seatMapQueryService;
+    private final SeatMapReader seatMapReader;
 
-    // 만든 JSON을 다시 파싱하지 않고 그대로 낸다. 좌석 상태가 바뀌므로 브라우저가 저장해 두지 않게 한다
+    // 좌석 상태가 바뀌므로 브라우저가 저장해 두지 않게 한다
     @GetMapping("/api/performances/{performanceId}/seats")
-    public ResponseEntity<String> seats(@PathVariable long performanceId) {
+    public ResponseEntity<SeatMapResult> seats(@PathVariable long performanceId) {
         return ResponseEntity.ok()
                 .contentType(JSON_UTF8)
                 .cacheControl(CacheControl.noStore())
-                .body(seatMapQueryService.get(performanceId));
+                .body(seatMapReader.read(performanceId));
     }
 }
