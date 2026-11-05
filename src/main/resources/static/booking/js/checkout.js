@@ -7,7 +7,7 @@
   var PAY_TIMEOUT_MS = 15000;
   var URGENT_SECONDS = 60;
   var METHOD_NAMES = { CARD: '신용·체크카드', EASY_PAY: '간편결제' };
-  var AGAIN = '다시 예매하려면 줄을 서서 자리를 골라 주세요.';
+  var AGAIN = '다시 예매하려면 자리를 새로 골라 주세요.';
 
   var body = document.body;
   var holdId = body.dataset.holdId;
@@ -126,18 +126,14 @@
     body.classList.toggle('is-narrow', node !== ui.order);
   }
 
-  function queueHref() {
+  function seatsHref() {
     if (!state.hold) return bk.links.shows;
-    return bk.links.queue(state.hold.performanceId, showId);
+    return bk.links.seats(state.hold.performanceId, showId);
   }
 
-  function forgetQueueToken() {
-    if (state.hold) bk.session.remove(bk.keys.queueToken(state.hold.performanceId));
-  }
-
-  // 결과 화면의 단추. 줄 서기부터 다시 하는 단추는 남은 대기 표를 지우고 간다
+  // 결과 화면의 단추
   var LINKS = {
-    repick: function () { return { label: '자리 다시 고르기', href: queueHref(), before: forgetQueueToken }; },
+    repick: function () { return { label: '자리 다시 고르기', href: seatsHref() }; },
     shows: function () { return { label: '공연 목록', href: bk.links.shows }; },
     bookings: function () { return { label: '내 예매 보기', href: bk.links.bookings }; },
     reload: function () { return { label: '다시 불러오기', href: location.pathname + location.search }; }
@@ -147,9 +143,7 @@
   var RESULTS = {
     done: { title: '예매가 끝났어요', facts: true, main: 'bookings', sub: 'shows' },
     declined: { title: '결제가 거절됐어요. 자리는 풀렸어요', text: AGAIN, main: 'repick', sub: 'shows' },
-    expired: { title: '결제 시간이 지나 자리가 풀렸어요',
-      text: '놓친 자리는 10분 뒤에 다시 고를 수 있어요. 다른 자리는 지금 고를 수 있어요.', main: 'repick', sub: 'shows' },
-    seatLost: { title: '결제는 됐지만 자리를 지키지 못했어요', text: '결제 금액은 자동으로 돌려드려요.', main: 'repick', sub: 'shows' },
+    expired: { title: '결제 시간이 지나 자리가 풀렸어요', text: AGAIN, main: 'repick', sub: 'shows' },
     cancelled: { title: '결제가 취소돼 자리가 풀렸어요', text: AGAIN, main: 'repick', sub: 'shows' },
     released: { title: '이미 놓은 자리예요', text: AGAIN, main: 'repick', sub: 'shows' },
     alreadyFreed: { title: '이미 풀린 자리예요', text: AGAIN, main: 'repick', sub: 'shows' },
@@ -163,7 +157,6 @@
     if (!action) return;
     node.textContent = action.label;
     node.setAttribute('href', action.href);
-    node.onclick = action.before || null;
   }
 
   // extra: {text, number}로 표의 글을 바꾼다
@@ -345,7 +338,6 @@
   var PAY_FAILURES = {
     PAYMENT_DECLINED: 'declined',
     HOLD_EXPIRED: 'expired',
-    SEAT_LOST_REFUNDING: 'seatLost',
     PAYMENT_CANCELLED: 'cancelled',
     HOLD_NOT_FOUND: 'notFound'
   };
@@ -404,7 +396,6 @@
     bk.del('/api/holds/' + holdId).then(function () {
       stopTimers();
       state.stage = 'result';
-      forgetQueueToken();
       bk.session.remove(idemKey);
       location.href = showHref;
     }, function (e) {
@@ -466,7 +457,7 @@
   function settle(p) {
     if (p.status === 'APPROVED') {
       if (p.holdStatus === 'CONFIRMED') showDone(p.bookingNumber);
-      else if (p.holdStatus === 'REFUNDING' || p.holdStatus === 'RELEASED') showResult('seatLost');
+      else if (p.holdStatus !== 'PAYING') showResult('released');
     } else if (p.status === 'DECLINED') {
       showResult('declined');
     } else if (p.status === 'CANCELLED') {
@@ -482,7 +473,6 @@
     bk.get('/api/payments/' + h.paymentId).then(function (p) {
       if (p.status === 'DECLINED') showResult('declined');
       else if (p.status === 'CANCELLED') showResult('cancelled');
-      else if (p.status === 'APPROVED') showResult('seatLost');
       else showResult('released');
     }, function () { showResult('released'); });
   }
@@ -496,8 +486,6 @@
   function route(h, note) {
     state.hold = h;
     if (!state.headerDone) {
-      // 대기 표는 자리를 잡을 때 이미 썼다. 남겨 두면 다음 예매가 쓴 표로 줄을 선다
-      forgetQueueToken();
       state.headerDone = true;
       bk.loadPerformanceHeader(showId, h.performanceId);
     }
@@ -513,8 +501,6 @@
       explainReleased(h);
     } else if (h.status === 'EXPIRED') {
       showResult('expired');
-    } else if (h.status === 'REFUNDING') {
-      showResult('seatLost');
     } else {
       showResult('released');
     }

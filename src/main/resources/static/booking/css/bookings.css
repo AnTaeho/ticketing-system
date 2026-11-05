@@ -13,8 +13,6 @@
 .bk .facts{margin-top:4px;border-top:0}
 .bk .facts div{padding:9px 0}
 .bk-msg{margin-top:14px;padding:10px 12px;border-radius:var(--radius);background:var(--accent-soft);color:var(--accent-text);font-size:14px;line-height:1.5}
-.bk-msg.is-wait{background:var(--bg);color:var(--muted)}
-.bk-msg.is-refund{background:var(--warn-soft);color:var(--warn-text)}
 .bk-msg.is-done{background:var(--bg);color:var(--muted)}
 .bk-alert{margin-top:12px}
 .bk-foot{margin-top:14px}

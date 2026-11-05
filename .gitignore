@@ -40,11 +40,5 @@ out/
 ### VS Code ###
 .vscode/
 
-### Gatling build output ###
-load-test/gatling/target/
-
 ### macOS ###
 .DS_Store
-
-### Load test results ###
-load-test/results/

@@ -4,8 +4,7 @@
 
   // 서버 message 대신 화면이 직접 쓰는 말
   var WORDS = {
-    network: '인터넷 연결이 불안정해요',
-    busy: '사람이 많아 잠시 막혔어요'
+    network: '인터넷 연결이 불안정해요'
   };
   var NETWORK_MESSAGE = WORDS.network + '. 연결을 확인하고 다시 시도해 주세요';
   var FALLBACK_MESSAGE = '잠시 문제가 생겼어요. 잠시 뒤 다시 시도해 주세요';
@@ -65,7 +64,7 @@
     });
   }
 
-  // 같은 요청을 주기마다 보낸다. 늦게 온 응답은 버리고, 탭이 숨으면 멈췄다가(keepWhenHidden이면 계속) 다시 보이면 곧바로 한 번 보낸다.
+  // 같은 요청을 주기마다 보낸다. 늦게 온 응답은 버리고, 탭이 숨으면 멈췄다가 다시 보이면 곧바로 한 번 보낸다.
   // interval은 ms나 ms를 돌려주는 함수(null이면 다음 차례를 잡지 않는다). 처리기가 다음 차례를 정하지 않으면 interval 뒤에 다시 한다
   function poller(opts) {
     var timer = null;
@@ -74,7 +73,7 @@
     var decided = false;
 
     function awake() {
-      return opts.keepWhenHidden || !document.hidden;
+      return !document.hidden;
     }
 
     function nextDelay() {
@@ -106,7 +105,6 @@
 
     document.addEventListener('visibilitychange', function () {
       if (document.hidden) {
-        if (opts.keepWhenHidden) return;
         clearTimeout(timer);
         timer = null;
         seq++;
@@ -118,8 +116,6 @@
     return {
       // 지금 한 번 하고 이어 간다. 날아가 있는 응답은 버린다
       now: function () { active = true; run(); },
-      // ms 뒤에 한다. 없으면 interval
-      later: function (ms) { active = true; plan(ms === undefined ? nextDelay() : ms); },
       // 이번에는 다음 차례를 잡지 않는다. 탭이 다시 보이면 이어 간다
       idle: function () { plan(null); },
       stop: function () { active = false; seq++; clearTimeout(timer); timer = null; }
@@ -252,8 +248,6 @@
   }
 
   var keys = {
-    // 대기열 표(sessionStorage)
-    queueToken: function (performanceId) { return 'bk_queue_' + performanceId; },
     // 같은 자리 결제 재시도에 쓰는 번호(sessionStorage)
     idempotency: function (holdId) { return 'bk_idem_' + holdId; },
     // 결제 확인 중 화면에 보일 결제 수단(sessionStorage)
@@ -271,7 +265,6 @@
     shows: '/booking/shows',
     bookings: '/booking/bookings',
     show: function (showId) { return showId ? '/booking/shows/' + showId : '/booking/shows'; },
-    queue: function (performanceId, showId) { return withShow('/booking/performances/' + performanceId + '/queue', showId); },
     seats: function (performanceId, showId) { return withShow('/booking/performances/' + performanceId + '/seats', showId); },
     checkout: function (holdId, showId) { return withShow('/booking/holds/' + encodeURIComponent(holdId) + '/checkout', showId); }
   };
@@ -293,19 +286,6 @@
 
   function positiveId(raw) {
     return /^[1-9]\d{0,17}$/.test(raw || '') ? raw : null;
-  }
-
-  // ---- 대기열 표 ----
-
-  function queueTokenPath(performanceId, queueToken) {
-    return '/api/performances/' + performanceId + '/queue/tokens/' + encodeURIComponent(queueToken);
-  }
-
-  // 화면을 떠날 때 처리열 자리를 잠깐만 더 두라고 알린다. 쿠키로 사용자를 알리고 응답은 기다리지 않는다
-  function leaveQueue(performanceId) {
-    var queueToken = storage('session').get(keys.queueToken(performanceId));
-    if (!queueToken || !navigator.sendBeacon) return;
-    try { navigator.sendBeacon(queueTokenPath(performanceId, queueToken) + '/leave'); } catch (e) { /* 못 보내면 생존 신호가 끊겨 자리가 풀린다 */ }
   }
 
   window.bk = {
@@ -335,8 +315,6 @@
     links: links,
     query: query,
     safePath: safePath,
-    positiveId: positiveId,
-    queueTokenPath: queueTokenPath,
-    leaveQueue: leaveQueue
+    positiveId: positiveId
   };
 })();

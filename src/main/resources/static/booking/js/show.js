@@ -19,7 +19,7 @@
     if (performance.state === 'OPEN') {
       return el('a', {
         class: 'btn btn-primary',
-        href: bk.links.queue(performance.id, showId),
+        href: bk.links.seats(performance.id, showId),
         text: '예매하기'
       });
     }
