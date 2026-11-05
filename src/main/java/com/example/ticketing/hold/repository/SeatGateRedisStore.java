@@ -4,9 +4,9 @@ import com.example.ticketing.common.redis.RedisFailures;
 import com.example.ticketing.common.redis.RedisKeys;
 import com.example.ticketing.common.redis.RedisScripts;
 import com.example.ticketing.hold.domain.GateHold;
-import com.example.ticketing.hold.domain.GateResult;
 import java.time.Duration;
 import java.util.List;
+import java.util.Optional;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 
@@ -21,14 +21,18 @@ public class SeatGateRedisStore {
         this.redis = redis;
     }
 
-    // seatIds는 오름차순이어야 한다
-    public GateResult tryHold(GateHold hold, Duration ttl) {
+    // seatIds는 오름차순이어야 한다. 이미 잡힌 좌석이 있으면 그 좌석 ID를, 모두 잡았으면 빈 값을 돌려준다
+    public Optional<Long> tryHold(GateHold hold, Duration ttl) {
         if (hold.seatIds().isEmpty()) {
             throw new IllegalArgumentException("좌석이 비었다");
         }
         List<?> reply = RedisFailures.translate(() -> redis.execute(RedisScripts.HOLD, seatKeys(hold),
                 hold.holdToken(), String.valueOf(ttl.toMillis())));
-        return GateResult.fromScript(reply);
+        // hold.lua 반환은 {'OK'} 또는 {'SEAT_TAKEN', 좌석 키}다
+        if (reply.size() < 2) {
+            return Optional.empty();
+        }
+        return Optional.of(RedisKeys.seatIdOf(String.valueOf(reply.get(1))));
     }
 
     // 값이 holdToken인 좌석 키만 지운다. 그냥 DEL하면 그새 남이 잡은 키를 지운다. 반환: 지운 키 수

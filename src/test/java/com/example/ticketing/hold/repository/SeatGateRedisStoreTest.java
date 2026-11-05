@@ -4,7 +4,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.example.ticketing.common.redis.RedisKeys;
 import com.example.ticketing.hold.domain.GateHold;
-import com.example.ticketing.hold.domain.GateResult;
 import com.example.ticketing.support.Fixtures;
 import com.example.ticketing.support.IntegrationTest;
 import com.example.ticketing.support.TestRedis;
@@ -12,6 +11,7 @@ import java.time.Duration;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ThreadLocalRandom;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -50,9 +50,9 @@ class SeatGateRedisStoreTest {
     @Test
     @DisplayName("선점에 성공하면 좌석 키에 토큰을 쓰고 수명을 건다")
     void holdWritesKeys() {
-        GateResult result = seatGateRedisStore.tryHold(new GateHold(pid, "tA", seats), TTL);
+        Optional<Long> result = seatGateRedisStore.tryHold(new GateHold(pid, "tA", seats), TTL);
 
-        assertThat(result).isEqualTo(GateResult.ok());
+        assertThat(result).isEmpty();
         for (String key : List.of(seatKey(seat1), seatKey(seat2))) {
             assertThat(redis.opsForValue().get(key)).isEqualTo("tA");
             assertThat(testRedis.pttl(key)).isBetween(TTL.toMillis() - TOLERANCE_MS, TTL.toMillis());
@@ -66,9 +66,9 @@ class SeatGateRedisStoreTest {
         seatGateRedisStore.tryHold(new GateHold(pid, "tB", List.of(seat2)), TTL);
         Map<String, String> before = snapshot();
 
-        GateResult result = seatGateRedisStore.tryHold(new GateHold(pid, "tA", seats), TTL);
+        Optional<Long> result = seatGateRedisStore.tryHold(new GateHold(pid, "tA", seats), TTL);
 
-        assertThat(result).isEqualTo(GateResult.seatTaken(seat2));
+        assertThat(result).contains(seat2);
         assertThat(snapshot()).isEqualTo(before);
         assertThat(redis.hasKey(seatKey(seat1))).isFalse();
     }
