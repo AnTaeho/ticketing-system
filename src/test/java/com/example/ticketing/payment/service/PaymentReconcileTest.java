@@ -156,7 +156,7 @@ class PaymentReconcileTest {
     void notFoundAfterWindowIsCancelled(Unsettled kind) {
         Held held = fixtures.held(2);
         long paymentId = unsettled(kind, held);
-        assertThat(testRedis.gateKeys(held.pid())).isNotEmpty();
+        assertThat(testRedis.keys(held.pid())).isNotEmpty();
         double before = counters.count(Metrics.PAYMENT_RECONCILE, Tag.RESULT, "cancelled");
         db.agePayment(paymentId, 60);
         db.makePaymentDue(paymentId);
@@ -167,7 +167,7 @@ class PaymentReconcileTest {
         assertThat(db.holdStatus(held.holdId())).isEqualTo("RELEASED");
         held.seatIds().forEach(seatId -> assertThat(db.seat(seatId)).containsEntry("status", "AVAILABLE")
                 .containsEntry("hold_id", null).containsEntry("held_until", null));
-        assertThat(testRedis.gateKeys(held.pid())).isEmpty();
+        assertThat(testRedis.keys(held.pid())).isEmpty();
         assertThat(stubPg.cancelCalls()).isEqualTo(1);
         assertThat(counters.count(Metrics.PAYMENT_RECONCILE, Tag.RESULT, "cancelled") - before).isEqualTo(1);
     }
@@ -206,7 +206,7 @@ class PaymentReconcileTest {
         redis.delete(RedisKeys.seat(held.pid(), lost));
         long thief = fixtures.newUser();
         CreateHoldResult thiefHold = seatHoldService.hold(
-                new CreateHoldCommand(thief, held.pid(), List.of(lost), fixtures.admit(held.pid(), thief)));
+                new CreateHoldCommand(thief, held.pid(), List.of(lost)));
         stubPg.queryWith(PgResult.of(PgStatus.APPROVED, "pg-lost-1"));
         double before = counters.count(Metrics.PAYMENT_RECONCILE, Tag.RESULT, "seat_lost");
         db.makePaymentDue(paymentId);
@@ -360,7 +360,7 @@ class PaymentReconcileTest {
         assertThat(db.holdStatus(held.holdId())).isEqualTo("RELEASED");
         held.seatIds().forEach(seatId -> assertThat(db.seat(seatId)).containsEntry("status", "AVAILABLE")
                 .containsEntry("hold_id", null));
-        assertThat(testRedis.gateKeys(held.pid())).isEmpty();
+        assertThat(testRedis.keys(held.pid())).isEmpty();
         assertThat(counters.count(Metrics.PAYMENT_RECONCILE, Tag.RESULT, "declined") - before).isEqualTo(1);
     }
 
@@ -415,7 +415,7 @@ class PaymentReconcileTest {
         assertThat(db.holdStatus(held.holdId())).isEqualTo("RELEASED");
         held.seatIds().forEach(seatId -> assertThat(db.seat(seatId)).containsEntry("status", "AVAILABLE")
                 .containsEntry("hold_id", null));
-        assertThat(testRedis.gateKeys(held.pid())).isEmpty();
+        assertThat(testRedis.keys(held.pid())).isEmpty();
         assertThat(stubPg.cancelCalls()).isZero();
     }
 

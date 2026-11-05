@@ -16,7 +16,6 @@ import org.springframework.test.context.TestPropertySource;
         "ticketing.hold.expiry-enabled=false",
         "ticketing.payment.reconcile-enabled=false",
         "ticketing.outbox.worker-enabled=false",
-        "ticketing.queue.promote-enabled=false",
         "ticketing.seatmap.snapshot-enabled=false",
         "ticketing.gate.reconcile-enabled=false",
         "spring.data.redis.database=1",

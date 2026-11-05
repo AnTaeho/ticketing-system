@@ -180,7 +180,7 @@ class BookingCancelTest {
         assertThat(db.outboxCount("REFUND_REQUESTED", c.paymentId())).isEqualTo(1);
         c.seatIds().forEach(seatId -> assertThat(db.seat(seatId)).containsEntry("status", "AVAILABLE")
                 .containsEntry("hold_id", null));
-        assertThat(testRedis.gateKeys(c.pid())).isEmpty();
+        assertThat(testRedis.keys(c.pid())).isEmpty();
     }
 
     @Test

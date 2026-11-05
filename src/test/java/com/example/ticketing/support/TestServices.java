@@ -24,9 +24,6 @@ import com.example.ticketing.payment.service.PaymentGateReflector;
 import com.example.ticketing.payment.service.PaymentReconcileScheduler;
 import com.example.ticketing.payment.service.PaymentReconcileTransaction;
 import com.example.ticketing.payment.service.PaymentTransaction;
-import com.example.ticketing.queue.repository.QueueRedisStore;
-import com.example.ticketing.queue.service.QueuePromotionScheduler;
-import com.example.ticketing.queue.service.QueueService;
 import com.example.ticketing.seat.repository.SeatRepository;
 import com.example.ticketing.seat.repository.SeatMapRedisStore;
 import com.example.ticketing.seat.service.SeatCatalog;
@@ -80,25 +77,12 @@ public class TestServices {
         return new SeatGateRedisStore(redis);
     }
 
-    public static QueueRedisStore queueStore(StringRedisTemplate redis) {
-        return new QueueRedisStore(redis);
-    }
-
     public static SeatMapRedisStore seatMapStore(StringRedisTemplate redis) {
         return new SeatMapRedisStore(redis);
     }
 
     public SeatHoldServiceBuilder seatHoldService() {
         return new SeatHoldServiceBuilder();
-    }
-
-    public QueueServiceBuilder queueService() {
-        return new QueueServiceBuilder();
-    }
-
-    public QueuePromotionScheduler queuePromotionScheduler(TicketingProperties properties, SeatCatalog catalog) {
-        return new QueuePromotionScheduler(bean(SchedulerLease.class), bean(QueueRedisStore.class), catalog,
-                bean(SeatMapQueryService.class), Clock.systemDefaultZone(), properties);
     }
 
     // 운영 카탈로그는 예매 중 회차 목록을 10초 묶어 두므로 방금 만든 회차가 빠질 수 있다. 캐시 없는 새 카탈로그다
@@ -218,7 +202,6 @@ public class TestServices {
         private TicketingProperties properties;
         private SeatGateRedisStore gateStore;
         private SeatHoldTransaction transaction;
-        private QueueService queueService;
 
         public SeatHoldServiceBuilder properties(TicketingProperties properties) {
             this.properties = properties;
@@ -235,11 +218,6 @@ public class TestServices {
             return this;
         }
 
-        public SeatHoldServiceBuilder queueService(QueueService queueService) {
-            this.queueService = queueService;
-            return this;
-        }
-
         // 반영 빈은 넘긴 게이트 저장소와 설정으로 새로 만든다
         public SeatHoldService build() {
             TicketingProperties resolved = properties != null ? properties : contextProperties();
@@ -248,37 +226,7 @@ public class TestServices {
                     transaction != null ? transaction : bean(SeatHoldTransaction.class),
                     bean(SeatHoldRepository.class),
                     bean(DbClock.class), Clock.systemDefaultZone(), gate, gateReflector(gate, resolved),
-                    queueService != null ? queueService : bean(QueueService.class),
                     new HoldMetrics(meterRegistry()), System::nanoTime, resolved);
-        }
-    }
-
-    public final class QueueServiceBuilder {
-
-        private TicketingProperties properties;
-        private QueueRedisStore store;
-        private SeatMapQueryService seatMap;
-
-        public QueueServiceBuilder properties(TicketingProperties properties) {
-            this.properties = properties;
-            return this;
-        }
-
-        public QueueServiceBuilder store(QueueRedisStore store) {
-            this.store = store;
-            return this;
-        }
-
-        public QueueServiceBuilder seatMap(SeatMapQueryService seatMap) {
-            this.seatMap = seatMap;
-            return this;
-        }
-
-        public QueueService build() {
-            return new QueueService(store != null ? store : bean(QueueRedisStore.class), bean(SeatCatalog.class),
-                    seatMap != null ? seatMap : bean(SeatMapQueryService.class),
-                    Clock.systemDefaultZone(), System::nanoTime,
-                    properties != null ? properties : contextProperties(), meterRegistry());
         }
     }
 

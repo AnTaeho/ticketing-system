@@ -7,7 +7,6 @@ import com.example.ticketing.hold.service.HoldExpiryScheduler;
 import com.example.ticketing.hold.service.HoldExpiryTransaction;
 import com.example.ticketing.outbox.service.OutboxDispatchScheduler;
 import com.example.ticketing.payment.service.PaymentReconcileScheduler;
-import com.example.ticketing.queue.service.QueuePromotionScheduler;
 import com.example.ticketing.seat.service.SeatMapSnapshotScheduler;
 import com.example.ticketing.support.IntegrationTest;
 import java.time.Duration;
@@ -36,8 +35,6 @@ class TicketingPropertiesTest {
         assertThat(properties.hold().ttl()).isEqualTo(Duration.ofMinutes(5));
         assertThat(properties.hold().maxSeats()).isEqualTo(4);
         assertThat(properties.payment().payDeadline()).isEqualTo(Duration.ofMinutes(10));
-        assertThat(properties.queue().waitingTokenTtl()).isEqualTo(Duration.ofMinutes(60));
-        assertThat(properties.queue().waitingLeaveGrace()).isEqualTo(Duration.ofSeconds(10));
         assertThat(properties.seatmap().snapshotIntervalMs()).isEqualTo(1000);
         assertThat(properties.outbox().lockDuration()).isEqualTo(Duration.ofSeconds(60));
         assertThat(properties.gate().reconcileScanMs()).isEqualTo(30000);
@@ -53,7 +50,6 @@ class TicketingPropertiesTest {
         assertThat(properties.hold().expiryEnabled()).isFalse();
         assertThat(properties.payment().reconcileEnabled()).isFalse();
         assertThat(properties.outbox().workerEnabled()).isFalse();
-        assertThat(properties.queue().promoteEnabled()).isFalse();
         assertThat(properties.seatmap().snapshotEnabled()).isFalse();
         assertThat(properties.gate().reconcileEnabled()).isFalse();
     }
@@ -62,7 +58,7 @@ class TicketingPropertiesTest {
     @DisplayName("스케줄러 스위치(*-enabled)가 꺼진 테스트 컨텍스트에는 스케줄러 빈이 없고 위임 대상 빈은 있다")
     void schedulerBeansDisabledInTests() {
         List.of(HoldExpiryScheduler.class, GateKeyReconcileScheduler.class, PaymentReconcileScheduler.class,
-                        OutboxDispatchScheduler.class, QueuePromotionScheduler.class, SeatMapSnapshotScheduler.class)
+                        OutboxDispatchScheduler.class, SeatMapSnapshotScheduler.class)
                 .forEach(type -> assertThat(context.getBeanProvider(type).getIfAvailable()).as(type.getSimpleName())
                         .isNull());
         assertThat(context.getBeanProvider(HoldExpiryTransaction.class).getIfAvailable()).isNotNull();

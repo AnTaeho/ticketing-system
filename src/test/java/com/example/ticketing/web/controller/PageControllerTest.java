@@ -48,7 +48,6 @@ class PageControllerTest {
             "/booking/login, booking/login",
             "/booking/shows, booking/shows",
             "/booking/shows/7, booking/show",
-            "/booking/performances/9/queue, booking/queue",
             "/booking/performances/9/seats, booking/seats",
             "/booking/holds/5/checkout, booking/checkout",
             "/booking/bookings, booking/bookings"
@@ -62,14 +61,12 @@ class PageControllerTest {
     }
 
     @Test
-    @DisplayName("화면은 경로의 번호와 좌석 수·생존 신호 간격·시연 여부를 모델로 넘긴다")
+    @DisplayName("화면은 경로의 번호와 좌석 수·시연 여부를 모델로 넘긴다")
     void passesModel() throws Exception {
         mockMvc.perform(get("/booking/shows/7")).andExpect(model().attribute("showId", 7L));
-        mockMvc.perform(get("/booking/performances/9/queue")).andExpect(model().attribute("performanceId", 9L));
         mockMvc.perform(get("/booking/performances/9/seats"))
                 .andExpect(model().attribute("performanceId", 9L))
-                .andExpect(model().attribute("maxSeats", 4))
-                .andExpect(model().attribute("heartbeatMs", 40_000L));
+                .andExpect(model().attribute("maxSeats", 4));
         mockMvc.perform(get("/booking/holds/5/checkout"))
                 .andExpect(model().attribute("holdId", 5L))
                 .andExpect(model().attribute("demoPg", true))
@@ -100,7 +97,6 @@ class PageControllerTest {
     @ParameterizedTest(name = "{0}")
     @CsvSource({
             "/booking/shows/abc",
-            "/booking/performances/x/queue",
             "/booking/performances/1.5/seats",
             "/booking/holds/abc/checkout"
     })

@@ -35,32 +35,6 @@ public final class RedisKeys {
         return Long.parseLong(key.substring(key.lastIndexOf(':') + 1));
     }
 
-    public static String queueWaiting(long performanceId) {
-        return "bq:" + tag(performanceId) + ":waiting";
-    }
-
-    public static String queueProcessing(long performanceId) {
-        return "bq:" + tag(performanceId) + ":processing";
-    }
-
-    // 처리열 토큰의 입장 시각(ms). 생존 신호가 최대 세션 길이를 넘겨 늘리지 못하게 한다
-    public static String queueAdmitted(long performanceId) {
-        return "bq:" + tag(performanceId) + ":admitted";
-    }
-
-    // 대기 중에 화면을 떠난 토큰과 줄에서 뺄 시각(ms). 유예 안에 돌아오면 지운다
-    public static String queueLeaving(long performanceId) {
-        return "bq:" + tag(performanceId) + ":leaving";
-    }
-
-    public static String queueUser(long userId, long performanceId) {
-        return "bq:" + tag(performanceId) + ":user:" + userId;
-    }
-
-    public static String queueRate(long performanceId) {
-        return "bq:" + tag(performanceId) + ":rate";
-    }
-
     public static String seatMap(long performanceId) {
         return "seatmap:" + tag(performanceId);
     }

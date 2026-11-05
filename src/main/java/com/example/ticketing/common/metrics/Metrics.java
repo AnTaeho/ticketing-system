@@ -88,7 +88,6 @@ public final class Metrics {
         String EXTEND = "extend";
         String CONFIRM = "confirm";
         String COOLDOWN = "cooldown";
-        String QUEUE_CONSUME = "queue_consume";
     }
 
     // GATE_ORPHAN_REMOVED의 kind

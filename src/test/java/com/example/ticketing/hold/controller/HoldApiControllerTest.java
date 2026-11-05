@@ -23,7 +23,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 import tools.jackson.databind.JsonNode;
 
-// 판정은 SeatHoldServiceTest·SeatHoldQueueTest·SeatCatalogTest가 본다. 여기서는 HTTP 연결만 본다
+// 판정은 SeatHoldServiceTest·SeatCatalogTest가 본다. 여기서는 HTTP 연결만 본다
 @IntegrationTest
 class HoldApiControllerTest {
 
@@ -50,7 +50,7 @@ class HoldApiControllerTest {
         long r = ids.get(4);
         long userId = fixtures.newUser();
 
-        JsonNode created = testMvc.body(hold(userId, pid, List.of(r, vip), fixtures.admit(pid, userId))
+        JsonNode created = testMvc.body(hold(userId, pid, List.of(r, vip))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.holdId").isNumber())
                 .andExpect(jsonPath("$.expiresAt").isString())
@@ -98,22 +98,10 @@ class HoldApiControllerTest {
         long pid = fixtures.newPerformance(1, 1, 6);
         long userId = fixtures.newUser();
 
-        hold(userId, pid, db.seatIds(pid).subList(0, 5), fixtures.admit(pid, userId))
+        hold(userId, pid, db.seatIds(pid).subList(0, 5))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("INVALID_SEAT_SELECTION"))
                 .andExpect(jsonPath("$.detail.reason").value("COUNT"));
-    }
-
-    @Test
-    @DisplayName("처리열 토큰 없이 잡으면 403 NOT_ADMITTED로 답한다")
-    void notAdmitted() throws Exception {
-        long pid = fixtures.newPerformance(1, 1, 2);
-        long userId = fixtures.newUser();
-
-        hold(userId, pid, List.of(db.seatIds(pid).get(0)), null)
-                .andExpect(status().isForbidden())
-                .andExpect(jsonPath("$.code").value("NOT_ADMITTED"))
-                .andExpect(jsonPath("$.message").value("입장 순서가 지났어요. 다시 줄을 서 주세요"));
     }
 
     @Test
@@ -129,12 +117,9 @@ class HoldApiControllerTest {
                 .andExpect(jsonPath("$.code").value("LOGIN_REQUIRED"));
     }
 
-    // queueToken이 null이면 본문에서 뺀다
-    private ResultActions hold(long userId, long pid, List<Long> seatIds, String queueToken) throws Exception {
+    private ResultActions hold(long userId, long pid, List<Long> seatIds) throws Exception {
         String ids = seatIds.stream().map(String::valueOf).collect(Collectors.joining(","));
-        String body = queueToken == null
-                ? "{\"seatIds\":[%s]}".formatted(ids)
-                : "{\"seatIds\":[%s],\"queueToken\":\"%s\"}".formatted(ids, queueToken);
+        String body = "{\"seatIds\":[%s]}".formatted(ids);
         return mockMvc.perform(post("/api/performances/{pid}/holds", pid)
                 .header(USER_ID_HEADER, userId)
                 .contentType(MediaType.APPLICATION_JSON)

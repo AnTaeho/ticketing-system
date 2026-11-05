@@ -17,7 +17,6 @@ import com.example.ticketing.hold.dto.HoldDetailResult;
 import com.example.ticketing.hold.dto.HoldPlacement;
 import com.example.ticketing.hold.repository.SeatGateRedisStore;
 import com.example.ticketing.hold.repository.SeatHoldRepository;
-import com.example.ticketing.queue.service.QueueService;
 import com.example.ticketing.seat.dto.SeatSelection;
 import com.example.ticketing.seat.service.SeatCatalog;
 import java.time.Clock;
@@ -42,7 +41,6 @@ public class SeatHoldService {
     private final Clock clock;
     private final SeatGateRedisStore gateStore;
     private final SeatGateReflector gateReflector;
-    private final QueueService queueService;
     private final HoldMetrics metrics;
     private final Duration holdTtl;
     private final Semaphore fallbackPermits;
@@ -51,7 +49,7 @@ public class SeatHoldService {
     public SeatHoldService(SeatCatalog seatCatalog, SeatHoldTransaction seatHoldTransaction,
                            SeatHoldRepository seatHoldRepository, DbClock dbClock, Clock clock,
                            SeatGateRedisStore gateStore, SeatGateReflector gateReflector,
-                           QueueService queueService, HoldMetrics metrics, LongSupplier nanoClock,
+                           HoldMetrics metrics, LongSupplier nanoClock,
                            TicketingProperties properties) {
         this.seatCatalog = seatCatalog;
         this.seatHoldTransaction = seatHoldTransaction;
@@ -60,29 +58,18 @@ public class SeatHoldService {
         this.clock = clock;
         this.gateStore = gateStore;
         this.gateReflector = gateReflector;
-        this.queueService = queueService;
         this.metrics = metrics;
         this.redisWarn = new ThrottledWarn(log, nanoClock);
         this.holdTtl = properties.hold().ttl();
         this.fallbackPermits = new Semaphore(properties.gate().fallbackMaxConcurrency());
     }
 
-    // 토큰은 커밋까지 성공했을 때만 소모한다. 게이트·DB에서 진 사용자는 같은 토큰으로 다른 좌석을 고른다
     public CreateHoldResult hold(CreateHoldCommand command) {
         // 게이트를 부르기 전 서버 시계로 거르는 사전 확인이다. 경계 판정은 트랜잭션 안에서 DB 시각으로 다시 한다
         seatCatalog.requireOpen(command.performanceId(), LocalDateTime.now(clock));
         SeatSelection selection = seatCatalog.validateSeats(command.performanceId(), command.seatIds());
         GateHold gateHold = new GateHold(command.userId(), command.performanceId(), UUID.randomUUID().toString(),
                 selection.seatIds());
-        if (!checkAdmission(command)) {
-            // Redis가 죽은 걸 이미 봤으니 게이트는 부르지 않는다
-            if (gateReflector.enabled()) {
-                metrics.gateError();
-            } else {
-                metrics.gateSkipped();
-            }
-            return holdWithoutRedis(command, selection, gateHold, false);
-        }
         if (!passGate(gateHold)) {
             return holdWithoutRedis(command, selection, gateHold, true);
         }
@@ -107,25 +94,6 @@ public class SeatHoldService {
     // 커밋이 끝난 뒤 게이트 키를 지운다
     public void release(long userId, long holdId) {
         gateReflector.release(seatHoldTransaction.heldToReleased(userId, holdId));
-    }
-
-    // false면 Redis 장애로 확인하지 못해 DB 판정으로 넘긴다. passGate도 같다
-    private boolean checkAdmission(CreateHoldCommand command) {
-        String queueToken = command.queueToken();
-        if (queueToken == null || queueToken.isBlank()) {
-            throw new ApiException(ErrorCode.NOT_ADMITTED);
-        }
-        boolean admitted;
-        try {
-            admitted = queueService.isAdmitted(command.userId(), command.performanceId(), queueToken);
-        } catch (RedisUnavailableException e) {
-            warnRedisFailure("queue_check", command.performanceId(), e);
-            return false;
-        }
-        if (!admitted) {
-            throw new ApiException(ErrorCode.NOT_ADMITTED);
-        }
-        return true;
     }
 
     // 게이트 OFF면 Redis를 부르지 않는다. 거절이면 DB에 닿지 않고 409로 끝난다
@@ -181,7 +149,6 @@ public class SeatHoldService {
             }
             throw e;
         }
-        queueService.consumeQuietly(command.userId(), command.performanceId(), command.queueToken());
         return new CreateHoldResult(placement.holdId(), placement.expiresAt(),
                 selection.seats(), selection.totalAmount());
     }

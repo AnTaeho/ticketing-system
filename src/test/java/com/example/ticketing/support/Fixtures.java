@@ -12,9 +12,6 @@ import com.example.ticketing.payment.dto.PayCommand;
 import com.example.ticketing.payment.dto.PaymentOutcome;
 import com.example.ticketing.payment.dto.PaymentResult;
 import com.example.ticketing.payment.service.PaymentService;
-import com.example.ticketing.queue.domain.QueueTokenStatus;
-import com.example.ticketing.queue.dto.QueueEnterResult;
-import com.example.ticketing.queue.service.QueueService;
 import com.example.ticketing.show.dto.CreatePerformanceCommand;
 import com.example.ticketing.show.dto.CreateShowCommand;
 import com.example.ticketing.show.service.ShowAdminService;
@@ -38,7 +35,6 @@ public class Fixtures {
     private final ShowAdminService showAdminService;
     private final UserRepository userRepository;
     private final DbClock dbClock;
-    private final QueueService queueService;
     private final SeatHoldService seatHoldService;
     private final PaymentService paymentService;
     private final TestDb db;
@@ -87,27 +83,6 @@ public class Fixtures {
         return userRepository.save(User.create("fx-" + shortId())).getId();
     }
 
-    // 운영과 같은 진입 경로로 처리열 토큰을 받는다. 바로 입장하지 못하면 테스트가 실패한다
-    public String admit(long performanceId, long userId) {
-        QueueEnterResult entered = queueService.enter(userId, performanceId);
-        assertThat(entered.status())
-                .as("회차 %d 사용자 %d가 처리열에 바로 들어가야 한다", performanceId, userId)
-                .isEqualTo(QueueTokenStatus.PROCESSING);
-        return entered.queueToken();
-    }
-
-    // 정원을 넘겨 입장시킨다(동시성 테스트용). 부를 때마다 새 토큰을 처리열에 직접 넣는다
-    public String forceAdmit(long performanceId, long userId) {
-        String queueToken = userId + "." + UUID.randomUUID();
-        long now = System.currentTimeMillis();
-        long expireAt = now + properties.queue().admissionWindow().toMillis();
-        testRedis.template().opsForZSet().add(RedisKeys.queueProcessing(performanceId), queueToken, expireAt);
-        testRedis.template().opsForZSet().add(RedisKeys.queueAdmitted(performanceId), queueToken, now);
-        testRedis.template().opsForValue().set(RedisKeys.queueUser(userId, performanceId), queueToken,
-                properties.queue().waitingTokenTtl());
-        return queueToken;
-    }
-
     // 새 회차(1구역 1열 6석)에서 새 사용자가 앞에서부터 seatCount석을 잡은 상태
     public Held held(int seatCount) {
         long pid = newPerformance(1, 1, 6);
@@ -120,7 +95,7 @@ public class Fixtures {
 
     public Held held(long pid, long userId, List<Long> seatIds) {
         CreateHoldResult hold = seatHoldService.hold(
-                new CreateHoldCommand(userId, pid, seatIds, admit(pid, userId)));
+                new CreateHoldCommand(userId, pid, seatIds));
         return new Held(pid, userId, hold.holdId(), List.copyOf(seatIds), hold.totalAmount(),
                 db.holdToken(hold.holdId()));
     }

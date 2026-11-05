@@ -12,7 +12,6 @@ import com.example.ticketing.common.web.HttpNames;
 import com.example.ticketing.fakepg.controller.FakePgController;
 import com.example.ticketing.hold.controller.HoldApiController;
 import com.example.ticketing.payment.controller.PaymentApiController;
-import com.example.ticketing.queue.controller.QueueApiController;
 import com.example.ticketing.seat.controller.SeatMapApiController;
 import com.example.ticketing.show.controller.ShowAdminApiController;
 import com.example.ticketing.show.controller.ShowApiController;
@@ -136,7 +135,7 @@ class ApiExceptionHandlerTest {
 
         assertThat(restControllers).contains(BookingApiController.class, DemoLoginApiController.class,
                 FakePgController.class, HoldApiController.class, PaymentApiController.class,
-                QueueApiController.class, SeatMapApiController.class, ShowAdminApiController.class,
+                SeatMapApiController.class, ShowAdminApiController.class,
                 ShowApiController.class);
         assertThat(restControllers).allSatisfy(type -> {
             assertThat(api.isApplicableToBeanType(type)).as(type.getName()).isTrue();

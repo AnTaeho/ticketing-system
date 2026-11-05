@@ -19,7 +19,6 @@ public record TicketingProperties(
         @NotNull @Valid Hold hold,
         @NotNull @Valid Payment payment,
         @NotNull @Valid Gate gate,
-        @NotNull @Valid Queue queue,
         @NotNull @Valid Seatmap seatmap,
         @NotNull @Valid Outbox outbox,
         @NotNull @Valid Pg pg,
@@ -59,24 +58,6 @@ public record TicketingProperties(
             boolean reconcileEnabled,
             @Positive long reconcileScanMs // @Scheduled 전용
     ) {
-    }
-
-    public record Queue(
-            @Positive int capacity,
-            @NotNull @DurationMin(millis = 1) Duration processingMaxSession,
-            @NotNull @DurationMin(millis = 1) Duration processingIdleTimeout,
-            @NotNull @DurationMin Duration processingLeaveGrace,
-            @NotNull @DurationMin Duration waitingLeaveGrace,
-            @NotNull @DurationMin(millis = 1) Duration waitingTokenTtl,
-            boolean promoteEnabled,
-            @Positive long promoteIntervalMs
-    ) {
-
-        // 입장 직후 처리열 자리가 남는 시간. 생존 신호가 오기 전까지다
-        public Duration admissionWindow() {
-            return processingIdleTimeout.compareTo(processingMaxSession) < 0 ? processingIdleTimeout
-                    : processingMaxSession;
-        }
     }
 
     // 로컬 캐시와 스케줄러 리스 길이는 주기에서 정한다

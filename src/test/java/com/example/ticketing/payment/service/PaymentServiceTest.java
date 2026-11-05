@@ -202,7 +202,7 @@ class PaymentServiceTest {
         assertThat(db.holdStatus(held.holdId())).isEqualTo("RELEASED");
         held.seatIds().forEach(seatId -> assertThat(db.seat(seatId)).containsEntry("status", "AVAILABLE")
                 .containsEntry("hold_id", null).containsEntry("held_until", null));
-        assertThat(testRedis.gateKeys(held.pid())).isEmpty();
+        assertThat(testRedis.keys(held.pid())).isEmpty();
         assertThat(db.bookingCountOfHold(held.holdId())).isZero();
 
         ApiException again = catchApiException(() -> paymentService.pay(command(held, key)));
@@ -369,15 +369,13 @@ class PaymentServiceTest {
         held.seatIds().forEach(seatId -> assertThat(db.seat(seatId)).containsEntry("held_until", payDeadline));
 
         long other = fixtures.newUser();
-        String queueToken = fixtures.admit(held.pid(), other);
         ApiException byGate = catchApiException(() -> seatHoldService.hold(
-                new CreateHoldCommand(other, held.pid(), held.seatIds(), queueToken)));
+                new CreateHoldCommand(other, held.pid(), held.seatIds())));
         assertThat(byGate.getCode()).isEqualTo(ErrorCode.SEAT_TAKEN);
 
         testRedis.clean(held.pid());
-        String retryToken = fixtures.admit(held.pid(), other);
         ApiException byDb = catchApiException(() -> seatHoldService.hold(
-                new CreateHoldCommand(other, held.pid(), held.seatIds(), retryToken)));
+                new CreateHoldCommand(other, held.pid(), held.seatIds())));
         assertThat(byDb.getCode()).isEqualTo(ErrorCode.SEAT_STATE_CHANGED);
 
         assertThat(holdExpiryTransaction.claimAndExpire(50))
@@ -397,8 +395,7 @@ class PaymentServiceTest {
         long lost = held.seatIds().get(1);
         long thief = fixtures.newUser();
         CreateHoldResult thiefHold = seatHoldService.hold(
-                new CreateHoldCommand(thief, held.pid(), List.of(db.seatIds(held.pid()).get(2)),
-                fixtures.admit(held.pid(), thief)));
+                new CreateHoldCommand(thief, held.pid(), List.of(db.seatIds(held.pid()).get(2))));
         stubPg.beforeApproveReturns(orderId ->
                 jdbcTemplate.update("UPDATE seat SET hold_id = ? WHERE seat_id = ?", thiefHold.holdId(), lost));
         String key = key();

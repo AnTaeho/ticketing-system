@@ -61,7 +61,7 @@ class SeatHoldGateTest {
         long userA = fixtures.newUser();
         long userB = fixtures.newUser();
         CreateHoldResult holdA = seatHoldService.hold(
-                new CreateHoldCommand(userA, pid, target, fixtures.admit(pid, userA)));
+                new CreateHoldCommand(userA, pid, target));
         String tokenA = db.holdToken(holdA.holdId());
         assertThat(redis.opsForValue().get(RedisKeys.seat(pid, target.get(0)))).isEqualTo(tokenA);
 
@@ -69,8 +69,7 @@ class SeatHoldGateTest {
         double gateOkBefore = counters.count(Metrics.HOLD_GATE, Tag.RESULT, "ok");
         double stateChangedBefore = counters.count(Metrics.HOLD_DB, Tag.RESULT, "state_changed");
 
-        String queueToken = fixtures.admit(pid, userB);
-        assertThatThrownBy(() -> seatHoldService.hold(new CreateHoldCommand(userB, pid, target, queueToken)))
+        assertThatThrownBy(() -> seatHoldService.hold(new CreateHoldCommand(userB, pid, target)))
                 .isInstanceOf(ApiException.class)
                 .extracting("code").isEqualTo(ErrorCode.SEAT_STATE_CHANGED);
 
@@ -91,13 +90,12 @@ class SeatHoldGateTest {
     @DisplayName("같은 사용자의 두 번째 선점은 게이트가 USER_HAS_HOLD로 막고 DB에 닿지 않는다")
     void userHasHoldStopsAtGate() {
         long userId = fixtures.newUser();
-        seatHoldService.hold(new CreateHoldCommand(userId, pid, List.of(ids.get(0)), fixtures.admit(pid, userId)));
+        seatHoldService.hold(new CreateHoldCommand(userId, pid, List.of(ids.get(0))));
         double dbBefore = counters.sum(Metrics.HOLD_DB);
         double gateBefore = counters.count(Metrics.HOLD_GATE, Tag.RESULT, "user_has_hold");
 
-        String queueToken = fixtures.admit(pid, userId);
         assertThatThrownBy(() -> seatHoldService.hold(
-                new CreateHoldCommand(userId, pid, List.of(ids.get(1)), queueToken)))
+                new CreateHoldCommand(userId, pid, List.of(ids.get(1)))))
                 .extracting("code").isEqualTo(ErrorCode.USER_HAS_HOLD);
 
         assertThat(counters.sum(Metrics.HOLD_DB) - dbBefore).isZero();
@@ -113,7 +111,7 @@ class SeatHoldGateTest {
         long userA = fixtures.newUser();
         long userB = fixtures.newUser();
         CreateHoldResult holdA = seatHoldService.hold(
-                new CreateHoldCommand(userA, pid, List.of(seat), fixtures.admit(pid, userA)));
+                new CreateHoldCommand(userA, pid, List.of(seat)));
         db.expireHoldAndSeats(holdA.holdId());
 
         // 스케줄러 빈은 테스트에서 꺼져 있다. 남이 남긴 만료 선점이 앞에 있을 수 있어 치워질 때까지 돈다
@@ -132,8 +130,7 @@ class SeatHoldGateTest {
                 .isLessThanOrEqualTo(properties.hold().reholdCooldown().toSeconds());
         double dbBefore = counters.sum(Metrics.HOLD_DB);
 
-        String queueToken = fixtures.admit(pid, userA);
-        assertThatThrownBy(() -> seatHoldService.hold(new CreateHoldCommand(userA, pid, List.of(seat), queueToken)))
+        assertThatThrownBy(() -> seatHoldService.hold(new CreateHoldCommand(userA, pid, List.of(seat))))
                 .isInstanceOf(ApiException.class)
                 .satisfies(e -> {
                     ApiException be = (ApiException) e;
@@ -143,11 +140,11 @@ class SeatHoldGateTest {
         assertThat(counters.sum(Metrics.HOLD_DB) - dbBefore).isZero();
 
         CreateHoldResult holdB = seatHoldService.hold(
-                new CreateHoldCommand(userB, pid, List.of(seat), fixtures.admit(pid, userB)));
+                new CreateHoldCommand(userB, pid, List.of(seat)));
         assertThat(db.heldSeats(pid, holdB.holdId())).containsExactly(seat);
         // 쿨다운은 놓친 좌석에만 걸린다
         CreateHoldResult holdA2 = seatHoldService.hold(
-                new CreateHoldCommand(userA, pid, List.of(ids.get(1)), fixtures.admit(pid, userA)));
+                new CreateHoldCommand(userA, pid, List.of(ids.get(1))));
         assertThat(db.heldSeats(pid, holdA2.holdId())).containsExactly(ids.get(1));
     }
 
@@ -158,14 +155,14 @@ class SeatHoldGateTest {
         long userA = fixtures.newUser();
         long userB = fixtures.newUser();
         CreateHoldResult holdA = seatHoldService.hold(
-                new CreateHoldCommand(userA, pid, target, fixtures.admit(pid, userA)));
-        assertThat(testRedis.gateKeys(pid)).hasSize(3);
+                new CreateHoldCommand(userA, pid, target));
+        assertThat(testRedis.keys(pid)).hasSize(3);
 
         seatHoldService.release(userA, holdA.holdId());
 
-        assertThat(testRedis.gateKeys(pid)).isEmpty();
+        assertThat(testRedis.keys(pid)).isEmpty();
         CreateHoldResult holdB = seatHoldService.hold(
-                new CreateHoldCommand(userB, pid, target, fixtures.admit(pid, userB)));
+                new CreateHoldCommand(userB, pid, target));
         assertThat(db.heldSeats(pid, holdB.holdId())).containsExactlyElementsOf(target);
         assertThat(redis.opsForValue().get(RedisKeys.seat(pid, target.get(0))))
                 .isEqualTo(db.holdToken(holdB.holdId()));

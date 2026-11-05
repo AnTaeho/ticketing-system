@@ -57,16 +57,13 @@ class SeatHoldGateRollbackTest {
         }).when(spy).persistHold(anyLong(), any(), anyString());
         double gateOkBefore = counters.count(Metrics.HOLD_GATE, Tag.RESULT, "ok");
         double releaseFailureBefore = counters.count(Metrics.REDIS_REFLECT_FAILURE, Tag.OP, "release");
-        String queueToken = fixtures.admit(pid, userId);
 
-        assertThatThrownBy(() -> seatHoldService.hold(new CreateHoldCommand(userId, pid, target, queueToken)))
+        assertThatThrownBy(() -> seatHoldService.hold(new CreateHoldCommand(userId, pid, target)))
                 .isInstanceOf(DataAccessResourceFailureException.class);
 
         assertThat(counters.count(Metrics.HOLD_GATE, Tag.RESULT, "ok") - gateOkBefore).isEqualTo(1);
         assertThat(counters.count(Metrics.REDIS_REFLECT_FAILURE, Tag.OP, "release")).isEqualTo(releaseFailureBefore);
-        assertThat(testRedis.gateKeys(pid)).isEmpty();
-        // 서버 오류로 끝난 선점은 토큰을 소모하지 않는다
-        assertThat(testRedis.template().opsForZSet().score(RedisKeys.queueProcessing(pid), queueToken)).isNotNull();
+        assertThat(testRedis.keys(pid)).isEmpty();
         assertThat(db.holdCount(pid)).isZero();
         assertThat(jdbcTemplate.queryForList("SELECT DISTINCT status FROM seat WHERE performance_id = ?",
                 String.class, pid)).containsExactly("AVAILABLE");

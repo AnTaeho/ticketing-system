@@ -55,13 +55,10 @@ class SeatHoldConcurrencyTest {
     void sameSeatsFiveHundredUsers() {
         long pid = fixtures.newPerformance(1, 1, 4);
         List<Long> target = db.seatIds(pid).subList(0, 2);
-        // 정원(200)보다 많은 500명을 처리열에 직접 넣는다. 재려는 것은 좌석 경합이다
         List<Long> users = new ArrayList<>(THREAD_COUNT);
-        List<String> tokens = new ArrayList<>(THREAD_COUNT);
         for (int i = 0; i < THREAD_COUNT; i++) {
             long userId = fixtures.newUser();
             users.add(userId);
-            tokens.add(fixtures.forceAdmit(pid, userId));
         }
         double okBefore = counters.count(Metrics.HOLD_DB, Tag.RESULT, "ok");
         double changedBefore = counters.count(Metrics.HOLD_DB, Tag.RESULT, "state_changed");
@@ -73,7 +70,7 @@ class SeatHoldConcurrencyTest {
         Results<CreateHoldResult> results = Concurrently.of(THREAD_COUNT)
                 .readyWithin(Duration.ofSeconds(30))
                 .within(Duration.ofSeconds(60))
-                .run(i -> service().hold(new CreateHoldCommand(users.get(i), pid, target, tokens.get(i))));
+                .run(i -> service().hold(new CreateHoldCommand(users.get(i), pid, target)));
 
         assertThat(results.unexpected(ApiException.class)).isEmpty();
         assertThat(results.values()).hasSize(1);
@@ -101,7 +98,7 @@ class SeatHoldConcurrencyTest {
                     .isEqualTo(THREAD_COUNT - 1);
             assertThat(counters.count(Metrics.HOLD_GATE, Tag.RESULT, "skipped") - gateSkippedBefore)
                     .isEqualTo(THREAD_COUNT);
-            assertThat(testRedis.gateKeys(pid)).isEmpty();
+            assertThat(testRedis.keys(pid)).isEmpty();
         }
     }
 
@@ -120,13 +117,10 @@ class SeatHoldConcurrencyTest {
         List<Integer> badRounds = new ArrayList<>();
 
         for (int round = 0; round < CROSS_ROUNDS; round++) {
-            // 진 쪽은 토큰이 남아 같은 토큰을 다시 받고, 이긴 쪽은 소모돼 새로 받는다
-            String tokenA = fixtures.admit(pid, userA);
-            String tokenB = fixtures.admit(pid, userB);
             Results<CreateHoldResult> results = Concurrently.of(2).within(Duration.ofSeconds(60))
                     .run(i -> i == 0
-                            ? service().hold(new CreateHoldCommand(userA, pid, forward, tokenA))
-                            : service().hold(new CreateHoldCommand(userB, pid, reverse, tokenB)));
+                            ? service().hold(new CreateHoldCommand(userA, pid, forward))
+                            : service().hold(new CreateHoldCommand(userB, pid, reverse)));
 
             int conflicted = 0;
             for (Throwable error : results.errors()) {
@@ -158,7 +152,7 @@ class SeatHoldConcurrencyTest {
                 "SELECT COUNT(*) FROM seat_hold WHERE performance_id = ? AND status = 'RELEASED'",
                 Long.class, pid)).isEqualTo(CROSS_ROUNDS);
         // 매 회 취소가 게이트 키도 지운다. 게이트 OFF면 처음부터 키가 없다
-        assertThat(testRedis.gateKeys(pid)).isEmpty();
+        assertThat(testRedis.keys(pid)).isEmpty();
     }
 
     @Test
@@ -168,15 +162,13 @@ class SeatHoldConcurrencyTest {
         int attempts = 10;
         List<Long> ids = db.seatIds(pid);
         long userId = fixtures.newUser();
-        // 시도마다 다른 토큰을 넣는다. 한 토큰이면 먼저 이긴 요청의 소모로 늦은 요청이 NOT_ADMITTED가 될 수 있다
         List<String> tokens = new ArrayList<>(attempts);
         for (int i = 0; i < attempts; i++) {
-            tokens.add(fixtures.forceAdmit(pid, userId));
         }
 
         Results<CreateHoldResult> results = Concurrently.of(attempts).within(Duration.ofSeconds(60))
                 .run(i -> service().hold(
-                        new CreateHoldCommand(userId, pid, List.of(ids.get(i)), tokens.get(i))));
+                        new CreateHoldCommand(userId, pid, List.of(ids.get(i)))));
 
         assertThat(results.unexpected(ApiException.class)).isEmpty();
         assertThat(results.values()).hasSize(1);
@@ -188,7 +180,7 @@ class SeatHoldConcurrencyTest {
                 Long.class, pid, userId)).isEqualTo(1);
         assertThat(db.heldSeatCount(pid)).isEqualTo(1);
         if (!gateEnabled()) {
-            assertThat(testRedis.gateKeys(pid)).isEmpty();
+            assertThat(testRedis.keys(pid)).isEmpty();
         }
     }
 
