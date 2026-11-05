@@ -8,15 +8,15 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.context.annotation.Import;
 import org.springframework.test.context.TestPropertySource;
 
-// 예매 테스트 메타 애너테이션들이 같은 속성을 쓰게 한 곳에 둔다. 예매 테스트 데이터는 전용 DB·Redis DB 1에 쌓는다
+// 예매 테스트 메타 애너테이션들이 같은 속성을 쓰게 한 곳에 둔다. 테스트 DB·Redis 번호는 환경 변수로 바꿀 수 있고 기본은 ticketing_booking_test·1이다
 @Target(ElementType.ANNOTATION_TYPE)
 @Retention(RetentionPolicy.RUNTIME)
 @TestPropertySource(properties = {
         "ticketing.seed.enabled=false",
         "ticketing.hold.expiry-enabled=false",
         "ticketing.payment.reconcile-enabled=false",
-        "spring.data.redis.database=1",
-        "spring.datasource.url=jdbc:mysql://localhost:3306/ticketing_booking_test"
+        "spring.data.redis.database=${TICKETING_TEST_REDIS_DB:1}",
+        "spring.datasource.url=jdbc:mysql://localhost:3306/${TICKETING_TEST_DB:ticketing_booking_test}"
                 + "?createDatabaseIfNotExist=true&serverTimezone=Asia/Seoul&characterEncoding=UTF-8"
 })
 @Import({Fixtures.class, TestDb.class, TestRedis.class, TestServices.class, TestMvc.class})

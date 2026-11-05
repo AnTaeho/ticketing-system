@@ -19,17 +19,17 @@ class TestDatabaseTest {
     private StringRedisTemplate redis;
 
     @Test
-    @DisplayName("예매 테스트는 전용 DB ticketing_booking_test에 붙는다")
+    @DisplayName("예매 테스트는 앱 DB가 아니라 이름이 _test로 끝나는 전용 DB에 붙는다")
     void usesDedicatedDatabase() {
         assertThat(jdbcTemplate.queryForObject("SELECT DATABASE()", String.class))
-                .isEqualTo("ticketing_booking_test");
+                .isNotEqualTo("ticketing").endsWith("_test");
     }
 
     @Test
-    @DisplayName("예매 테스트의 Redis 연결은 DB 1을 쓴다")
-    void usesRedisDatabaseOne() {
+    @DisplayName("예매 테스트의 Redis 연결은 앱이 쓰는 DB 0이 아닌 번호를 쓴다")
+    void usesSeparateRedisDatabase() {
         LettuceConnectionFactory factory = (LettuceConnectionFactory) redis.getConnectionFactory();
 
-        assertThat(factory.getDatabase()).isEqualTo(1);
+        assertThat(factory.getDatabase()).isNotZero();
     }
 }
