@@ -15,7 +15,6 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.test.web.servlet.MockMvc;
-import org.springframework.test.web.servlet.MvcResult;
 
 @IntegrationTest
 class SeatMapApiControllerTest {
@@ -39,7 +38,7 @@ class SeatMapApiControllerTest {
     void returnsSnapshotJson() throws Exception {
         long pid = fixtures.newPerformance(1, 2, 3);
 
-        MvcResult result = mockMvc.perform(get(SEATS, pid))
+        mockMvc.perform(get(SEATS, pid))
                 .andExpect(status().isOk())
                 .andExpect(header().string("Content-Type", "application/json;charset=UTF-8"))
                 .andExpect(header().string("Cache-Control", "no-store"))
@@ -54,9 +53,7 @@ class SeatMapApiControllerTest {
                 .andExpect(jsonPath("$.sections[0].rows[0].seats[0].no").value(1))
                 .andExpect(jsonPath("$.sections[0].rows[0].seats[0].grade").value("VIP"))
                 .andExpect(jsonPath("$.sections[0].rows[0].seats[0].price").value(180_000))
-                .andExpect(jsonPath("$.sections[0].rows[0].seats[0].s").value("A"))
-                .andReturn();
-
+                .andExpect(jsonPath("$.sections[0].rows[0].seats[0].s").value("A"));
     }
 
     @Test

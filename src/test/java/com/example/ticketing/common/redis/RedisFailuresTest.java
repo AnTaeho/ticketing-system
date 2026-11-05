@@ -19,7 +19,7 @@ class RedisFailuresTest {
         assertThatThrownBy(() -> RedisFailures.translate(() -> {
             throw template;
         })).isInstanceOf(RedisUnavailableException.class).hasCause(template);
-        assertThatThrownBy(() -> RedisFailures.translate((Runnable) () -> {
+        assertThatThrownBy(() -> RedisFailures.translate(() -> {
             throw lettuce;
         })).isInstanceOf(RedisUnavailableException.class).hasCause(lettuce);
     }
