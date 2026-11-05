@@ -19,12 +19,13 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
-// 좌석은 PG 결과가 확정된 뒤에만 푼다. 여러 서버가 동시에 돌아도 집기의 SKIP LOCKED로 나눠 갖는다
+// 좌석은 PG 결과가 확정된 뒤에만 푼다. 결제를 잠그지 않고 읽어 건마다 처리한다. 확정과 겹쳐도 hold 락 뒤 상태 확인으로 한 번만 효과가 있다
 @Slf4j
 @Component
 @ConditionalOnProperty(name = "ticketing.payment.reconcile-enabled", havingValue = "true", matchIfMissing = true)
 public class PaymentReconcileScheduler {
 
+    private final PaymentReader paymentReader;
     private final PaymentReconcileTransaction reconcileTransaction;
     private final PaymentTransaction paymentTransaction;
     private final PgClient pgClient;
@@ -34,10 +35,11 @@ public class PaymentReconcileScheduler {
     private final Duration processingRecheckAfter;
     private final Map<String, Counter> results;
 
-    public PaymentReconcileScheduler(PaymentReconcileTransaction reconcileTransaction,
+    public PaymentReconcileScheduler(PaymentReader paymentReader, PaymentReconcileTransaction reconcileTransaction,
                                      PaymentTransaction paymentTransaction, PgClient pgClient,
                                      PaymentGateReflector reflector, TicketingProperties properties,
                                      MeterRegistry meterRegistry) {
+        this.paymentReader = paymentReader;
         this.reconcileTransaction = reconcileTransaction;
         this.paymentTransaction = paymentTransaction;
         this.pgClient = pgClient;
@@ -46,18 +48,18 @@ public class PaymentReconcileScheduler {
         this.recheckAfter = properties.payment().unknownRecheckAfter();
         this.processingRecheckAfter = properties.payment().processingRecheckAfter();
         this.results = Metrics.counters(meterRegistry, Metrics.PAYMENT_RECONCILE, Tag.RESULT,
-                ReconcileResult.CONFIRMED, ReconcileResult.SEAT_LOST, ReconcileResult.DECLINED,
+                ReconcileResult.CONFIRMED, ReconcileResult.DECLINED,
                 ReconcileResult.CANCELLED, ReconcileResult.WAITING, ReconcileResult.QUERY_FAILED);
     }
 
     @Scheduled(fixedDelayString = "${ticketing.payment.reconcile-scan-ms}")
     public void run() {
-        List<ClaimedPayment> claimed = reconcileTransaction.claim(batchSize);
+        List<ClaimedPayment> claimed = paymentReader.findDue(batchSize);
         for (ClaimedPayment payment : claimed) {
             try {
                 reconcile(payment);
             } catch (RuntimeException e) {
-                // 집기에서 다음 확인 시각을 미뤄 두었으므로 이 건은 다음 주기에 다시 집힌다
+                // 다음 확인 시각이 그대로라 이 건은 다음 주기에 다시 집힌다
                 log.warn("[reconcile] 결제 대사 실패, 다음 건으로 넘어간다 paymentId={}", payment.paymentId(), e);
             }
         }
@@ -76,7 +78,7 @@ public class PaymentReconcileScheduler {
         }
     }
 
-    // 묘비 덕분에 망취소 뒤 늦게 온 승인은 거절되므로, 생성 후 일정 시간이 지나면 pay_deadline까지 기다리지 않는다
+    // 묘비 덕분에 망취소 뒤 늦게 온 승인은 거절되므로, 생성 후 일정 시간이 지나면 취소한다
     private void notFound(ClaimedPayment payment) {
         if (!payment.notFoundCancelDue()) {
             recheck(payment, recheckAfter, null, ReconcileResult.WAITING);
@@ -101,7 +103,6 @@ public class PaymentReconcileScheduler {
         reflector.reflect(settlement);
         switch (result.outcome()) {
             case CONFIRMED -> results.get(ReconcileResult.CONFIRMED).increment();
-            case SEAT_LOST -> results.get(ReconcileResult.SEAT_LOST).increment();
             case DECLINED -> results.get(ReconcileResult.DECLINED).increment();
             case CANCELLED -> results.get(ReconcileResult.CANCELLED).increment();
             default -> {

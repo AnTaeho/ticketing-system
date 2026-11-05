@@ -12,7 +12,6 @@ public record HoldDetailResult(
         long performanceId,
         HoldStatus status,
         LocalDateTime expiresAt,
-        LocalDateTime payDeadline,
         LocalDateTime serverNow,
         List<SeatInfo> seats,
         int totalAmount,
@@ -21,6 +20,6 @@ public record HoldDetailResult(
 
     public static HoldDetailResult from(SeatHold hold, List<SeatInfo> seats, Long paymentId, LocalDateTime serverNow) {
         return new HoldDetailResult(hold.getId(), hold.getPerformanceId(), hold.getStatus(), hold.getExpiresAt(),
-                hold.getPayDeadline(), serverNow, List.copyOf(seats), hold.getTotalAmount(), paymentId);
+                serverNow, List.copyOf(seats), hold.getTotalAmount(), paymentId);
     }
 }

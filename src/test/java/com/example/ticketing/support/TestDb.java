@@ -35,7 +35,7 @@ public class TestDb {
     }
 
     public Map<String, Object> seat(long seatId) {
-        return jdbcTemplate.queryForMap("SELECT status, hold_id, held_until, price FROM seat WHERE seat_id = ?", seatId);
+        return jdbcTemplate.queryForMap("SELECT status, hold_id, price FROM seat WHERE seat_id = ?", seatId);
     }
 
     public String seatStatus(long seatId) {
@@ -61,24 +61,13 @@ public class TestDb {
         return jdbcTemplate.queryForObject("SELECT hold_token FROM seat_hold WHERE hold_id = ?", String.class, holdId);
     }
 
-    public LocalDateTime payDeadline(long holdId) {
-        return jdbcTemplate.queryForObject("SELECT pay_deadline FROM seat_hold WHERE hold_id = ?", LocalDateTime.class,
-                holdId);
-    }
-
     public long holdCount(long pid) {
         return jdbcTemplate.queryForObject("SELECT COUNT(*) FROM seat_hold WHERE performance_id = ?", Long.class, pid);
     }
 
-    // 선점의 만료 시각만 1초 전으로 당긴다. 좌석 held_until은 그대로다
+    // 선점의 만료 시각만 1초 전으로 당긴다
     public void expireHold(long holdId) {
         jdbcTemplate.update("UPDATE seat_hold SET expires_at = NOW(6) - INTERVAL 1 SECOND WHERE hold_id = ?", holdId);
-    }
-
-    // 선점과 그 좌석의 기한을 함께 1분 전으로 당긴다
-    public void expireHoldAndSeats(long holdId) {
-        jdbcTemplate.update("UPDATE seat_hold SET expires_at = NOW(6) - INTERVAL 1 MINUTE WHERE hold_id = ?", holdId);
-        jdbcTemplate.update("UPDATE seat SET held_until = NOW(6) - INTERVAL 1 MINUTE WHERE hold_id = ?", holdId);
     }
 
     public Map<String, Object> payment(long paymentId) {

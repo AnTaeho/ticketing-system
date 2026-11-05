@@ -112,8 +112,7 @@ class PaymentApiControllerTest {
         mockMvc.perform(get("/api/holds/{holdId}", held.holdId()).header(USER_ID_HEADER, held.userId()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("CONFIRMED"))
-                .andExpect(jsonPath("$.paymentId").value(paymentId))
-                .andExpect(jsonPath("$.payDeadline").isString());
+                .andExpect(jsonPath("$.paymentId").value(paymentId));
     }
 
     @Test

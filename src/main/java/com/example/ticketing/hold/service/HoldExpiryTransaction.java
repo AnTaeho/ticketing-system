@@ -35,7 +35,7 @@ public class HoldExpiryTransaction {
                         Collectors.mapping(HeldSeat::seatId, Collectors.toList())));
 
         RowCounts.requireExactly(seatHoldRepository.heldToExpired(ids), ids.size(), "hold EXPIRED");
-        // 좌석은 잠그지 않아 기한이 지난 좌석을 남이 이미 잡았을 수 있으므로 hold_id 조건부 UPDATE로 푼다
+        // 좌석은 잠그지 않으므로 hold_id 조건부 UPDATE로 푼다
         seatRepository.heldToAvailableOfHolds(ids);
 
         return claimed.stream()

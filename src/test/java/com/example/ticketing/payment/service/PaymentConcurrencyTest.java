@@ -205,7 +205,6 @@ class PaymentConcurrencyTest {
         long untouchedHold = paidHold == holdA ? holdB : holdA;
         assertThat(db.holdStatus(paidHold)).isEqualTo("CONFIRMED");
         assertThat(db.holdStatus(untouchedHold)).isEqualTo("HELD");
-        assertThat(db.payDeadline(untouchedHold)).isNull();
         assertThat(db.paymentCountOfHold(untouchedHold)).isZero();
     }
 

@@ -41,6 +41,7 @@ class PaymentReconcileSchedulerTest {
     private static final int BATCH = 20;
     private static final Duration RECHECK = Duration.ofSeconds(10);
 
+    private PaymentReader paymentReader;
     private PaymentReconcileTransaction paymentReconcileTransaction;
     private PaymentTransaction paymentTransaction;
     private PgClient pgClient;
@@ -50,6 +51,7 @@ class PaymentReconcileSchedulerTest {
 
     @BeforeEach
     void setUp() {
+        paymentReader = mock(PaymentReader.class);
         paymentReconcileTransaction = mock(PaymentReconcileTransaction.class);
         paymentTransaction = mock(PaymentTransaction.class);
         pgClient = mock(PgClient.class);
@@ -61,7 +63,7 @@ class PaymentReconcileSchedulerTest {
     @Test
     @DisplayName("한 건이 예외를 던져도 루프가 멈추지 않고 다음 건을 처리한다")
     void oneFailureDoesNotStopLoop() {
-        when(paymentReconcileTransaction.claim(BATCH))
+        when(paymentReader.findDue(BATCH))
                 .thenReturn(List.of(claimed(1, "o1", false), claimed(2, "o2", false)));
         when(pgClient.query("o1")).thenThrow(new IllegalStateException("boom"));
         when(pgClient.query("o2")).thenReturn(PgResult.of(PgStatus.APPROVED, "tx2"));
@@ -77,7 +79,7 @@ class PaymentReconcileSchedulerTest {
     @Test
     @DisplayName("게이트 OFF면 대사가 결론을 내도 Redis 게이트를 부르지 않는다")
     void gateOffSkipsRedis() {
-        when(paymentReconcileTransaction.claim(BATCH))
+        when(paymentReader.findDue(BATCH))
                 .thenReturn(List.of(claimed(1, "o1", false), claimed(2, "o2", false)));
         when(pgClient.query("o1")).thenReturn(PgResult.of(PgStatus.APPROVED, "tx1"));
         when(pgClient.query("o2")).thenReturn(PgResult.of(PgStatus.DECLINED, null));
@@ -94,7 +96,7 @@ class PaymentReconcileSchedulerTest {
     @Test
     @DisplayName("다른 쪽이 먼저 결론을 내 좌석이 그대로면 Redis 반영도 집계도 하지 않는다")
     void notAppliedIsNotReflected() {
-        when(paymentReconcileTransaction.claim(BATCH)).thenReturn(List.of(claimed(1, "o1", false)));
+        when(paymentReader.findDue(BATCH)).thenReturn(List.of(claimed(1, "o1", false)));
         when(pgClient.query("o1")).thenReturn(PgResult.of(PgStatus.APPROVED, "tx1"));
         when(paymentTransaction.openToApproved(1, "tx1")).thenReturn(settlement(1, PaymentOutcome.CONFIRMED, false));
 
@@ -107,7 +109,7 @@ class PaymentReconcileSchedulerTest {
     @Test
     @DisplayName("PG에 없는 결제의 망취소가 거절이면 거절로 정리하고 실패면 오류를 남기고 미룬다")
     void notFoundCancelOutcomes() {
-        when(paymentReconcileTransaction.claim(BATCH))
+        when(paymentReader.findDue(BATCH))
                 .thenReturn(List.of(claimed(1, "o1", true), claimed(2, "o2", true)));
         when(pgClient.query(anyString())).thenReturn(PgResult.of(PgStatus.NOT_FOUND, null));
         when(pgClient.cancel("o1")).thenReturn(PgResult.of(PgStatus.DECLINED, null));
@@ -126,13 +128,12 @@ class PaymentReconcileSchedulerTest {
     private PaymentReconcileScheduler scheduler(boolean gateEnabled) {
         TicketingProperties properties = TestProperties.empty()
                 .hold(new Hold(Duration.ofMinutes(5), 4, true, 1000, 50))
-                .payment(new Payment(Duration.ofMinutes(10), Duration.ofSeconds(30),
-                        Duration.ofSeconds(5), RECHECK, Duration.ofSeconds(30), true, 2000, BATCH,
-                        Duration.ofSeconds(30)))
+                .payment(new Payment(Duration.ofSeconds(30), Duration.ofSeconds(5), RECHECK,
+                        Duration.ofSeconds(30), true, 2000, BATCH))
                 .gate(new Gate(gateEnabled))
                 .build();
         SeatGateReflector reflector = TestServices.gateReflector(seatGateRedisStore, properties);
-        return TestServices.paymentReconcileScheduler(paymentReconcileTransaction, paymentTransaction, pgClient,
+        return TestServices.paymentReconcileScheduler(paymentReader, paymentReconcileTransaction, paymentTransaction, pgClient,
                 reflector, properties, meterRegistry);
     }
 

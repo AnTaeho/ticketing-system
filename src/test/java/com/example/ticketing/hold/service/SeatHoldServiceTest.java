@@ -38,7 +38,7 @@ class SeatHoldServiceTest {
     private JdbcTemplate jdbcTemplate;
 
     @Test
-    @DisplayName("선점하면 선점과 좌석이 DB 시각 기준 5분 뒤까지 잡힌다")
+    @DisplayName("선점하면 선점이 DB 시각 기준 5분 뒤까지 유효하고 좌석이 잡힌다")
     void holdWritesHoldAndSeats() {
         long pid = fixtures.newPerformance(1, 1, 4);
         List<Long> ids = db.seatIds(pid);
@@ -58,8 +58,7 @@ class SeatHoldServiceTest {
                 .isBefore(before.plusMinutes(5).plusSeconds(5));
         assertThat(created.seats()).extracting(s -> s.id()).containsExactly(ids.get(0), ids.get(1));
         assertThat(db.heldSeats(pid, created.holdId())).containsExactly(ids.get(0), ids.get(1));
-        assertThat(jdbcTemplate.queryForList("SELECT held_until FROM seat WHERE performance_id = ? AND hold_id = ?",
-                LocalDateTime.class, pid, created.holdId())).containsOnly(created.expiresAt());
+        assertThat(hold.get("expires_at")).isEqualTo(created.expiresAt());
     }
 
     @Test
@@ -91,11 +90,10 @@ class SeatHoldServiceTest {
 
         assertThat(db.holdStatus(holdA.holdId())).isEqualTo("RELEASED");
         List<Map<String, Object>> seats = jdbcTemplate.queryForList(
-                "SELECT status, hold_id, held_until FROM seat WHERE seat_id IN (?, ?)", target.get(0), target.get(1));
+                "SELECT status, hold_id FROM seat WHERE seat_id IN (?, ?)", target.get(0), target.get(1));
         assertThat(seats).allSatisfy(seat -> {
             assertThat(seat.get("status")).isEqualTo("AVAILABLE");
             assertThat(seat.get("hold_id")).isNull();
-            assertThat(seat.get("held_until")).isNull();
         });
 
         CreateHoldResult holdB = seatHoldService.hold(
@@ -110,29 +108,24 @@ class SeatHoldServiceTest {
     }
 
     @Test
-    @DisplayName("기한이 지난 좌석은 다른 사용자가 가져가고 원래 선점은 그대로 남는다")
-    void expiredSeatsCanBeTaken() {
+    @DisplayName("기한이 지나도 만료 처리 전에는 다른 사용자가 그 좌석을 잡지 못한다")
+    void expiredHoldKeepsSeatsUntilExpiryRuns() {
         long pid = fixtures.newPerformance(1, 1, 4);
         List<Long> target = db.seatIds(pid).subList(0, 2);
         long userA = fixtures.newUser();
         long userB = fixtures.newUser();
         CreateHoldResult holdA = seatHoldService.hold(
                 new CreateHoldCommand(userA, pid, target));
-        long otherUser = fixtures.newUser();
-
-        assertThatThrownBy(() -> seatHoldService.hold(new CreateHoldCommand(otherUser, pid, target)))
-                .extracting("code").isEqualTo(ErrorCode.SEAT_TAKEN);
-
-        // 게이트 키는 선점과 같은 TTL이라 held_until이 지나면 함께 사라진다. DB 시각만 당겼으므로 키도 지운다
-        jdbcTemplate.update("UPDATE seat SET held_until = NOW(6) - INTERVAL 1 SECOND "
-                + "WHERE performance_id = ? AND hold_id = ?", pid, holdA.holdId());
+        db.expireHold(holdA.holdId());
+        // 게이트 키는 선점과 같은 TTL이라 기한이 지나면 함께 사라진다. DB 시각만 당겼으므로 키도 지운다
         testRedis.clean(pid);
-        CreateHoldResult holdB = seatHoldService.hold(
-                new CreateHoldCommand(userB, pid, target));
 
-        assertThat(db.heldSeats(pid, holdB.holdId())).containsExactlyElementsOf(target);
-        assertThat(db.heldSeats(pid, holdA.holdId())).isEmpty();
+        assertThatThrownBy(() -> seatHoldService.hold(new CreateHoldCommand(userB, pid, target)))
+                .extracting("code").isEqualTo(ErrorCode.SEAT_STATE_CHANGED);
+
+        assertThat(db.heldSeats(pid, holdA.holdId())).containsExactlyElementsOf(target);
         assertThat(db.holdStatus(holdA.holdId())).isEqualTo("HELD");
+        assertThat(testRedis.keys(pid)).isEmpty();
     }
 
     @Test

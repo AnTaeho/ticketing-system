@@ -32,7 +32,6 @@ class TicketingPropertiesTest {
         assertThat(properties.seed().enabled()).isFalse();
         assertThat(properties.hold().ttl()).isEqualTo(Duration.ofMinutes(5));
         assertThat(properties.hold().maxSeats()).isEqualTo(4);
-        assertThat(properties.payment().payDeadline()).isEqualTo(Duration.ofMinutes(10));
         assertThat(properties.outbox().lockDuration()).isEqualTo(Duration.ofSeconds(60));
         assertThat(properties.pg().baseUrl()).isEmpty();
         assertThat(properties.pg().readTimeout()).isEqualTo(Duration.ofSeconds(3));
@@ -40,7 +39,6 @@ class TicketingPropertiesTest {
         assertThat(properties.fakePg().slowDelay()).isEqualTo(Duration.ofSeconds(5));
         assertThat(properties.fakePg().delayMin()).isEqualTo(Duration.ofMillis(200));
         assertThat(properties.payment().processingRecheckAfter()).isEqualTo(Duration.ofSeconds(5));
-        assertThat(properties.payment().reconcileClaimLease()).isEqualTo(Duration.ofSeconds(30));
         assertThat(properties.outbox().maxBackoff()).isEqualTo(Duration.ofSeconds(60));
         assertThat(properties.hold().expiryEnabled()).isFalse();
         assertThat(properties.payment().reconcileEnabled()).isFalse();

@@ -49,7 +49,6 @@ ticketing:
     expiry-scan-ms: 1000
     expiry-batch-size: 50
   payment:
-    pay-deadline: 10m
     requested-recheck-after: 30s
     processing-recheck-after: 5s     # PG가 아직 처리 중이라고 답한 결제를 다시 볼 때까지
     unknown-recheck-after: 10s
@@ -57,7 +56,6 @@ ticketing:
     reconcile-enabled: true
     reconcile-scan-ms: 2000
     reconcile-batch-size: 20
-    reconcile-claim-lease: 30s       # 집은 결제를 PG 조회가 끝날 때까지 다른 서버가 다시 집지 않게 미뤄 둔다
   gate:
     enabled: true              # 부하 테스트 비교 스위치
   outbox:

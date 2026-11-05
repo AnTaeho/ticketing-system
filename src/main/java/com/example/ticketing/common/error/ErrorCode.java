@@ -30,7 +30,6 @@ public enum ErrorCode {
     HOLD_EXPIRED(HttpStatus.CONFLICT, "결제 시간이 지나 자리가 풀렸어요"),
     HOLD_NOT_PAYABLE(HttpStatus.CONFLICT, "지금은 이 자리를 결제할 수 없어요"),
     ALREADY_PAYING(HttpStatus.CONFLICT, "다른 화면에서 이미 결제하고 있어요"),
-    SEAT_LOST_REFUNDING(HttpStatus.CONFLICT, "결제는 됐지만 자리를 지키지 못했어요. 결제 금액은 자동으로 돌려드려요"),
     PAYMENT_CANCELLED(HttpStatus.CONFLICT, "결제가 취소됐어요. 자리는 풀렸어요"),
     CANCEL_NOT_ALLOWED(HttpStatus.CONFLICT, "공연이 시작돼 예매를 취소할 수 없어요");
 

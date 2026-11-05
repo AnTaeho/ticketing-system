@@ -63,9 +63,6 @@ public class SeatHold {
     @Column(name = "expires_at", nullable = false)
     private LocalDateTime expiresAt;
 
-    @Column(name = "pay_deadline")
-    private LocalDateTime payDeadline;
-
     @CreatedDate
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
@@ -96,30 +93,20 @@ public class SeatHold {
         moveTo(HoldStatus.HELD, HoldStatus.RELEASED);
     }
 
-    public void heldToPaying(LocalDateTime payDeadline, LocalDateTime dbNow) {
+    public void heldToPaying(LocalDateTime dbNow) {
         if (isExpiredAt(dbNow)) {
             throw new IllegalStateException("hold " + id + "는 " + expiresAt + "에 만료돼 결제로 넘길 수 없다");
         }
         moveTo(HoldStatus.HELD, HoldStatus.PAYING);
-        this.payDeadline = payDeadline;
     }
 
     public void payingToConfirmed() {
         moveTo(HoldStatus.PAYING, HoldStatus.CONFIRMED);
     }
 
-    public void payingToRefunding() {
-        moveTo(HoldStatus.PAYING, HoldStatus.REFUNDING);
-    }
-
     // PG 거절·망취소 확정 때만 부른다. 사용자 취소(HELD → RELEASED)는 heldToReleased
     public void payingToReleased() {
         moveTo(HoldStatus.PAYING, HoldStatus.RELEASED);
-    }
-
-    // 좌석 상실로 환불하던 hold를 환불 확정 뒤 닫는다
-    public void refundingToReleased() {
-        moveTo(HoldStatus.REFUNDING, HoldStatus.RELEASED);
     }
 
     private void moveTo(HoldStatus from, HoldStatus to) {

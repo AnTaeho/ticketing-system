@@ -60,8 +60,7 @@ public class SeatHoldTransaction {
 
         SeatHold hold = seatHoldRepository.save(SeatHold.held(userId, performanceId, holdToken,
                 selection.seatIds().size(), selection.totalAmount(), expiresAt));
-        int updated = seatRepository.availableOrExpiredToHeld(performanceId, selection.seatIds(), hold.getId(),
-                expiresAt);
+        int updated = seatRepository.availableToHeld(performanceId, selection.seatIds(), hold.getId());
         if (updated != selection.seatIds().size()) {
             throw new ApiException(ErrorCode.SEAT_STATE_CHANGED, Map.of("seatIds", selection.seatIds()));
         }
@@ -78,7 +77,7 @@ public class SeatHoldTransaction {
                     Map.of("holdId", holdId, "status", hold.getStatus().name()));
         }
         hold.heldToReleased();
-        // 좌석은 잠그지 않아 기한이 지난 좌석을 남이 잡을 수 있으므로 hold_id 조건부 UPDATE로 푼다
+        // 좌석은 잠그지 않으므로 hold_id 조건부 UPDATE로 푼다
         List<Long> seatIds = seatRepository.findHeldSeatIds(holdId);
         seatRepository.heldToAvailable(holdId);
         return new GateHold(hold.getPerformanceId(), hold.getHoldToken(), seatIds);

@@ -9,11 +9,7 @@ import com.example.ticketing.common.metrics.Metrics.Tag;
 import com.example.ticketing.notification.service.TicketIssuedHandler;
 import com.example.ticketing.outbox.domain.OutboxTaskType;
 import com.example.ticketing.outbox.dto.ClaimedOutboxTask;
-import com.example.ticketing.outbox.dto.RefundRequestedPayload;
 import com.example.ticketing.outbox.dto.TicketIssuedPayload;
-import com.example.ticketing.payment.client.PgResult;
-import com.example.ticketing.payment.client.PgStatus;
-import com.example.ticketing.payment.dto.PaymentStart.Started;
 import com.example.ticketing.payment.service.PaymentTransaction;
 import com.example.ticketing.payment.service.RefundRequestedHandler;
 import com.example.ticketing.support.Concurrently;
@@ -21,7 +17,6 @@ import com.example.ticketing.support.Concurrently.Results;
 import com.example.ticketing.support.Counters;
 import com.example.ticketing.support.Fixtures;
 import com.example.ticketing.support.Fixtures.Confirmed;
-import com.example.ticketing.support.Fixtures.Held;
 import com.example.ticketing.support.IntegrationTest;
 import com.example.ticketing.support.StubPgClient;
 import com.example.ticketing.support.StubPgTestConfig;
@@ -33,7 +28,6 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.AfterEach;
@@ -163,102 +157,6 @@ class OutboxDispatchSchedulerTest {
     }
 
     @Test
-    @DisplayName("좌석을 잃은 결제의 환불을 PG가 취소하면 결제가 CANCELLED로 닫힌다")
-    void refundCompletes() {
-        Refund r = seatLostRefund();
-        double before = counters.count(Metrics.OUTBOX_TASK, Tag.TYPE, "REFUND_REQUESTED", Tag.RESULT, "done");
-
-        worker.run();
-
-        assertThat(stubPg.cancelCalls()).isEqualTo(1);
-        assertThat(db.payment(r.paymentId)).containsEntry("status", "CANCELLED");
-        assertThat(db.holdStatus(r.holdId)).isEqualTo("RELEASED");
-        assertThat(db.outboxTask("REFUND_REQUESTED", r.paymentId)).containsEntry("status", "DONE");
-        assertThat(counters.count(Metrics.OUTBOX_TASK, Tag.TYPE, "REFUND_REQUESTED", Tag.RESULT, "done") - before)
-                .isEqualTo(1);
-
-        // 다시 처리돼도(재전달) 바뀌는 행 없이 성공한다
-        refundRequestedHandler.handle(jsonMapper.readValue(r.payload, RefundRequestedPayload.class));
-        assertThat(db.payment(r.paymentId)).containsEntry("status", "CANCELLED");
-        assertThat(db.holdStatus(r.holdId)).isEqualTo("RELEASED");
-    }
-
-    @Test
-    @DisplayName("환불 요청에 PG가 DECLINED로 답해도 결제를 CANCELLED로 닫는다")
-    void refundDeclinedClosesPayment() {
-        Refund r = seatLostRefund();
-        stubPg.cancelWith(PgResult.of(PgStatus.DECLINED, null));
-
-        worker.run();
-
-        assertThat(db.payment(r.paymentId)).containsEntry("status", "CANCELLED");
-        assertThat(db.holdStatus(r.holdId)).isEqualTo("RELEASED");
-        assertThat(db.outboxTask("REFUND_REQUESTED", r.paymentId)).containsEntry("status", "DONE");
-    }
-
-    @Test
-    @DisplayName("환불이 PG CONFLICT로 계속 실패하면 백오프로 재시도하다 다섯 번째에 FAILED가 된다")
-    void refundConflictRetriesThenFails() {
-        Refund r = seatLostRefund();
-        stubPg.cancelWith(PgResult.of(PgStatus.CONFLICT, null));
-        double retryBefore = counters.count(Metrics.OUTBOX_TASK, Tag.TYPE, "REFUND_REQUESTED", Tag.RESULT, "retry");
-        double failedBefore = counters.count(Metrics.OUTBOX_TASK, Tag.TYPE, "REFUND_REQUESTED", Tag.RESULT, "failed");
-
-        worker.run();
-
-        Map<String, Object> first = db.outboxTask("REFUND_REQUESTED", r.paymentId);
-        assertThat(first).containsEntry("status", "PENDING").containsEntry("attempt", 1)
-                .containsEntry("locked_until", null);
-        assertThat((String) first.get("last_error")).contains("CONFLICT");
-        assertThat(db.outboxRetryDelayMs(r.taskId)).isBetween(2_000L - TOLERANCE_MS, 2_000L);
-        assertThat(db.payment(r.paymentId)).containsEntry("status", "APPROVED");
-        assertThat(db.holdStatus(r.holdId)).isEqualTo("REFUNDING");
-
-        worker.run();
-        assertThat(db.outboxTask("REFUND_REQUESTED", r.paymentId)).containsEntry("attempt", 1);
-
-        for (int attempt = 2; attempt <= 4; attempt++) {
-            db.makeOutboxDue(r.taskId);
-            worker.run();
-            assertThat(db.outboxTask("REFUND_REQUESTED", r.paymentId)).containsEntry("status", "PENDING")
-                    .containsEntry("attempt", attempt);
-            long expectedMs = (1L << attempt) * 1_000;
-            assertThat(db.outboxRetryDelayMs(r.taskId)).isBetween(expectedMs - TOLERANCE_MS, expectedMs);
-        }
-
-        db.makeOutboxDue(r.taskId);
-        worker.run();
-
-        assertThat(db.outboxTask("REFUND_REQUESTED", r.paymentId)).containsEntry("status", "FAILED")
-                .containsEntry("attempt", properties.outbox().maxAttempts()).containsEntry("locked_until", null);
-        db.makeOutboxDue(r.taskId);
-        worker.run();
-        assertThat(stubPg.cancelCalls()).isEqualTo(5);
-        assertThat(counters.count(Metrics.OUTBOX_TASK, Tag.TYPE, "REFUND_REQUESTED", Tag.RESULT, "retry")
-                - retryBefore).isEqualTo(4);
-        assertThat(counters.count(Metrics.OUTBOX_TASK, Tag.TYPE, "REFUND_REQUESTED", Tag.RESULT, "failed")
-                - failedBefore).isEqualTo(1);
-    }
-
-    @Test
-    @DisplayName("같은 배치에서 한 작업의 핸들러가 실패해도 다른 작업은 DONE이 된다")
-    void oneFailureDoesNotStopBatch() {
-        Refund r = seatLostRefund();
-        stubPg.cancelWith(PgResult.unknown("read timeout 3s"));
-        Confirmed c = fixtures.confirmed(1);
-        assertThat(r.taskId).isLessThan(db.outboxTaskId("TICKET_ISSUED", c.bookingId()));
-
-        worker.run();
-
-        assertThat(db.outboxTask("REFUND_REQUESTED", r.paymentId)).containsEntry("status", "PENDING")
-                .containsEntry("attempt", 1);
-        assertThat((String) db.outboxTask("REFUND_REQUESTED", r.paymentId).get("last_error"))
-                .contains("read timeout 3s");
-        assertThat(db.outboxTask("TICKET_ISSUED", c.bookingId())).containsEntry("status", "DONE");
-        assertThat(notificationCount(c.bookingId())).isEqualTo(1);
-    }
-
-    @Test
     @DisplayName("핸들러가 빠진 작업 종류가 있으면 워커를 만들 수 없다")
     void missingHandlerFailsAtStartup() {
         assertThatThrownBy(() -> services.outboxDispatchScheduler(List.of(ticketIssuedHandler), properties))
@@ -345,24 +243,6 @@ class OutboxDispatchSchedulerTest {
             bookingIds.add(fixtures.confirmed(pid, List.of(seatIds.get(i))).bookingId());
         }
         return bookingIds;
-    }
-
-    // 결제 마감이 지나 한 좌석을 남이 가져간 뒤 승인이 확인된 결제(hold REFUNDING, 결제 APPROVED, REFUND_REQUESTED)
-    private Refund seatLostRefund() {
-        Held held = fixtures.held(2);
-        Started started = (Started) paymentTransaction.start(held.userId(), held.holdId(), UUID.randomUUID().toString());
-        long paymentId = started.paymentId();
-        long lost = held.seatIds().get(1);
-        jdbcTemplate.update("UPDATE seat SET held_until = NOW(6) - INTERVAL 1 SECOND WHERE seat_id = ?", lost);
-        testRedis.clean(held.pid());
-        fixtures.held(held.pid(), List.of(lost));
-        paymentTransaction.openToApproved(paymentId, "pg-refund-" + paymentId);
-        assertThat(db.holdStatus(held.holdId())).isEqualTo("REFUNDING");
-        assertThat(db.payment(paymentId)).containsEntry("status", "APPROVED");
-        Map<String, Object> task = db.outboxTask("REFUND_REQUESTED", paymentId);
-        assertThat(task).containsEntry("status", "PENDING");
-        return new Refund(paymentId, held.holdId(), db.outboxTaskId("REFUND_REQUESTED", paymentId),
-                (String) task.get("payload"));
     }
 
     private TicketIssuedPayload payloadOf(ClaimedOutboxTask task) {

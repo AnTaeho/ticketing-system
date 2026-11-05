@@ -3,14 +3,12 @@ package com.example.ticketing.payment.service;
 import static com.example.ticketing.support.ApiErrors.catchApiException;
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.example.ticketing.common.config.TicketingProperties;
 import com.example.ticketing.common.error.ApiException;
 import com.example.ticketing.common.error.ErrorCode;
 import com.example.ticketing.common.jdbc.ConstraintViolations;
 import com.example.ticketing.common.redis.RedisKeys;
 import com.example.ticketing.hold.domain.GateHold;
 import com.example.ticketing.hold.dto.CreateHoldCommand;
-import com.example.ticketing.hold.dto.CreateHoldResult;
 import com.example.ticketing.hold.service.HoldExpiryTransaction;
 import com.example.ticketing.hold.service.SeatHoldService;
 import com.example.ticketing.payment.client.PgResult;
@@ -79,8 +77,6 @@ class PaymentServiceTest {
     private TestRedis testRedis;
     @Autowired
     private JsonMapper jsonMapper;
-    @Autowired
-    private TicketingProperties properties;
 
     private StringRedisTemplate redis;
 
@@ -147,7 +143,7 @@ class PaymentServiceTest {
 
         assertThat(db.holdStatus(held.holdId())).isEqualTo("CONFIRMED");
         held.seatIds().forEach(seatId -> assertThat(db.seat(seatId)).containsEntry("status", "SOLD")
-                .containsEntry("hold_id", held.holdId()).containsEntry("held_until", null));
+                .containsEntry("hold_id", held.holdId()));
 
         Map<String, Object> payment = db.payment(paymentId);
         assertThat(payment).containsEntry("status", "APPROVED").containsEntry("next_check_at", null)
@@ -194,7 +190,7 @@ class PaymentServiceTest {
                 .containsEntry("hold_id", held.holdId());
         assertThat(db.holdStatus(held.holdId())).isEqualTo("RELEASED");
         held.seatIds().forEach(seatId -> assertThat(db.seat(seatId)).containsEntry("status", "AVAILABLE")
-                .containsEntry("hold_id", null).containsEntry("held_until", null));
+                .containsEntry("hold_id", null));
         assertThat(testRedis.keys(held.pid())).isEmpty();
         assertThat(db.bookingCountOfHold(held.holdId())).isZero();
 
@@ -220,9 +216,8 @@ class PaymentServiceTest {
         assertThat(db.paymentRecheckMs(response.paymentId())).isBetween(10_000L - TOLERANCE_MS, 10_000L);
 
         assertThat(db.holdStatus(held.holdId())).isEqualTo("PAYING");
-        LocalDateTime payDeadline = db.payDeadline(held.holdId());
         held.seatIds().forEach(seatId -> assertThat(db.seat(seatId)).containsEntry("status", "HELD")
-                .containsEntry("hold_id", held.holdId()).containsEntry("held_until", payDeadline));
+                .containsEntry("hold_id", held.holdId()));
         for (long seatId : held.seatIds()) {
             assertThat(redis.opsForValue().get(RedisKeys.seat(held.pid(), seatId))).isEqualTo(held.holdToken());
         }
@@ -282,7 +277,6 @@ class PaymentServiceTest {
 
         assertThat(e.getCode()).isEqualTo(ErrorCode.HOLD_EXPIRED);
         assertThat(db.holdStatus(held.holdId())).isEqualTo("HELD");
-        assertThat(db.payDeadline(held.holdId())).isNull();
         assertThat(db.paymentCountOfHold(held.holdId())).isZero();
         assertThat(stubPg.approveCalls()).isZero();
     }
@@ -352,10 +346,6 @@ class PaymentServiceTest {
         paymentService.pay(command(held, key()));
         db.expireHold(held.holdId());
 
-        LocalDateTime payDeadline = db.payDeadline(held.holdId());
-        assertThat(payDeadline).isNotNull();
-        held.seatIds().forEach(seatId -> assertThat(db.seat(seatId)).containsEntry("held_until", payDeadline));
-
         long other = fixtures.newUser();
         ApiException byGate = catchApiException(() -> seatHoldService.hold(
                 new CreateHoldCommand(other, held.pid(), held.seatIds())));
@@ -370,47 +360,9 @@ class PaymentServiceTest {
                 .noneMatch(expired -> expired.holdId() == held.holdId());
         assertThat(db.holdStatus(held.holdId())).isEqualTo("PAYING");
         held.seatIds().forEach(seatId -> assertThat(db.seat(seatId)).containsEntry("status", "HELD")
-                .containsEntry("hold_id", held.holdId()).containsEntry("held_until", payDeadline));
+                .containsEntry("hold_id", held.holdId()));
         assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM seat_hold WHERE user_id = ?", Long.class, other))
                 .isZero();
-    }
-
-    @Test
-    @DisplayName("승인 직전 좌석 하나를 잃으면 환불로 넘기고 409 SEAT_LOST_REFUNDING이다")
-    void seatLostWhileApproving() {
-        Held held = fixtures.held(2);
-        long kept = held.seatIds().get(0);
-        long lost = held.seatIds().get(1);
-        long thief = fixtures.newUser();
-        CreateHoldResult thiefHold = seatHoldService.hold(
-                new CreateHoldCommand(thief, held.pid(), List.of(db.seatIds(held.pid()).get(2))));
-        stubPg.beforeApproveReturns(orderId ->
-                jdbcTemplate.update("UPDATE seat SET hold_id = ? WHERE seat_id = ?", thiefHold.holdId(), lost));
-        String key = key();
-
-        ApiException e = catchApiException(() -> paymentService.pay(command(held, key)));
-
-        assertThat(e.getCode()).isEqualTo(ErrorCode.SEAT_LOST_REFUNDING);
-        long paymentId = ((Number) e.getDetail().get("paymentId")).longValue();
-        assertThat(db.holdStatus(held.holdId())).isEqualTo("REFUNDING");
-        assertThat(db.seat(kept)).containsEntry("status", "AVAILABLE").containsEntry("hold_id", null)
-                .containsEntry("held_until", null);
-        assertThat(db.seat(lost)).containsEntry("status", "HELD").containsEntry("hold_id", thiefHold.holdId());
-        Map<String, Object> payment = db.payment(paymentId);
-        assertThat(payment).containsEntry("status", "APPROVED").containsEntry("next_check_at", null);
-        assertThat(db.bookingCountOfHold(held.holdId())).isZero();
-        assertThat(db.outboxCount("REFUND_REQUESTED", paymentId)).isEqualTo(1);
-        JsonNode refund = jsonMapper.readTree((String) db.outboxTask("REFUND_REQUESTED", paymentId).get("payload"));
-        assertThat(refund.get("paymentId").asLong()).isEqualTo(paymentId);
-        assertThat(refund.get("orderId").asString()).isEqualTo(payment.get("order_id"));
-
-        assertThat(redis.hasKey(RedisKeys.seat(held.pid(), kept))).isFalse();
-        assertThat(redis.opsForValue().get(RedisKeys.seat(held.pid(), db.seatIds(held.pid()).get(2))))
-                .isEqualTo(db.holdToken(thiefHold.holdId()));
-
-        ApiException again = catchApiException(() -> paymentService.pay(command(held, key)));
-        assertThat(again.getCode()).isEqualTo(ErrorCode.SEAT_LOST_REFUNDING);
-        assertThat(stubPg.approveCalls()).isEqualTo(1);
     }
 
     @Test

@@ -68,7 +68,6 @@ public final class Metrics {
     // PAYMENT_RECONCILE의 result
     public interface ReconcileResult {
         String CONFIRMED = "confirmed";
-        String SEAT_LOST = "seat_lost";
         String DECLINED = "declined";
         String CANCELLED = "cancelled";
         String WAITING = "waiting";

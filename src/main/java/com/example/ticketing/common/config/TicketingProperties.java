@@ -37,15 +37,13 @@ public record TicketingProperties(
     }
 
     public record Payment(
-            @NotNull @DurationMin(millis = 1) Duration payDeadline,
             @NotNull @DurationMin Duration requestedRecheckAfter,
             @NotNull @DurationMin Duration processingRecheckAfter,
             @NotNull @DurationMin Duration unknownRecheckAfter,
             @NotNull @DurationMin Duration notFoundCancelAfter,
             boolean reconcileEnabled,
             @Positive long reconcileScanMs, // @Scheduled 전용
-            @Positive int reconcileBatchSize,
-            @NotNull @DurationMin(millis = 1) Duration reconcileClaimLease
+            @Positive int reconcileBatchSize
     ) {
     }
 

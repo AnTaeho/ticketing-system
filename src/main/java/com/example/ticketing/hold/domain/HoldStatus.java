@@ -5,6 +5,5 @@ public enum HoldStatus {
     PAYING,
     CONFIRMED,
     EXPIRED,
-    RELEASED,
-    REFUNDING
+    RELEASED
 }

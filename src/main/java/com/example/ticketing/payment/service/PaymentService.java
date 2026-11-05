@@ -84,7 +84,6 @@ public class PaymentService {
         long paymentId = result.paymentId();
         return switch (result.outcome()) {
             case PROCESSING, UNKNOWN, CONFIRMED -> result;
-            case SEAT_LOST -> throw failure(ErrorCode.SEAT_LOST_REFUNDING, paymentId);
             case DECLINED -> throw failure(ErrorCode.PAYMENT_DECLINED, paymentId);
             case CANCELLED -> throw failure(ErrorCode.PAYMENT_CANCELLED, paymentId);
         };

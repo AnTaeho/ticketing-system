@@ -61,8 +61,7 @@ class SchemaTest {
                 .contains("KEY `idx_seat_perf_status` (`performance_id`,`status`)")
                 .contains("KEY `idx_seat_hold` (`hold_id`)")
                 .contains("`grade` varchar(10) NOT NULL")
-                .contains("`status` varchar(10) NOT NULL")
-                .contains("`held_until` datetime(6) DEFAULT NULL");
+                .contains("`status` varchar(10) NOT NULL");
     }
 
     @Test
@@ -78,7 +77,6 @@ class SchemaTest {
                 .contains("`hold_token` char(36) NOT NULL")
                 .contains("`status` varchar(12) NOT NULL")
                 .contains("`expires_at` datetime(6) NOT NULL")
-                .contains("`pay_deadline` datetime(6) DEFAULT NULL")
                 .contains("`created_at` datetime(6) NOT NULL")
                 .contains("`updated_at` datetime(6) NOT NULL");
     }

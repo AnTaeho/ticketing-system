@@ -10,7 +10,6 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Index;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
-import java.time.LocalDateTime;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -64,9 +63,6 @@ public class Seat {
     @Column(name = "hold_id")
     private Long holdId;
 
-    @Column(name = "held_until")
-    private LocalDateTime heldUntil;
-
     public SeatInfo info() {
         return new SeatInfo(id, section, rowNo, seatNo, grade, price);
     }
@@ -75,7 +71,6 @@ public class Seat {
     public void soldToAvailable() {
         moveTo(SeatStatus.SOLD, SeatStatus.AVAILABLE);
         holdId = null;
-        heldUntil = null;
     }
 
     private void moveTo(SeatStatus from, SeatStatus to) {

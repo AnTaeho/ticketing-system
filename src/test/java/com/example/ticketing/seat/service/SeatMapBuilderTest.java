@@ -71,7 +71,7 @@ class SeatMapBuilderTest {
 
         assertThat(statuses(seatMapBuilder.build(pid))).containsExactly("A", "A", "A", "A");
 
-        jdbcTemplate.update("UPDATE seat SET status = 'HELD', held_until = NOW(6) + INTERVAL 5 MINUTE WHERE seat_id = ?",
+        jdbcTemplate.update("UPDATE seat SET status = 'HELD' WHERE seat_id = ?",
                 seatIds.get(1));
         jdbcTemplate.update("UPDATE seat SET status = 'SOLD' WHERE seat_id = ?", seatIds.get(3));
 

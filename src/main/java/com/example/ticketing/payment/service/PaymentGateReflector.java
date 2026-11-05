@@ -19,7 +19,7 @@ public class PaymentGateReflector {
         settlement.changedGate().ifPresent(changed -> {
             switch (settlement.result().outcome()) {
                 // 확정된 좌석의 키는 TTL로 사라진다. SOLD 좌석은 DB가 막는다
-                case SEAT_LOST, DECLINED, CANCELLED -> gate.release(changed);
+                case DECLINED, CANCELLED -> gate.release(changed);
                 default -> {
                 }
             }

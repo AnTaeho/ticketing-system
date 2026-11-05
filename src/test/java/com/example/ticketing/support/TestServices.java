@@ -17,6 +17,7 @@ import com.example.ticketing.outbox.service.OutboxTaskTransaction;
 import com.example.ticketing.payment.client.HttpPgClient;
 import com.example.ticketing.payment.client.PgClient;
 import com.example.ticketing.payment.service.PaymentGateReflector;
+import com.example.ticketing.payment.service.PaymentReader;
 import com.example.ticketing.payment.service.PaymentReconcileScheduler;
 import com.example.ticketing.payment.service.PaymentReconcileTransaction;
 import com.example.ticketing.payment.service.PaymentTransaction;
@@ -81,15 +82,16 @@ public class TestServices {
     }
 
     public static PaymentReconcileScheduler paymentReconcileScheduler(
-            PaymentReconcileTransaction reconcileTransaction, PaymentTransaction paymentTransaction, PgClient pgClient,
+            PaymentReader paymentReader, PaymentReconcileTransaction reconcileTransaction,
+            PaymentTransaction paymentTransaction, PgClient pgClient,
             SeatGateReflector reflector, TicketingProperties properties, MeterRegistry meterRegistry) {
-        return new PaymentReconcileScheduler(reconcileTransaction, paymentTransaction, pgClient,
+        return new PaymentReconcileScheduler(paymentReader, reconcileTransaction, paymentTransaction, pgClient,
                 new PaymentGateReflector(reflector), properties, meterRegistry);
     }
 
     // 컨텍스트의 PG 클라이언트(대역이 있으면 대역)로 만든다
     public PaymentReconcileScheduler paymentReconcileScheduler() {
-        return paymentReconcileScheduler(bean(PaymentReconcileTransaction.class), bean(PaymentTransaction.class),
+        return paymentReconcileScheduler(bean(PaymentReader.class), bean(PaymentReconcileTransaction.class), bean(PaymentTransaction.class),
                 bean(PgClient.class), bean(SeatGateReflector.class), contextProperties(), meterRegistry());
     }
 

@@ -74,7 +74,6 @@ class HoldApiControllerTest {
                 .andExpect(jsonPath("$.performanceId").value(pid))
                 .andExpect(jsonPath("$.status").value("HELD"))
                 .andExpect(jsonPath("$.expiresAt").value(expiresAt))
-                .andExpect(jsonPath("$.payDeadline").isEmpty())
                 .andExpect(jsonPath("$.serverNow").isString())
                 .andExpect(jsonPath("$.seats.length()").value(2))
                 .andExpect(jsonPath("$.seats[0].id").value(vip))

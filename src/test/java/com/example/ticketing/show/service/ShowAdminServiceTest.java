@@ -55,7 +55,7 @@ class ShowAdminServiceTest {
         assertThat(count("SELECT COUNT(*) FROM seat WHERE performance_id = ?", created.performanceId()))
                 .isEqualTo(800);
         assertThat(count("SELECT COUNT(*) FROM seat WHERE performance_id = ? AND status = 'AVAILABLE'"
-                + " AND hold_id IS NULL AND held_until IS NULL", created.performanceId()))
+                + " AND hold_id IS NULL", created.performanceId()))
                 .isEqualTo(800);
 
         Map<String, Integer> byGrade = new HashMap<>();

@@ -8,7 +8,6 @@ import com.example.ticketing.support.Concurrently.Results;
 import com.example.ticketing.support.Fixtures;
 import com.example.ticketing.support.IntegrationTest;
 import com.example.ticketing.support.TestDb;
-import com.example.ticketing.support.TestRedis;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -32,8 +31,6 @@ class HoldExpiryTransactionTest {
     @Autowired
     private TestDb db;
     @Autowired
-    private TestRedis testRedis;
-    @Autowired
     private JdbcTemplate jdbcTemplate;
 
     @Test
@@ -48,7 +45,7 @@ class HoldExpiryTransactionTest {
             List<Long> seats = List.of(ids.get(i * 2), ids.get(i * 2 + 1));
             seatsByHold.put(fixtures.held(pid, seats).holdId(), seats);
         }
-        seatsByHold.keySet().forEach(db::expireHoldAndSeats);
+        seatsByHold.keySet().forEach(db::expireHold);
 
         Results<List<HoldExpiry>> results = Concurrently.of(threadCount)
                 .readyWithin(Duration.ofSeconds(30))
@@ -76,7 +73,7 @@ class HoldExpiryTransactionTest {
                 .containsExactly("EXPIRED");
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM seat WHERE performance_id = ? "
-                        + "AND status = 'AVAILABLE' AND hold_id IS NULL AND held_until IS NULL",
+                        + "AND status = 'AVAILABLE' AND hold_id IS NULL",
                 Long.class, pid)).isEqualTo(holdCount * 2L);
     }
 
@@ -94,28 +91,6 @@ class HoldExpiryTransactionTest {
         assertThat(returned).extracting(HoldExpiry::holdId).doesNotContain(holdId);
         assertThat(db.holdStatus(holdId)).isEqualTo("PAYING");
         assertThat(db.heldSeats(pid, holdId)).containsExactlyElementsOf(target);
-    }
-
-    @Test
-    @DisplayName("늦게 치운 A의 선점은 B가 가져간 좌석을 건드리지 않는다")
-    void lateExpiryKeepsOthersSeats() {
-        long pid = fixtures.newPerformance(1, 1, 4);
-        List<Long> target = db.seatIds(pid).subList(0, 2);
-        long holdA = fixtures.held(pid, target).holdId();
-        db.expireHoldAndSeats(holdA);
-        // 게이트 키는 선점과 같은 TTL이라 만료 시각이 지나면 함께 사라진다. DB 시각만 당겼으므로 키도 지운다
-        testRedis.clean(pid);
-        long holdB = fixtures.held(pid, target).holdId();
-
-        List<HoldExpiry> returned = drain();
-
-        assertThat(db.holdStatus(holdA)).isEqualTo("EXPIRED");
-        assertThat(db.holdStatus(holdB)).isEqualTo("HELD");
-        assertThat(db.heldSeats(pid, holdB)).containsExactlyElementsOf(target);
-        assertThat(returned).filteredOn(h -> h.holdId() == holdA)
-                .singleElement()
-                .satisfies(h -> assertThat(h.gate().seatIds()).isEmpty());
-        assertThat(returned).extracting(HoldExpiry::holdId).doesNotContain(holdB);
     }
 
     @Test

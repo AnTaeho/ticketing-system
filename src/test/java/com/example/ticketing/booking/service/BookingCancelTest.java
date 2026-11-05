@@ -101,7 +101,7 @@ class BookingCancelTest {
         assertThat(booking).containsEntry("status", "CANCELLED");
         assertThat(booking.get("cancelled_at")).isNotNull();
         c.seatIds().forEach(seatId -> assertThat(db.seat(seatId)).containsEntry("status", "AVAILABLE")
-                .containsEntry("hold_id", null).containsEntry("held_until", null));
+                .containsEntry("hold_id", null));
         assertThat(db.outboxCount("REFUND_REQUESTED", c.paymentId())).isEqualTo(1);
         Map<String, Object> task = db.outboxTask("REFUND_REQUESTED", c.paymentId());
         assertThat(task).containsEntry("status", "PENDING").containsEntry("attempt", 0);
