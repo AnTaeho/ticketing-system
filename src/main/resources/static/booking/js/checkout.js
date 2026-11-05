@@ -457,6 +457,7 @@
   function settle(p) {
     if (p.status === 'APPROVED') {
       if (p.holdStatus === 'CONFIRMED') showDone(p.bookingNumber);
+      else if (p.holdStatus !== 'PAYING') showResult('released');
     } else if (p.status === 'DECLINED') {
       showResult('declined');
     } else if (p.status === 'CANCELLED') {
