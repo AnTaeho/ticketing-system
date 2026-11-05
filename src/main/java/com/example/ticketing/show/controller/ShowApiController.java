@@ -23,7 +23,7 @@ public class ShowApiController {
     }
 
     @GetMapping("/{showId}")
-    public ShowDetailResult get(@PathVariable Long showId) {
+    public ShowDetailResult get(@PathVariable long showId) {
         return showReader.getShow(showId);
     }
 }
