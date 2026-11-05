@@ -24,7 +24,7 @@ com.example.ticketing
 |---|---|---|
 | `controller` | `*Controller`, 컨트롤러 전용 변환기 | 같은 기능의 `service`·`dto`, `common` |
 | `dto` | `*Request`, `*Command`, `*Result`, `*Response`, 흐름 결과 record | 같은 기능의 `domain`, 다른 기능의 `domain` 값·enum, `common` |
-| `service` | `*Service`, `*Transaction`, `*Reader`, `*Scheduler`, `*Handler` | 같은 기능의 `repository`·`domain`·`dto`·`client`, 다른 기능의 `service`·`dto`, `common` |
+| `service` | `*Service`, `*Transaction`, `*Reader`, `*Scheduler` | 같은 기능의 `repository`·`domain`·`dto`·`client`, 다른 기능의 `service`·`dto`, `common` |
 | `repository` | `*Repository`(JPA), `*RedisStore`(Redis) | 같은 기능의 `domain`·`dto`, 다른 기능의 `domain` enum, `common` |
 | `domain` | 엔티티, 상태 enum, 값 record, 순수 규칙 | `common`, 다른 기능의 `domain` 값·enum (엔티티는 제외) |
 | `client` | 외부 시스템 클라이언트와 그 결과 타입 | `common` |
@@ -44,8 +44,8 @@ com.example.ticketing
 | `*Service` | 한 유스케이스의 흐름을 짠다. 트랜잭션을 열지 않는다(관리 API의 단순 생성만 예외). 커밋 뒤 Redis 반영과 외부 호출을 여기서 한다 | SQL |
 | `*Transaction` | 쓰기 트랜잭션 한 단위. 락, 조건부 UPDATE | 외부 호출, Redis |
 | `*Reader` | 읽기 전용 조회와 조립 | 쓰기 |
-| `*Scheduler` | 주기 실행의 진입점. 집고, 건마다 위임하고, 실패를 기록한다. `@Scheduled` 메서드 이름은 `run()`이다. 건마다의 판정이 한 화면에 들면 여기에 둔다 | 트랜잭션, 길어진 판정 |
-| `*Reflector` | 커밋 뒤 Redis 게이트 반영. 게이트 스위치와 반영 실패 기록을 맡는다 | DB |
+| `*Scheduler` | 주기 실행의 진입점. 대상을 읽거나(SKIP LOCKED면 집고) 건마다 위임하고, 실패를 기록한다. `@Scheduled` 메서드 이름은 `run()`이다. 건마다의 판정이 한 화면에 들면 여기에 둔다 | 트랜잭션, 길어진 판정 |
+| `*Reflector` | 커밋 뒤 Redis 게이트 반영. 게이트 스위치와 반영 실패 기록을 맡는다. 결제 결론이 풀어야 할 키는 `PaymentSettlement.gateToRelease()`가 알려 준다 | DB |
 | `*Repository` | Spring Data JPA. 저장, 파생 메서드·JPQL 조회, `@Lock` 행 잠금·`SKIP LOCKED` 집기, JPQL 조건부 UPDATE | 업무 판정 |
 | `*RedisStore` | Redis 읽기·쓰기와 Lua 실행. Redis 장애는 `RedisUnavailableException`으로 바꿔 던진다 | 장애 정책 |
 | `*Client` | 외부 시스템 호출. 실패를 결과 값으로 돌려준다 | 재시도 정책 |
@@ -57,7 +57,7 @@ com.example.ticketing
 - 엔티티 PK 컬럼은 다른 테이블이 그 행을 가리킬 때 쓰는 이름(`hold_id`, `payment_id`)으로 짓고, 자바 필드는 `id`로 둔다.
 - 메서드 이름은 하는 일을 그대로 쓴다. `boolean`은 이름 그대로의 뜻일 때만 돌려주고, 갈래가 셋 이상이거나 "모름"이 섞이면 enum을 돌려준다.
 - 상태 전이 메서드는 repository와 `*Transaction` 모두 `출발To도착`(`heldToPaying`, `payingToConfirmed`)으로 짓는다.
-- 표에 없는 service 도우미(`*Issuer`, `*Builder`, `*Refunder`)는 이름이 하는 일을 그대로 말하게 짓는다.
+- 표에 없는 service 도우미(`*Issuer`, `*Refunder`, `SeatCatalog`)는 이름이 하는 일을 그대로 말하게 짓는다.
 - 인자 순서는 `userId, performanceId, …`로 통일한다.
 
 ## 3. 데이터 전달은 DTO로
@@ -70,7 +70,7 @@ com.example.ticketing
 | Controller → Service | `*Command` (값이 둘 이상일 때. id 하나는 그대로 넘긴다) | `dto` |
 | Service → Controller | `*Result` | `dto` |
 | Controller → HTTP | `*Result`를 그대로. 필드 이름만 다르면 `*Result`에 `@JsonProperty`를 달고, 모양이 다를 때만 `*Response` (`from(result)`) | `dto` |
-| `*Transaction` → `*Service` | 결과를 뜻하는 이름의 record (예: `HoldPlacement`, `PaymentConclusion`) | `dto` |
+| `*Transaction` → `*Service` | 결과를 뜻하는 이름의 record (예: `HoldPlacement`, `PaymentSettlement`) | `dto` |
 
 - 엔티티는 `service` 밖으로 나가지 않는다. 엔티티에서 DTO를 만들 때는 `*Result.from(entity)` 한 곳에서만 한다.
 - 필드를 옮겨 담기만 하는 record(`*Result`와 같은 모양의 `*Row`·`*Response`)는 두지 않는다.
@@ -86,13 +86,14 @@ com.example.ticketing
 - 영향 행 수는 그대로 비교한다(`updated == 1`). 기대와 다르면 업무 실패는 `ApiException`, 락 아래라 어긋날 수 없는 불변식 위반은 `RowCounts.requireExactly`의 `IllegalStateException`이다.
 - 상태를 바꾸는 트랜잭션은 `READ_COMMITTED`다. 락 순서는 users → seat_hold → booking_payment·booking → seat(id 오름차순)이다.
 - `SKIP LOCKED` 집기는 상태 변경과 같은 트랜잭션에서 한다.
-- 트랜잭션은 `*Transaction`의 선언형 `@Transactional`로만 연다. `TransactionTemplate`은 쓰지 않는다.
+- 쓰기 트랜잭션은 `*Transaction`이 연다. 모든 메서드가 같으면 클래스에 한 번 단다. 읽기 묶음은 `*Reader`의 `readOnly`이고, 남의 트랜잭션에 끼는 도우미(`BookingIssuer`, `SeatBulkInserter`)는 `MANDATORY`다. 예외는 관리 API의 단순 생성과 가짜 PG의 `REQUIRES_NEW` 둘이다.
+- 운영 코드에서는 `TransactionTemplate`을 쓰지 않는다. 테스트에서 `new`로 만든 `*Transaction`을 감쌀 때만 쓴다.
 
 ## 5. 시간
 
 - 만료·마감 판정은 DB 시각이다. JPQL은 `current_timestamp`(MySQL에서 `current_timestamp(6)`)로 비교한다. `local datetime`은 MySQL에서 초 단위로 잘리므로 쓰지 않는다.
 - "지금 + 기간"은 HQL에서 숫자 기간으로 더한다(`current_timestamp + (:nanos) nanosecond`, `timestampadd(second, :n, current_timestamp)`). Hibernate는 `Duration` 파라미터 산술을 받지 않는다.
-- DB 시각을 저장해야 하는 INSERT는 같은 트랜잭션에서 이미 읽은 `DbClock` 값을 넘긴다. 행마다 DB에서 시각을 되읽게 하지 않는다.
+- DB 시각을 저장해야 하는 INSERT는 같은 트랜잭션에서 이미 읽은 `DbClock` 값을 넘긴다. 행마다 DB에서 시각을 되읽게 하지 않는다. 결제 생성 시각(`Payment.createdAt`)도 이렇게 넣는다. 남은 감사 컬럼(`@CreatedDate`·`@LastModifiedDate`)은 JVM 시각이라 판정에 쓰지 않는다.
 - 자바에서 판정 시각이 필요하면 `DbClock`에서 받는다. 요청마다 DB를 치지 않으려는 사전 확인(선점 전 오픈 확인)만 주입한 `Clock`으로 거르고, 경계는 트랜잭션 안의 DB 시각이 다시 판정한다. 경과 시간(PG 호출 시간 로그)은 주입한 `LongSupplier` 나노 시계로 잰다. `System.currentTimeMillis()`·`nanoTime()`을 직접 부르지 않는다.
 
 ## 6. Redis
@@ -128,7 +129,8 @@ com.example.ticketing
 
 ## 11. 테스트
 
-- 통합 테스트는 `@IntegrationTest`(MOCK) 또는 `@HttpIntegrationTest`(RANDOM_PORT) 메타 애너테이션을 쓴다. 테스트는 전용 DB `ticketing_booking_test`와 Redis DB 1을 쓴다.
+- 통합 테스트는 `@IntegrationTest`(MOCK) 또는 `@HttpIntegrationTest`(RANDOM_PORT) 메타 애너테이션을 쓴다. 테스트 DB는 기본이 `ticketing_booking_test`와 Redis DB 1이고 `TICKETING_TEST_DB`·`TICKETING_TEST_REDIS_DB`로 바꾼다. 테스트 DB 이름은 `_test`로 끝나야 하고 Redis 0은 쓰지 않는다.
+- `StubPgClient`는 `TestCleanup`이 테스트마다 초기화한다. 테스트 클래스가 따로 초기화하지 않는다.
 - 설정을 바꾼 대상을 만들 때는 `@TestPropertySource`로 컨텍스트를 늘리지 않고, `TestProperties`로 바꾼 설정을 만들어 `new`로 조립한다.
 - 데이터는 운영 경로(`Fixtures`)로 만든다. 픽스처가 만든 회차는 픽스처가 기억했다가 정리한다.
 - 동시성 테스트는 `Concurrently` 러너를 쓴다. 출발 전 모두 준비시키고, 시간 제한을 두고, 예기치 못한 예외가 0인지 단언한다.

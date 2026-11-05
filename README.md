@@ -101,10 +101,10 @@ cp src/main/resources/application-local.yml.example src/main/resources/applicati
 - 결제 화면에서 로컬 전용 「결제 상황」(정상 승인 / 거절 / 응답 지연)을 골라 PG 타임아웃 흐름을 볼 수 있습니다.
 
 ```bash
-./gradlew test           # 통합 테스트 207건. MySQL·Redis 필요
+./gradlew test           # 통합 테스트 208건. MySQL·Redis 필요
 ```
 
-테스트는 전용 DB `ticketing_booking_test`(자동 생성)와 Redis DB 1을 써서 시연 데이터와 섞이지 않습니다. 같은 좌석 500명 동시 잡기, 엇갈린 순서의 다석 잡기, 게이트를 끈 DB 판정, 같은 멱등키 동시 결제, 만료 스케줄러 동시 실행 같은 동시성 테스트가 들어 있습니다.
+테스트는 전용 DB `ticketing_booking_test`(자동 생성)와 Redis DB 1을 써서 시연 데이터와 섞이지 않습니다(`TICKETING_TEST_DB`·`TICKETING_TEST_REDIS_DB`로 바꿀 수 있습니다). 같은 좌석 500명 동시 잡기, 엇갈린 순서의 다석 잡기, 게이트를 끈 DB 판정, 같은 멱등키 동시 결제, 만료 스케줄러 동시 실행 같은 동시성 테스트가 들어 있습니다.
 
 prod 프로필은 `ddl-auto: validate`라서 [`docs/booking-schema.sql`](docs/booking-schema.sql)로 테이블을 먼저 만들어야 합니다.
 
