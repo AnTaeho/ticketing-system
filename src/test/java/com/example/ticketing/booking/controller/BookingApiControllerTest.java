@@ -15,7 +15,6 @@ import com.example.ticketing.support.StubPgClient;
 import com.example.ticketing.support.StubPgTestConfig;
 import com.example.ticketing.support.TestDb;
 import com.example.ticketing.support.TestMvc;
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -43,12 +42,6 @@ class BookingApiControllerTest {
     @BeforeEach
     void setUp() {
         mockMvc = testMvc.mockMvc();
-        stubPg.reset();
-    }
-
-    @AfterEach
-    void tearDown() {
-        stubPg.reset();
     }
 
     @Test

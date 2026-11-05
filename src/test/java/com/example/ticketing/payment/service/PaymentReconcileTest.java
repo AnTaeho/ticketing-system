@@ -27,7 +27,6 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -68,15 +67,9 @@ class PaymentReconcileTest {
 
     @BeforeEach
     void setUp() {
-        stubPg.reset();
         db.parkUnsettledPayments();
         redis = testRedis.template();
         scheduler = services.paymentReconcileScheduler();
-    }
-
-    @AfterEach
-    void tearDown() {
-        stubPg.reset();
     }
 
     @ParameterizedTest(name = "{0}")

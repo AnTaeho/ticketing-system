@@ -36,7 +36,6 @@ import com.example.ticketing.support.TestServices;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.Map;
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -77,13 +76,7 @@ class BookingCancelTest {
 
     @BeforeEach
     void setUp() {
-        stubPg.reset();
         redis = testRedis.template();
-    }
-
-    @AfterEach
-    void tearDown() {
-        stubPg.reset();
     }
 
     @Test

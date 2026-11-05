@@ -26,8 +26,6 @@ import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -54,16 +52,6 @@ class PaymentConcurrencyTest {
     private JdbcTemplate jdbcTemplate;
     @Autowired
     private PlatformTransactionManager transactionManager;
-
-    @BeforeEach
-    void setUp() {
-        stubPg.reset();
-    }
-
-    @AfterEach
-    void tearDown() {
-        stubPg.reset();
-    }
 
     @Test
     @DisplayName("같은 멱등키로 10스레드가 동시에 결제해도 PG 승인은 한 번이고 결제도 하나다")
