@@ -143,6 +143,13 @@ public class PaymentTransaction {
         }
     }
 
+    // 대사가 다음 확인 시각을 정한다. 끝난 결제는 건드리지 않는다. 바꿨으면 true
+    @Transactional(isolation = Isolation.READ_COMMITTED)
+    public boolean reschedule(long paymentId, Duration delay, String lastError) {
+        return paymentRepository.reschedule(paymentId, delay.toNanos(),
+                Texts.abbreviate(lastError, Payment.MAX_LAST_ERROR)) == 1;
+    }
+
     // 만료 판정은 DB 시각이다. 만료 스케줄러는 이 hold 행을 잠근 동안 집지 못한다
     private static void requirePayable(SeatHold hold, LocalDateTime dbNow) {
         long holdId = hold.getId();

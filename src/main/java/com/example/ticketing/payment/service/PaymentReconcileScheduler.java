@@ -21,7 +21,6 @@ import org.springframework.stereotype.Component;
 public class PaymentReconcileScheduler {
 
     private final PaymentReader paymentReader;
-    private final PaymentReconcileTransaction reconcileTransaction;
     private final PaymentTransaction paymentTransaction;
     private final PgClient pgClient;
     private final SeatGateReflector gate;
@@ -29,11 +28,10 @@ public class PaymentReconcileScheduler {
     private final Duration recheckAfter;
     private final Duration processingRecheckAfter;
 
-    public PaymentReconcileScheduler(PaymentReader paymentReader, PaymentReconcileTransaction reconcileTransaction,
+    public PaymentReconcileScheduler(PaymentReader paymentReader,
                                      PaymentTransaction paymentTransaction, PgClient pgClient,
                                      SeatGateReflector gate, TicketingProperties properties) {
         this.paymentReader = paymentReader;
-        this.reconcileTransaction = reconcileTransaction;
         this.paymentTransaction = paymentTransaction;
         this.pgClient = pgClient;
         this.gate = gate;
@@ -94,6 +92,6 @@ public class PaymentReconcileScheduler {
     }
 
     private void recheck(DuePayment payment, Duration delay, String lastError) {
-        reconcileTransaction.reschedule(payment.paymentId(), delay, lastError);
+        paymentTransaction.reschedule(payment.paymentId(), delay, lastError);
     }
 }

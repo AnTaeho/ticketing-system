@@ -38,7 +38,6 @@ class PaymentReconcileSchedulerTest {
     private static final Duration RECHECK = Duration.ofSeconds(10);
 
     private PaymentReader paymentReader;
-    private PaymentReconcileTransaction paymentReconcileTransaction;
     private PaymentTransaction paymentTransaction;
     private PgClient pgClient;
     private SeatGateRedisStore seatGateRedisStore;
@@ -46,7 +45,6 @@ class PaymentReconcileSchedulerTest {
     @BeforeEach
     void setUp() {
         paymentReader = mock(PaymentReader.class);
-        paymentReconcileTransaction = mock(PaymentReconcileTransaction.class);
         paymentTransaction = mock(PaymentTransaction.class);
         pgClient = mock(PgClient.class);
         seatGateRedisStore = mock(SeatGateRedisStore.class);
@@ -124,7 +122,7 @@ class PaymentReconcileSchedulerTest {
 
         verify(paymentTransaction).openToDeclined(1);
         verify(paymentTransaction, never()).openToCancelled(2);
-        verify(paymentReconcileTransaction).reschedule(2, RECHECK, "PG 취소 UNKNOWN: connect refused");
+        verify(paymentTransaction).reschedule(2, RECHECK, "PG 취소 UNKNOWN: connect refused");
     }
 
     private PaymentReconcileScheduler scheduler(boolean gateEnabled) {
@@ -135,7 +133,7 @@ class PaymentReconcileSchedulerTest {
                 .gate(new Gate(gateEnabled))
                 .build();
         SeatGateReflector reflector = TestServices.gateReflector(seatGateRedisStore, properties);
-        return TestServices.paymentReconcileScheduler(paymentReader, paymentReconcileTransaction, paymentTransaction, pgClient,
+        return TestServices.paymentReconcileScheduler(paymentReader, paymentTransaction, pgClient,
                 reflector, properties);
     }
 

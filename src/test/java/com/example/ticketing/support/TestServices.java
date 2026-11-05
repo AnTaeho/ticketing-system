@@ -17,7 +17,6 @@ import com.example.ticketing.payment.client.HttpPgClient;
 import com.example.ticketing.payment.client.PgClient;
 import com.example.ticketing.payment.service.PaymentReader;
 import com.example.ticketing.payment.service.PaymentReconcileScheduler;
-import com.example.ticketing.payment.service.PaymentReconcileTransaction;
 import com.example.ticketing.payment.service.PaymentTransaction;
 import com.example.ticketing.seat.service.SeatCatalog;
 import java.time.Clock;
@@ -78,16 +77,16 @@ public class TestServices {
     }
 
     public static PaymentReconcileScheduler paymentReconcileScheduler(
-            PaymentReader paymentReader, PaymentReconcileTransaction reconcileTransaction,
+            PaymentReader paymentReader,
             PaymentTransaction paymentTransaction, PgClient pgClient,
             SeatGateReflector reflector, TicketingProperties properties) {
-        return new PaymentReconcileScheduler(paymentReader, reconcileTransaction, paymentTransaction, pgClient,
+        return new PaymentReconcileScheduler(paymentReader, paymentTransaction, pgClient,
                 reflector, properties);
     }
 
     // 컨텍스트의 PG 클라이언트(대역이 있으면 대역)로 만든다
     public PaymentReconcileScheduler paymentReconcileScheduler() {
-        return paymentReconcileScheduler(bean(PaymentReader.class), bean(PaymentReconcileTransaction.class), bean(PaymentTransaction.class),
+        return paymentReconcileScheduler(bean(PaymentReader.class), bean(PaymentTransaction.class),
                 bean(PgClient.class), bean(SeatGateReflector.class), contextProperties());
     }
 

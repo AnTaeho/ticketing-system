@@ -46,8 +46,6 @@ class PaymentReconcileTest {
     @Autowired
     private PaymentReader paymentReader;
     @Autowired
-    private PaymentReconcileTransaction paymentReconcileTransaction;
-    @Autowired
     private PaymentTransaction paymentTransaction;
     @Autowired
     private PaymentService paymentService;
@@ -245,7 +243,7 @@ class PaymentReconcileTest {
         assertThat(stubPg.queryCalls()).isZero();
         assertThat(db.payment(approvedId)).containsEntry("status", "APPROVED");
         assertThat(db.payment(declinedId)).containsEntry("status", "DECLINED");
-        assertThat(paymentReconcileTransaction.reschedule(approvedId, Duration.ofSeconds(5), "late")).isFalse();
+        assertThat(paymentTransaction.reschedule(approvedId, Duration.ofSeconds(5), "late")).isFalse();
         assertThat(db.payment(approvedId)).containsEntry("last_error", null);
     }
 
