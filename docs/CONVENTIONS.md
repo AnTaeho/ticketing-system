@@ -8,8 +8,8 @@
 
 ```
 com.example.ticketing
-├── common/            여러 기능이 함께 쓰는 것 (error, web, redis, jdbc, time, metrics, log, config)
-├── user/  show/  seat/  queue/  hold/  payment/  booking/  outbox/  notification/  ops/
+├── common/            여러 기능이 함께 쓰는 것 (error, web, redis, jdbc, time, text, config)
+├── user/  show/  seat/  hold/  payment/  booking/
 │   ├── controller/    HTTP 진입점
 │   ├── dto/           계층 사이를 오가는 record
 │   ├── service/       흐름과 트랜잭션
@@ -32,9 +32,8 @@ com.example.ticketing
 - 다른 기능의 `controller`나 `repository`를 직접 부르지 않는다. 필요하면 그 기능의 `service`를 부른다.
 - 테이블의 쓰기는 그 테이블을 가진 기능만 한다. 다른 기능의 테이블은 자기 `*Repository`의 JPQL에서 그 엔티티로 읽기만 한다.
 - 예외: hold·payment·booking의 `*Transaction`은 한 트랜잭션 안에서 락 순서를 지키려고 좌석·회차·사용자 repository로 직접 행을 잠그고 상태를 바꾼다. 트랜잭션 밖의 조회는 이 예외에 들지 않는다.
-- 의존은 한 방향이다: `payment → booking`, `payment·booking → hold → seat → show`, `payment·booking·notification → outbox`. 거꾸로 부르지 않는다.
-- `outbox`는 작업 큐(기록, 집기, 결과 반영)만 맡고 다른 기능을 모른다. 작업 처리는 그 작업을 가진 기능이 `OutboxHandler`로 구현한다(환불은 `payment`, 발권 알림은 `notification`).
-- `ops`는 시연용 집계라 다른 기능의 테이블과 상태 enum을 읽기만 하고, 다른 기능은 `ops`를 부르지 않는다.
+- 의존은 한 방향이다: `payment → booking`, `payment·booking → hold → seat → show`. 거꾸로 부르지 않는다.
+- 예매 취소의 PG 환불은 booking이 정한 `PaymentRefunder` 인터페이스를 payment가 구현한다. 의존은 그대로 payment → booking이다.
 - 두 기능이 서로를 부르면(순환) 한쪽으로 몰거나 공통 개념을 `common`으로 뺀다.
 
 ## 2. 클래스 역할과 이름
@@ -43,11 +42,10 @@ com.example.ticketing
 |---|---|---|
 | `*Controller` | HTTP 요청을 `*Command`로 바꾸고, `*Result`를 내보낸다. 상태 코드를 고른다 | 판정, SQL, Redis |
 | `*Service` | 한 유스케이스의 흐름을 짠다. 트랜잭션을 열지 않는다(관리 API의 단순 생성만 예외). 커밋 뒤 Redis 반영과 외부 호출을 여기서 한다 | SQL |
-| `*Transaction` | 쓰기 트랜잭션 한 단위. 락, 조건부 UPDATE, 같은 트랜잭션의 Outbox 기록 | 외부 호출, Redis |
+| `*Transaction` | 쓰기 트랜잭션 한 단위. 락, 조건부 UPDATE | 외부 호출, Redis |
 | `*Reader` | 읽기 전용 조회와 조립 | 쓰기 |
 | `*Scheduler` | 주기 실행의 진입점. 집고, 건마다 위임하고, 실패를 기록한다. `@Scheduled` 메서드 이름은 `run()`이다. 건마다의 판정이 한 화면에 들면 여기에 둔다 | 트랜잭션, 길어진 판정 |
 | `*Reflector` | 커밋 뒤 Redis 게이트 반영. 게이트 스위치와 반영 실패 기록을 맡는다 | DB |
-| `*Writer` | 같은 트랜잭션 안에서 기록만 한다(`OutboxWriter`) | 커밋 |
 | `*Repository` | Spring Data JPA. 저장, 파생 메서드·JPQL 조회, `@Lock` 행 잠금·`SKIP LOCKED` 집기, JPQL 조건부 UPDATE | 업무 판정 |
 | `*RedisStore` | Redis 읽기·쓰기와 Lua 실행. Redis 장애는 `RedisUnavailableException`으로 바꿔 던진다 | 장애 정책 |
 | `*Client` | 외부 시스템 호출. 실패를 결과 값으로 돌려준다 | 재시도 정책 |
@@ -59,7 +57,7 @@ com.example.ticketing
 - 엔티티 PK 컬럼은 다른 테이블이 그 행을 가리킬 때 쓰는 이름(`hold_id`, `payment_id`)으로 짓고, 자바 필드는 `id`로 둔다.
 - 메서드 이름은 하는 일을 그대로 쓴다. `boolean`은 이름 그대로의 뜻일 때만 돌려주고, 갈래가 셋 이상이거나 "모름"이 섞이면 enum을 돌려준다.
 - 상태 전이 메서드는 repository와 `*Transaction` 모두 `출발To도착`(`heldToPaying`, `payingToConfirmed`)으로 짓는다.
-- 표에 없는 service 도우미(`*Issuer`, `*Builder`, `*Metrics`)는 이름이 하는 일을 그대로 말하게 짓는다.
+- 표에 없는 service 도우미(`*Issuer`, `*Builder`, `*Refunder`)는 이름이 하는 일을 그대로 말하게 짓는다.
 - 인자 순서는 `userId, performanceId, …`로 통일한다.
 
 ## 3. 데이터 전달은 DTO로
@@ -73,21 +71,20 @@ com.example.ticketing
 | Service → Controller | `*Result` | `dto` |
 | Controller → HTTP | `*Result`를 그대로. 필드 이름만 다르면 `*Result`에 `@JsonProperty`를 달고, 모양이 다를 때만 `*Response` (`from(result)`) | `dto` |
 | `*Transaction` → `*Service` | 결과를 뜻하는 이름의 record (예: `HoldPlacement`, `PaymentConclusion`) | `dto` |
-| Outbox 작업 | 작업 종류별 payload record. 쓰는 기능과 처리하는 기능이 함께 보므로 둘 다 의존하는 곳에 둔다 | `outbox/dto` |
 
 - 엔티티는 `service` 밖으로 나가지 않는다. 엔티티에서 DTO를 만들 때는 `*Result.from(entity)` 한 곳에서만 한다.
 - 필드를 옮겨 담기만 하는 record(`*Result`와 같은 모양의 `*Row`·`*Response`)는 두지 않는다.
 - `Map`은 오류 `detail`에만 쓴다. JSON을 문자열 키로 읽고 쓰지 않는다.
-- 같은 값은 같은 이름으로 부른다. (대기열 토큰은 어디서나 `queueToken`)
+- 같은 값은 같은 이름으로 부른다. (선점 토큰은 어디서나 `holdToken`)
 
 ## 4. 트랜잭션과 정합성
 
 - 좌석 배정의 최종 판정은 DB 조건부 UPDATE의 영향 행 수다. Redis는 DB 앞의 게이트다.
 - 같은 트랜잭션에서 잠근 행 하나의 상태 전이는 엔티티의 `출발To도착` 메서드와 변경 감지로 한다. 메서드는 지금 상태가 출발 상태가 아니면 `IllegalStateException`을 던진다. 엔티티에 setter는 없다.
-- 잠그지 않고 경합하는 전이(좌석 잡기, 결과 모름·대사가 겹치는 결제, 잠금 기한이 있는 Outbox 반영)와 잠근 여러 행을 한꺼번에 바꾸는 전이는 JPQL 조건부 UPDATE의 영향 행 수로 판정한다. 관리 중인 엔티티와 섞이면 `@Modifying(clearAutomatically = true, flushAutomatically = true)`를 단다.
+- 잠그지 않고 경합하는 전이(좌석 잡기, 결과 모름·대사가 겹치는 결제, 가짜 PG의 승인·취소)와 잠근 여러 행을 한꺼번에 바꾸는 전이는 JPQL 조건부 UPDATE의 영향 행 수로 판정한다. 관리 중인 엔티티와 섞이면 `@Modifying(clearAutomatically = true, flushAutomatically = true)`를 단다.
 - 상태에 대한 판정(예: "결제가 아직 열려 있나")은 상태 enum에 둔다.
 - 영향 행 수는 그대로 비교한다(`updated == 1`). 기대와 다르면 업무 실패는 `ApiException`, 락 아래라 어긋날 수 없는 불변식 위반은 `RowCounts.requireExactly`의 `IllegalStateException`이다.
-- 상태를 바꾸는 트랜잭션은 `READ_COMMITTED`다. 락 순서는 부모 행(users → seat_hold/booking) → 좌석(id 오름차순)이다.
+- 상태를 바꾸는 트랜잭션은 `READ_COMMITTED`다. 락 순서는 users → seat_hold → booking_payment·booking → seat(id 오름차순)이다.
 - `SKIP LOCKED` 집기는 상태 변경과 같은 트랜잭션에서 한다.
 - 트랜잭션은 `*Transaction`의 선언형 `@Transactional`로만 연다. `TransactionTemplate`은 쓰지 않는다.
 
@@ -96,14 +93,14 @@ com.example.ticketing
 - 만료·마감 판정은 DB 시각이다. JPQL은 `current_timestamp`(MySQL에서 `current_timestamp(6)`)로 비교한다. `local datetime`은 MySQL에서 초 단위로 잘리므로 쓰지 않는다.
 - "지금 + 기간"은 HQL에서 숫자 기간으로 더한다(`current_timestamp + (:nanos) nanosecond`, `timestampadd(second, :n, current_timestamp)`). Hibernate는 `Duration` 파라미터 산술을 받지 않는다.
 - DB 시각을 저장해야 하는 INSERT는 같은 트랜잭션에서 이미 읽은 `DbClock` 값을 넘긴다. 행마다 DB에서 시각을 되읽게 하지 않는다.
-- 자바에서 판정 시각이 필요하면 `DbClock`에서 받는다. 요청마다 DB를 치지 않으려는 사전 확인(대기열 진입, 선점 전 오픈 확인)만 주입한 `Clock`으로 거르고, 경계는 트랜잭션 안의 DB 시각이 다시 판정한다. 경과 시간(캐시 신선도, 간격)은 주입한 `LongSupplier` 나노 시계로 잰다. `System.currentTimeMillis()`·`nanoTime()`을 직접 부르지 않는다.
+- 자바에서 판정 시각이 필요하면 `DbClock`에서 받는다. 요청마다 DB를 치지 않으려는 사전 확인(선점 전 오픈 확인)만 주입한 `Clock`으로 거르고, 경계는 트랜잭션 안의 DB 시각이 다시 판정한다. 경과 시간(PG 호출 시간 로그)은 주입한 `LongSupplier` 나노 시계로 잰다. `System.currentTimeMillis()`·`nanoTime()`을 직접 부르지 않는다.
 
 ## 6. Redis
 
 - 키는 `common.redis.RedisKeys`에서만 만든다. 한 회차의 키는 해시 태그 `{p:<회차>}`를 붙인다.
 - Lua 스크립트는 `resources/scripts/`에 두고 `RedisScripts`로 한 번만 읽는다. 스크립트 머리에 KEYS, ARGV, 반환을 적는다.
 - Redis 장애 판별은 `RedisFailures`로 한다.
-- 커밋 뒤의 Redis 반영(게이트 해제·연장·확정, 토큰 소모)은 실패해도 사용자 응답을 바꾸지 않는다. 실패는 카운터와 `ThrottledWarn`으로 남긴다. 게이트가 꺼졌는지는 반영을 맡은 빈이 판단한다.
+- 커밋 뒤의 Redis 반영(게이트 해제)은 실패해도 사용자 응답을 바꾸지 않는다. 실패는 `log.warn`으로 남긴다. 게이트가 꺼졌는지는 반영을 맡은 빈이 판단한다.
 
 ## 7. 오류
 
@@ -115,16 +112,14 @@ com.example.ticketing
 ## 8. 설정
 
 - 설정은 `TicketingProperties`(접두사 `ticketing`) 하나에 둔다. 기본값은 `application.yml`에만 적는다.
-- 설정에는 정책 값(README에 적힌 시간·정원), 부하 시나리오가 바꾸는 값, 스케줄러 주기·스위치만 둔다. 아무도 바꾸지 않는 내부 값(스냅샷 TTL 등)은 쓰는 클래스의 상수로 두고, 다른 값에서 정해지는 값(리스 길이 = 주기 × 2)은 설정에서 끌어낸다.
+- 설정에는 정책 값(README에 적힌 시간), 게이트 스위치, 스케줄러 주기·스위치만 둔다. 아무도 바꾸지 않는 내부 값은 쓰는 클래스의 상수로 두고, 다른 값에서 정해지는 값은 설정에서 끌어낸다.
 - 주기(`@Scheduled`)에 쓰는 값만 ms 정수이고, 나머지 기간은 `Duration`이다.
 - 스케줄러를 끄는 스위치(`*-enabled`)도 설정 record와 `application.yml`에 적는다.
 - 설정 값은 생성자에서 한 번 꺼내 `final` 필드에 둔다.
 
-## 9. 메트릭과 로그
+## 9. 로그
 
-- 메트릭 이름과 태그는 `common.metrics.Metrics`의 상수로만 쓴다. 이름은 `ticketing.<영역>.<사건>`, 태그 키는 결과를 나타낼 때 `result`를 쓴다.
-- 카운터는 생성자에서 미리 등록한다. 태그 값이 여럿이면 `Metrics.counters`로 한 번에 등록해 태그 값으로 꺼낸다.
-- 로그는 `[영역] 문장 key=value` 형식이다. 반복될 수 있는 실패(장애 중 매 요청·매 주기)는 `ThrottledWarn`으로 남긴다. 예상하지 못한 예외는 스택과 함께 남긴다.
+- 로그는 `[영역] 문장 key=value` 형식이다. 예상하지 못한 예외는 스택과 함께 남긴다.
 
 ## 10. 주석
 
@@ -146,8 +141,7 @@ com.example.ticketing
 - 전역은 `window.bk` 하나다. `api.js`는 데이터 쪽(요청, 폴링, 저장소 키 `bk.keys`, 링크 `bk.links`, 좌석 글), `bk-ui.js`는 화면 부품(확인 단계 `bk.confirmBox`, 상태 상자 `bk.stateBox`, 머리 채우기, 하단 띠)을 맡는다. 화면 JS는 IIFE 하나로 감싸고 이 부품을 쓴다. 싣는 순서는 api.js → bk-ui.js → 화면 스크립트다.
 - 화면 JS의 상태는 객체 하나로 묶는다. 같은 꼴의 분기가 넷 이상이면(결과 화면, 실패 코드별 처리) 데이터 표 + 함수 하나로 쓰고 `TABLE[key]`로 꺼낸다. 셋 이하면 if로 쓴다.
 - 브라우저 표준(`AbortSignal.timeout`, `URLSearchParams`, `ResizeObserver`, `performance.now`)으로 되는 일은 도구를 만들지 않고, 지원하지 않는 브라우저용 대체 경로도 두지 않는다.
-- 템플릿 id는 화면 약자 + `-`로 시작한다 (`login-`, `shows-`, `show-`, `q-`, `seats-`, `co-`, `bk-`, `ops-`, 머리는 `page-`). 링크는 `th:href`로 쓴다.
+- 템플릿 id는 화면 약자 + `-`로 시작한다 (`login-`, `shows-`, `show-`, `seats-`, `co-`, `bk-`, 머리는 `page-`). 링크는 `th:href`로 쓴다.
 - 폴링은 `bk.poller`로 한다. 탭이 숨으면 멈추고, 늦게 온 응답은 버린다.
-- 예외로 대기열 화면의 순서 조회와 좌석 화면의 생존 신호만 `keepWhenHidden`으로 숨어도 돈다. 숨은 사이에 대기열 자리를 잃지 않게 하려는 것이다.
 - 색과 글자 크기는 `booking.css`의 `:root` 토큰으로만 쓴다. 한 화면만 쓰는 규칙은 그 화면 CSS에 둔다.
-- 화면 글은 쉬운 말로 쓰고, 만든 쪽 용어(선점, 게이트, 대사, Outbox, PG)는 쓰지 않는다. 운영 현황 화면은 예외로 용어를 쓰되 표마다 설명 한 줄을 둔다.
+- 화면 글은 쉬운 말로 쓰고, 만든 쪽 용어(선점, 게이트, 대사, PG)는 쓰지 않는다.
