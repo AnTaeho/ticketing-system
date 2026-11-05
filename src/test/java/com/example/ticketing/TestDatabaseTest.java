@@ -19,7 +19,7 @@ class TestDatabaseTest {
     private StringRedisTemplate redis;
 
     @Test
-    @DisplayName("예매 테스트는 앱 DB가 아니라 이름이 _test로 끝나는 전용 DB에 붙는다")
+    @DisplayName("예매 테스트는 앱 DB와 다른, 이름이 _test로 끝나는 전용 DB에 붙는다")
     void usesDedicatedDatabase() {
         assertThat(jdbcTemplate.queryForObject("SELECT DATABASE()", String.class))
                 .isNotEqualTo("ticketing").endsWith("_test");

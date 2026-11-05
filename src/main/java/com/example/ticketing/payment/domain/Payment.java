@@ -73,7 +73,7 @@ public class Payment {
     @Column(name = "next_check_at")
     private LocalDateTime nextCheckAt;
 
-    // JVM 시계가 아니라 호출자가 같은 트랜잭션에서 읽은 DB 시각을 넣는다. 대사의 망취소 판정이 DB 시각으로 비교한다
+    // 호출자가 같은 트랜잭션에서 읽은 DB 시각을 넣는다. 대사의 망취소 판정이 DB 시각과 비교하므로 JVM 시계를 쓰면 어긋난다
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 

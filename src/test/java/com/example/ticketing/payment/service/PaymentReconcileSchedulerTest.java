@@ -21,7 +21,6 @@ import com.example.ticketing.payment.client.PgResult;
 import com.example.ticketing.payment.client.PgStatus;
 import com.example.ticketing.payment.domain.PaymentStatus;
 import com.example.ticketing.payment.dto.DuePayment;
-import com.example.ticketing.payment.dto.PaymentOutcome;
 import com.example.ticketing.payment.dto.PaymentResult;
 import com.example.ticketing.payment.dto.PaymentSettlement;
 import com.example.ticketing.support.TestProperties;
@@ -57,7 +56,7 @@ class PaymentReconcileSchedulerTest {
                 .thenReturn(List.of(claimed(1, "o1", false), claimed(2, "o2", false)));
         when(pgClient.query("o1")).thenThrow(new IllegalStateException("boom"));
         when(pgClient.query("o2")).thenReturn(PgResult.of(PgStatus.APPROVED, "tx2"));
-        when(paymentTransaction.openToApproved(2, "tx2")).thenReturn(seatsChanged(2, PaymentOutcome.CONFIRMED));
+        when(paymentTransaction.openToApproved(2, "tx2")).thenReturn(seatsChanged(2, PaymentStatus.APPROVED));
 
         scheduler(true).run();
 
@@ -72,8 +71,8 @@ class PaymentReconcileSchedulerTest {
                 .thenReturn(List.of(claimed(1, "o1", false), claimed(2, "o2", false)));
         when(pgClient.query("o1")).thenReturn(PgResult.of(PgStatus.APPROVED, "tx1"));
         when(pgClient.query("o2")).thenReturn(PgResult.of(PgStatus.DECLINED, null));
-        when(paymentTransaction.openToApproved(1, "tx1")).thenReturn(seatsChanged(1, PaymentOutcome.CONFIRMED));
-        when(paymentTransaction.openToDeclined(2)).thenReturn(seatsChanged(2, PaymentOutcome.DECLINED));
+        when(paymentTransaction.openToApproved(1, "tx1")).thenReturn(seatsChanged(1, PaymentStatus.APPROVED));
+        when(paymentTransaction.openToDeclined(2)).thenReturn(seatsChanged(2, PaymentStatus.DECLINED));
 
         scheduler(false).run();
 
@@ -87,8 +86,8 @@ class PaymentReconcileSchedulerTest {
                 .thenReturn(List.of(claimed(1, "o1", false), claimed(2, "o2", false)));
         when(pgClient.query("o1")).thenReturn(PgResult.of(PgStatus.DECLINED, null));
         when(pgClient.query("o2")).thenReturn(PgResult.of(PgStatus.APPROVED, "tx2"));
-        when(paymentTransaction.openToDeclined(1)).thenReturn(seatsChanged(1, PaymentOutcome.DECLINED));
-        when(paymentTransaction.openToApproved(2, "tx2")).thenReturn(seatsChanged(2, PaymentOutcome.CONFIRMED));
+        when(paymentTransaction.openToDeclined(1)).thenReturn(seatsChanged(1, PaymentStatus.DECLINED));
+        when(paymentTransaction.openToApproved(2, "tx2")).thenReturn(seatsChanged(2, PaymentStatus.APPROVED));
 
         scheduler(true).run();
 
@@ -101,7 +100,7 @@ class PaymentReconcileSchedulerTest {
     void notAppliedIsNotReflected() {
         when(paymentReader.findDue(BATCH)).thenReturn(List.of(claimed(1, "o1", false)));
         when(pgClient.query("o1")).thenReturn(PgResult.of(PgStatus.APPROVED, "tx1"));
-        when(paymentTransaction.openToApproved(1, "tx1")).thenReturn(settlement(1, PaymentOutcome.CONFIRMED, false));
+        when(paymentTransaction.openToApproved(1, "tx1")).thenReturn(settlement(1, PaymentStatus.APPROVED, false));
 
         scheduler(true).run();
 
@@ -116,7 +115,7 @@ class PaymentReconcileSchedulerTest {
         when(pgClient.query(anyString())).thenReturn(PgResult.of(PgStatus.NOT_FOUND, null));
         when(pgClient.cancel("o1")).thenReturn(PgResult.of(PgStatus.DECLINED, null));
         when(pgClient.cancel("o2")).thenReturn(PgResult.unknown("connect refused"));
-        when(paymentTransaction.openToDeclined(1)).thenReturn(seatsChanged(1, PaymentOutcome.DECLINED));
+        when(paymentTransaction.openToDeclined(1)).thenReturn(seatsChanged(1, PaymentStatus.DECLINED));
 
         scheduler(true).run();
 
@@ -141,25 +140,15 @@ class PaymentReconcileSchedulerTest {
         return new DuePayment(paymentId, orderId, cancelDue);
     }
 
-    private static PaymentSettlement seatsChanged(long paymentId, PaymentOutcome outcome) {
-        return settlement(paymentId, outcome, true);
+    private static PaymentSettlement seatsChanged(long paymentId, PaymentStatus status) {
+        return settlement(paymentId, status, true);
     }
 
-    private static PaymentSettlement settlement(long paymentId, PaymentOutcome outcome, boolean changedSeats) {
-        PaymentResult result = new PaymentResult(paymentId, statusOf(outcome), HoldStatus.CONFIRMED, null, null);
+    private static PaymentSettlement settlement(long paymentId, PaymentStatus status, boolean changedSeats) {
+        PaymentResult result = new PaymentResult(paymentId, status, HoldStatus.CONFIRMED, null, null);
         if (!changedSeats) {
             return PaymentSettlement.seatsUnchanged(result);
         }
         return PaymentSettlement.seatsChanged(result, new GateHold(7L, "token", List.of(101L)));
-    }
-
-    private static PaymentStatus statusOf(PaymentOutcome outcome) {
-        return switch (outcome) {
-            case PROCESSING -> PaymentStatus.REQUESTED;
-            case UNKNOWN -> PaymentStatus.UNKNOWN;
-            case CONFIRMED -> PaymentStatus.APPROVED;
-            case DECLINED -> PaymentStatus.DECLINED;
-            case CANCELLED -> PaymentStatus.CANCELLED;
-        };
     }
 }

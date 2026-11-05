@@ -123,16 +123,16 @@ class PaymentReconcileTest {
     }
 
     @Test
-    @DisplayName("결제 생성 시각은 DB 시계에서 와서 JVM 시계와 어긋나도 망취소 판정이 DB 기준이다")
+    @DisplayName("결제 생성 시각은 넘겨받은 DB 시계 값으로 저장되고 망취소 판정이 그 값을 쓴다")
     void createdAtComesFromDbClock() {
         Held held = fixtures.held(1);
-        DbClock dbBehindJvmBy60s = new DbClock(entityManager) {
+        DbClock clock60sEarlier = new DbClock(entityManager) {
             @Override
             public LocalDateTime now() {
                 return super.now().minusSeconds(60);
             }
         };
-        PaymentTransaction skewed = services.paymentTransaction(dbBehindJvmBy60s);
+        PaymentTransaction skewed = services.paymentTransaction(clock60sEarlier);
         LocalDateTime jvmNow = LocalDateTime.now();
 
         // new로 만든 객체에는 클래스의 @Transactional이 걸리지 않으므로 트랜잭션을 직접 연다
