@@ -71,8 +71,11 @@ public class TestServices {
     }
 
     public BookingService bookingService(SeatGateReflector reflector) {
-        return new BookingService(bean(BookingReader.class), bean(PaymentRefunder.class),
-                bean(BookingTransaction.class), reflector);
+        return bookingService(reflector, bean(BookingTransaction.class));
+    }
+
+    public BookingService bookingService(SeatGateReflector reflector, BookingTransaction transaction) {
+        return new BookingService(bean(BookingReader.class), bean(PaymentRefunder.class), transaction, reflector);
     }
 
     public static PaymentReconcileScheduler paymentReconcileScheduler(

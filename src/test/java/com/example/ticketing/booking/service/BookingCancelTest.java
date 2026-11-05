@@ -2,10 +2,13 @@ package com.example.ticketing.booking.service;
 
 import static com.example.ticketing.support.ApiErrors.catchApiException;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import com.example.ticketing.booking.domain.BookingStatus;
 import com.example.ticketing.booking.dto.BookingResult;
@@ -38,6 +41,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.Import;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -46,6 +50,8 @@ import org.springframework.jdbc.core.JdbcTemplate;
 @Import(StubPgTestConfig.class)
 class BookingCancelTest {
 
+    @Autowired
+    private ApplicationContext context;
     @Autowired
     private BookingService bookingService;
     @Autowired
@@ -229,6 +235,36 @@ class BookingCancelTest {
     }
 
     @Test
+    @DisplayName("환불만 끝나고 예매 취소가 실패한 뒤 회차가 시작돼도 다시 보내면 PG를 부르지 않고 예매가 취소된다")
+    void retryAfterRefundedButBookingNotCancelled() {
+        Confirmed c = fixtures.confirmed(2);
+        BookingTransaction real = bean(BookingTransaction.class);
+        BookingTransaction flaky = mock(BookingTransaction.class);
+        when(flaky.confirmedToCancelled(anyLong(), anyLong()))
+                .thenThrow(new IllegalStateException("db down"))
+                .thenAnswer(call -> real.confirmedToCancelled(call.getArgument(0), call.getArgument(1)));
+        BookingService service = services.bookingService(services.gateReflector(
+                bean(SeatGateRedisStore.class), properties), flaky);
+
+        assertThatThrownBy(() -> service.cancel(c.userId(), c.bookingId())).isInstanceOf(IllegalStateException.class);
+
+        assertThat(db.payment(c.paymentId())).containsEntry("status", "CANCELLED");
+        assertThat(jdbcTemplate.queryForObject("SELECT status FROM booking WHERE booking_id = ?", String.class,
+                c.bookingId())).isEqualTo("CONFIRMED");
+        c.seatIds().forEach(seatId -> assertThat(db.seat(seatId)).containsEntry("status", "SOLD"));
+        assertThat(stubPg.cancelCalls()).isEqualTo(1);
+
+        startPerformance(c.pid());
+        CancelResult retried = service.cancel(c.userId(), c.bookingId());
+
+        assertThat(retried).isEqualTo(new CancelResult(c.bookingId(), BookingStatus.CANCELLED));
+        assertThat(stubPg.cancelCalls()).isEqualTo(1);
+        c.seatIds().forEach(seatId -> assertThat(db.seat(seatId)).containsEntry("status", "AVAILABLE")
+                .containsEntry("hold_id", null));
+        assertThat(testRedis.keys(c.pid())).isEmpty();
+    }
+
+    @Test
     @DisplayName("실제로 취소한 호출만 좌석 키를 지우고 이미 취소된 예매를 다시 취소하면 지우지 않는다")
     void gateReflection() {
         SeatGateRedisStore gate = mock(SeatGateRedisStore.class);
@@ -248,6 +284,10 @@ class BookingCancelTest {
     private LocalDateTime cancelledAt(long bookingId) {
         return jdbcTemplate.queryForObject("SELECT cancelled_at FROM booking WHERE booking_id = ?", LocalDateTime.class,
                 bookingId);
+    }
+
+    private <T> T bean(Class<T> type) {
+        return context.getBean(type);
     }
 
     private BookingService bookingServiceWith(SeatGateRedisStore store) {

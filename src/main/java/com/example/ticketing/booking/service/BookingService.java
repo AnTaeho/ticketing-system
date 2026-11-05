@@ -20,17 +20,19 @@ public class BookingService {
     private final BookingTransaction bookingTransaction;
     private final SeatGateReflector gate;
 
-    // PG 환불을 먼저 한다. 같은 주문 취소는 PG가 같은 답을 주므로 중간에 실패해도 다시 누르면 끝난다
+    // PG 환불을 먼저 한다. 환불만 끝나고 DB 변경이 실패해도 다시 누르면 환불된 결제는 PG와 시작 확인 없이 DB만 바꿔 끝난다
     public CancelResult cancel(long userId, long bookingId) {
         CancelTarget target = bookingReader.findCancelTarget(userId, bookingId);
         if (target.status() == BookingStatus.CANCELLED) {
             return new CancelResult(bookingId, BookingStatus.CANCELLED);
         }
-        if (!target.notStarted()) {
-            throw new ApiException(ErrorCode.CANCEL_NOT_ALLOWED, Map.of("bookingId", bookingId));
-        }
-        if (!paymentRefunder.refund(target.paymentId())) {
-            throw new ApiException(ErrorCode.REFUND_FAILED, Map.of("bookingId", bookingId));
+        if (!target.paymentRefunded()) {
+            if (!target.notStarted()) {
+                throw new ApiException(ErrorCode.CANCEL_NOT_ALLOWED, Map.of("bookingId", bookingId));
+            }
+            if (!paymentRefunder.refund(target.paymentId())) {
+                throw new ApiException(ErrorCode.REFUND_FAILED, Map.of("bookingId", bookingId));
+            }
         }
         bookingTransaction.confirmedToCancelled(userId, bookingId).ifPresent(gate::release);
         return new CancelResult(bookingId, BookingStatus.CANCELLED);
