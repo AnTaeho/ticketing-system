@@ -26,7 +26,7 @@ public class SeatHoldReader {
         SeatHold hold = seatHoldRepository.findByIdAndUserId(holdId, userId)
                 .orElseThrow(() -> new ApiException(ErrorCode.HOLD_NOT_FOUND, Map.of("holdId", holdId)));
         return HoldDetailResult.from(hold,
-                seatCatalog.seatsOfHold(hold.getPerformanceId(), holdId),
+                seatCatalog.seatsOfHold(holdId),
                 seatHoldRepository.findPaymentIdByHoldId(holdId).orElse(null), dbClock.now());
     }
 

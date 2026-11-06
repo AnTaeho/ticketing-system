@@ -4,8 +4,9 @@ import com.example.ticketing.common.jdbc.RowCounts;
 import com.example.ticketing.hold.domain.ClaimedHold;
 import com.example.ticketing.hold.dto.HoldExpiry;
 import com.example.ticketing.hold.repository.SeatHoldRepository;
+import com.example.ticketing.seat.domain.Seat;
+import com.example.ticketing.seat.domain.SeatStatus;
 import com.example.ticketing.seat.repository.SeatRepository;
-import com.example.ticketing.seat.domain.HeldSeat;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -30,9 +31,10 @@ public class HoldExpiryTransaction {
             return List.of();
         }
         List<Long> ids = claimed.stream().map(ClaimedHold::holdId).toList();
-        Map<Long, List<Long>> seatsByHold = seatRepository.findHeldSeats(ids).stream()
-                .collect(Collectors.groupingBy(HeldSeat::holdId,
-                        Collectors.mapping(HeldSeat::seatId, Collectors.toList())));
+        Map<Long, List<Long>> seatsByHold = seatRepository.findByHoldIdInAndStatusOrderById(ids, SeatStatus.HELD)
+                .stream()
+                .collect(Collectors.groupingBy(Seat::getHoldId,
+                        Collectors.mapping(Seat::getId, Collectors.toList())));
 
         RowCounts.requireExactly(seatHoldRepository.heldToExpired(ids), ids.size(), "hold EXPIRED");
         // 좌석은 잠그지 않으므로 hold_id 조건부 UPDATE로 푼다

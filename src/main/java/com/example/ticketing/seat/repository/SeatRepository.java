@@ -1,7 +1,7 @@
 package com.example.ticketing.seat.repository;
 
-import com.example.ticketing.seat.domain.HeldSeat;
 import com.example.ticketing.seat.domain.Seat;
+import com.example.ticketing.seat.domain.SeatStatus;
 import jakarta.persistence.LockModeType;
 import java.util.Collection;
 import java.util.List;
@@ -29,16 +29,12 @@ public interface SeatRepository extends JpaRepository<Seat, Long> {
 
     List<Seat> findByPerformanceId(long performanceId, Sort sort);
 
-    // 지금 이 hold를 가리키는 좌석(HELD·SOLD) ID 오름차순
-    @Query("select s.id from Seat s where s.performanceId = :performanceId and s.holdId = :holdId order by s.id")
-    List<Long> findSeatIdsOfHold(@Param("performanceId") long performanceId, @Param("holdId") long holdId);
+    // 지금 이 hold를 가리키는 좌석(HELD·SOLD)
+    List<Seat> findByHoldIdOrderById(long holdId);
 
-    @Query("select s.id from Seat s where s.holdId = :holdId and s.status = HELD order by s.id")
-    List<Long> findHeldSeatIds(@Param("holdId") long holdId);
+    List<Seat> findByHoldIdAndStatusOrderById(long holdId, SeatStatus status);
 
-    @Query("select new com.example.ticketing.seat.domain.HeldSeat(s.holdId, s.id) from Seat s "
-            + "where s.holdId in :holdIds and s.status = HELD order by s.id")
-    List<HeldSeat> findHeldSeats(@Param("holdIds") Collection<Long> holdIds);
+    List<Seat> findByHoldIdInAndStatusOrderById(Collection<Long> holdIds, SeatStatus status);
 
     // 락 순서대로 id 오름차순으로 잠근다
     @Lock(LockModeType.PESSIMISTIC_WRITE)

@@ -86,10 +86,9 @@ public class SeatCatalog {
         return new SeatSelection(performanceId, List.copyOf(sorted), seats, totalAmount);
     }
 
-    // 지금 이 hold를 가리키는 좌석. 풀리거나 남이 가져간 좌석은 빠지고, 위치·가격은 카탈로그에서 채운다
-    public List<SeatInfo> seatsOfHold(long performanceId, long holdId) {
-        Map<Long, SeatInfo> seats = performance(performanceId).seats();
-        return seatRepository.findSeatIdsOfHold(performanceId, holdId).stream().map(seats::get).toList();
+    // 지금 이 hold를 가리키는 좌석(HELD·SOLD). 풀린 좌석은 빠진다. DB에서 읽는다
+    public List<SeatInfo> seatsOfHold(long holdId) {
+        return seatRepository.findByHoldIdOrderById(holdId).stream().map(Seat::info).toList();
     }
 
     private static ApiException invalidSelection(Map<String, Object> detail) {
