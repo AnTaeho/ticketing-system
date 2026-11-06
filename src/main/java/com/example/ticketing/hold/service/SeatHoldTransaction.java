@@ -9,6 +9,8 @@ import com.example.ticketing.hold.domain.HoldStatus;
 import com.example.ticketing.hold.domain.SeatHold;
 import com.example.ticketing.hold.dto.HoldPlacement;
 import com.example.ticketing.hold.repository.SeatHoldRepository;
+import com.example.ticketing.seat.domain.Seat;
+import com.example.ticketing.seat.domain.SeatStatus;
 import com.example.ticketing.seat.dto.SeatSelection;
 import com.example.ticketing.seat.repository.SeatRepository;
 import com.example.ticketing.seat.service.SeatCatalog;
@@ -49,7 +51,7 @@ public class SeatHoldTransaction {
         if (userRepository.lockById(userId).isEmpty()) {
             throw new ApiException(ErrorCode.LOGIN_REQUIRED);
         }
-        if (seatHoldRepository.countActive(userId, performanceId) > 0) {
+        if (seatHoldRepository.existsByUserIdAndPerformanceIdAndStatusIn(userId, performanceId, HoldStatus.ACTIVE)) {
             throw new ApiException(ErrorCode.USER_HAS_HOLD);
         }
 
@@ -77,7 +79,8 @@ public class SeatHoldTransaction {
         }
         hold.heldToReleased();
         // 좌석은 잠그지 않으므로 hold_id 조건부 UPDATE로 푼다
-        List<Long> seatIds = seatRepository.findHeldSeatIds(holdId);
+        List<Long> seatIds = seatRepository.findByHoldIdAndStatusOrderById(holdId, SeatStatus.HELD).stream()
+                .map(Seat::getId).toList();
         seatRepository.heldToAvailable(holdId);
         return new GateHold(hold.getPerformanceId(), hold.getHoldToken(), seatIds);
     }

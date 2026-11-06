@@ -1,11 +1,13 @@
 package com.example.ticketing.hold.service;
 
 import com.example.ticketing.common.jdbc.RowCounts;
-import com.example.ticketing.hold.domain.ClaimedHold;
+import com.example.ticketing.hold.domain.GateHold;
+import com.example.ticketing.hold.domain.SeatHold;
 import com.example.ticketing.hold.dto.HoldExpiry;
 import com.example.ticketing.hold.repository.SeatHoldRepository;
+import com.example.ticketing.seat.domain.Seat;
+import com.example.ticketing.seat.domain.SeatStatus;
 import com.example.ticketing.seat.repository.SeatRepository;
-import com.example.ticketing.seat.domain.HeldSeat;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -25,21 +27,23 @@ public class HoldExpiryTransaction {
     private final SeatRepository seatRepository;
 
     public List<HoldExpiry> claimAndExpire(int batch) {
-        List<ClaimedHold> claimed = seatHoldRepository.claimExpired(Limit.of(batch));
+        List<SeatHold> claimed = seatHoldRepository.claimExpired(Limit.of(batch));
         if (claimed.isEmpty()) {
             return List.of();
         }
-        List<Long> ids = claimed.stream().map(ClaimedHold::holdId).toList();
-        Map<Long, List<Long>> seatsByHold = seatRepository.findHeldSeats(ids).stream()
-                .collect(Collectors.groupingBy(HeldSeat::holdId,
-                        Collectors.mapping(HeldSeat::seatId, Collectors.toList())));
+        List<Long> ids = claimed.stream().map(SeatHold::getId).toList();
+        Map<Long, List<Long>> seatsByHold = seatRepository.findByHoldIdInAndStatusOrderById(ids, SeatStatus.HELD)
+                .stream()
+                .collect(Collectors.groupingBy(Seat::getHoldId,
+                        Collectors.mapping(Seat::getId, Collectors.toList())));
 
         RowCounts.requireExactly(seatHoldRepository.heldToExpired(ids), ids.size(), "hold EXPIRED");
         // 좌석은 잠그지 않으므로 hold_id 조건부 UPDATE로 푼다
         seatRepository.heldToAvailableOfHolds(ids);
 
         return claimed.stream()
-                .map(h -> new HoldExpiry(h.holdId(), h.gate(seatsByHold.getOrDefault(h.holdId(), List.of()))))
+                .map(h -> new HoldExpiry(h.getId(), new GateHold(h.getPerformanceId(), h.getHoldToken(),
+                        seatsByHold.getOrDefault(h.getId(), List.of()))))
                 .toList();
     }
 }
