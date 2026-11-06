@@ -21,7 +21,7 @@ public interface SeatHoldRepository extends JpaRepository<SeatHold, Long> {
 
     // bulk UPDATE는 모두 flush·clear한다. 같은 트랜잭션에서 뒤이어 읽는 엔티티가 바뀌기 전 값으로 남지 않게
 
-    Optional<SeatHold> findByIdAndUserId(Long id, Long userId);
+    Optional<SeatHold> findByIdAndUserId(long id, long userId);
 
     boolean existsByUserIdAndPerformanceIdAndStatusIn(long userId, long performanceId,
                                                       Collection<HoldStatus> statuses);

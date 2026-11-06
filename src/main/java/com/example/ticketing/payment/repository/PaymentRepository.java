@@ -15,11 +15,11 @@ public interface PaymentRepository extends JpaRepository<Payment, Long> {
 
     // bulk UPDATE는 모두 flush·clear한다. 같은 트랜잭션에서 뒤이어 읽는 엔티티가 바뀌기 전 값으로 남지 않게
 
-    Optional<Payment> findByUserIdAndIdempotencyKey(Long userId, String idempotencyKey);
+    Optional<Payment> findByUserIdAndIdempotencyKey(long userId, String idempotencyKey);
 
-    Optional<Payment> findByHoldId(Long holdId);
+    Optional<Payment> findByHoldId(long holdId);
 
-    Optional<Payment> findByIdAndUserId(Long id, Long userId);
+    Optional<Payment> findByIdAndUserId(long id, long userId);
 
     // 엔티티를 영속성 컨텍스트에 올리지 않고 hold를 먼저 잠그려고 ID만 읽는다
     @Query("select p.holdId from Payment p where p.id = :id")

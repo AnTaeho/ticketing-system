@@ -9,7 +9,7 @@ import org.springframework.data.repository.query.Param;
 
 public interface PerformanceRepository extends JpaRepository<Performance, Long> {
 
-    List<Performance> findByShowIdOrderByStartsAtAscIdAsc(Long showId);
+    List<Performance> findByShowIdOrderByStartsAtAscIdAsc(long showId);
 
     // 공연마다 아직 시작하지 않은 가장 이른 회차. 같은 시각 회차가 여럿이면 모두 돌려준다
     @Query("""

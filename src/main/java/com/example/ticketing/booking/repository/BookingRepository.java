@@ -11,7 +11,7 @@ import org.springframework.data.repository.query.Param;
 
 public interface BookingRepository extends JpaRepository<Booking, Long> {
 
-    Optional<Booking> findByHoldId(Long holdId);
+    Optional<Booking> findByHoldId(long holdId);
 
     // 최신순
     List<Booking> findByUserIdOrderByCreatedAtDescIdDesc(long userId);
