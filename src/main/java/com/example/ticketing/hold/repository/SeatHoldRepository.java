@@ -1,8 +1,7 @@
 package com.example.ticketing.hold.repository;
 
-import com.example.ticketing.hold.domain.ClaimedHold;
+import com.example.ticketing.hold.domain.HoldStatus;
 import com.example.ticketing.hold.domain.SeatHold;
-import com.example.ticketing.hold.dto.ActiveHoldResult;
 import jakarta.persistence.LockModeType;
 import jakarta.persistence.QueryHint;
 import java.util.Collection;
@@ -24,18 +23,11 @@ public interface SeatHoldRepository extends JpaRepository<SeatHold, Long> {
 
     Optional<SeatHold> findByIdAndUserId(Long id, Long userId);
 
-    @Query("""
-            select count(h) from SeatHold h
-             where h.userId = :userId and h.performanceId = :performanceId and h.status in (HELD, PAYING)""")
-    long countActive(@Param("userId") long userId, @Param("performanceId") long performanceId);
+    boolean existsByUserIdAndPerformanceIdAndStatusIn(long userId, long performanceId,
+                                                      Collection<HoldStatus> statuses);
 
-    @Query("""
-            select new com.example.ticketing.hold.dto.ActiveHoldResult(h.id, h.status, h.expiresAt)
-              from SeatHold h
-             where h.userId = :userId and h.performanceId = :performanceId and h.status in (HELD, PAYING)
-             order by h.id desc
-             limit 1""")
-    Optional<ActiveHoldResult> findActive(@Param("userId") long userId, @Param("performanceId") long performanceId);
+    Optional<SeatHold> findFirstByUserIdAndPerformanceIdAndStatusInOrderByIdDesc(long userId, long performanceId,
+                                                                                 Collection<HoldStatus> statuses);
 
     // 결제 테이블은 읽기만 한다. 결제 기능이 hold 기능을 부르므로 결제 서비스를 부르면 순환이 된다
     @Query("select p.id from Payment p where p.holdId = :holdId")
@@ -54,11 +46,10 @@ public interface SeatHoldRepository extends JpaRepository<SeatHold, Long> {
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @QueryHints(@QueryHint(name = "jakarta.persistence.lock.timeout", value = "-2"))
     @Query("""
-            select new com.example.ticketing.hold.domain.ClaimedHold(h.id, h.performanceId, h.holdToken)
-              from SeatHold h
+            select h from SeatHold h
              where h.status = HELD and h.expiresAt < current_timestamp
              order by h.id""")
-    List<ClaimedHold> claimExpired(Limit limit);
+    List<SeatHold> claimExpired(Limit limit);
 
     // claimExpired로 잠근 hold를 한 문장으로 만료한다. 결제 중(PAYING)은 대상이 아니다. 결제 대사가 결론을 낸다
     @Modifying(clearAutomatically = true, flushAutomatically = true)

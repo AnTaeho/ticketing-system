@@ -1,7 +1,8 @@
 package com.example.ticketing.hold.service;
 
 import com.example.ticketing.common.jdbc.RowCounts;
-import com.example.ticketing.hold.domain.ClaimedHold;
+import com.example.ticketing.hold.domain.GateHold;
+import com.example.ticketing.hold.domain.SeatHold;
 import com.example.ticketing.hold.dto.HoldExpiry;
 import com.example.ticketing.hold.repository.SeatHoldRepository;
 import com.example.ticketing.seat.domain.Seat;
@@ -26,11 +27,11 @@ public class HoldExpiryTransaction {
     private final SeatRepository seatRepository;
 
     public List<HoldExpiry> claimAndExpire(int batch) {
-        List<ClaimedHold> claimed = seatHoldRepository.claimExpired(Limit.of(batch));
+        List<SeatHold> claimed = seatHoldRepository.claimExpired(Limit.of(batch));
         if (claimed.isEmpty()) {
             return List.of();
         }
-        List<Long> ids = claimed.stream().map(ClaimedHold::holdId).toList();
+        List<Long> ids = claimed.stream().map(SeatHold::getId).toList();
         Map<Long, List<Long>> seatsByHold = seatRepository.findByHoldIdInAndStatusOrderById(ids, SeatStatus.HELD)
                 .stream()
                 .collect(Collectors.groupingBy(Seat::getHoldId,
@@ -41,7 +42,8 @@ public class HoldExpiryTransaction {
         seatRepository.heldToAvailableOfHolds(ids);
 
         return claimed.stream()
-                .map(h -> new HoldExpiry(h.holdId(), h.gate(seatsByHold.getOrDefault(h.holdId(), List.of()))))
+                .map(h -> new HoldExpiry(h.getId(), new GateHold(h.getPerformanceId(), h.getHoldToken(),
+                        seatsByHold.getOrDefault(h.getId(), List.of()))))
                 .toList();
     }
 }

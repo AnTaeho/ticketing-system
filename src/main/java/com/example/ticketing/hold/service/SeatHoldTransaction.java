@@ -51,7 +51,7 @@ public class SeatHoldTransaction {
         if (userRepository.lockById(userId).isEmpty()) {
             throw new ApiException(ErrorCode.LOGIN_REQUIRED);
         }
-        if (seatHoldRepository.countActive(userId, performanceId) > 0) {
+        if (seatHoldRepository.existsByUserIdAndPerformanceIdAndStatusIn(userId, performanceId, HoldStatus.ACTIVE)) {
             throw new ApiException(ErrorCode.USER_HAS_HOLD);
         }
 
