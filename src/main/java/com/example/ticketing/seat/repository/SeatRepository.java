@@ -2,7 +2,6 @@ package com.example.ticketing.seat.repository;
 
 import com.example.ticketing.seat.domain.HeldSeat;
 import com.example.ticketing.seat.domain.Seat;
-import com.example.ticketing.seat.domain.SeatMapSeat;
 import jakarta.persistence.LockModeType;
 import java.util.Collection;
 import java.util.List;
@@ -29,15 +28,6 @@ public interface SeatRepository extends JpaRepository<Seat, Long> {
                         @Param("holdId") long holdId);
 
     List<Seat> findByPerformanceId(long performanceId, Sort sort);
-
-    // 구역 → 열 → 번호 순이다
-    @Query("""
-            select new com.example.ticketing.seat.domain.SeatMapSeat(
-                   s.id, s.section, s.rowNo, s.seatNo, s.grade, s.price, s.status)
-              from Seat s
-             where s.performanceId = :performanceId
-             order by s.section, s.rowNo, s.seatNo""")
-    List<SeatMapSeat> findSeatMap(@Param("performanceId") long performanceId);
 
     // 지금 이 hold를 가리키는 좌석(HELD·SOLD) ID 오름차순
     @Query("select s.id from Seat s where s.performanceId = :performanceId and s.holdId = :holdId order by s.id")
