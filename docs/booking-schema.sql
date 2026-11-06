@@ -23,8 +23,7 @@ CREATE TABLE `performance` (
   `show_id` bigint NOT NULL,
   `starts_at` datetime(6) NOT NULL,
   PRIMARY KEY (`performance_id`),
-  KEY `idx_perf_show` (`show_id`,`starts_at`),
-  KEY `idx_perf_open` (`open_at`,`starts_at`)
+  KEY `idx_perf_show` (`show_id`,`starts_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE `seat` (

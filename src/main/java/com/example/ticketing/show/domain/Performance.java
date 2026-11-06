@@ -16,8 +16,7 @@ import lombok.NoArgsConstructor;
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 @Table(name = "performance", indexes = {
-        @Index(name = "idx_perf_show", columnList = "show_id, starts_at"),
-        @Index(name = "idx_perf_open", columnList = "open_at, starts_at")
+        @Index(name = "idx_perf_show", columnList = "show_id, starts_at")
 })
 public class Performance {
 

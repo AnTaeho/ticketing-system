@@ -39,14 +39,13 @@ class SchemaTest {
     }
 
     @Test
-    @DisplayName("회차 테이블(performance)은 공연별·오픈 시각별 조회 인덱스를 가진다")
+    @DisplayName("회차 테이블(performance)은 공연별 조회 인덱스를 가진다")
     void performance() {
         String ddl = db.showCreateTable("performance");
 
         assertThat(ddl)
                 .contains("PRIMARY KEY (`performance_id`)")
                 .contains("KEY `idx_perf_show` (`show_id`,`starts_at`)")
-                .contains("KEY `idx_perf_open` (`open_at`,`starts_at`)")
                 .contains("`starts_at` datetime(6) NOT NULL")
                 .contains("`open_at` datetime(6) NOT NULL");
     }
