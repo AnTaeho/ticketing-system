@@ -149,7 +149,7 @@ class PaymentHttpTest {
         return RestClient.create("http://localhost:" + environment.getProperty("local.server.port"));
     }
 
-    // 서버 쪽 SLOW_SUCCESS 지연(5초)이 끝나 Fake PG 행이 결론 날 때까지 기다린다
+    // 서버 쪽 SLOW_SUCCESS 지연(slow-delay)이 끝나 Fake PG 행이 결론 날 때까지 기다린다
     private String awaitFakePgSettled(String orderId) {
         return Await.until(properties.fakePg().slowDelay().plusSeconds(5), Duration.ofMillis(100),
                 () -> fakePgStatus(orderId), status -> !"PROCESSING".equals(status));

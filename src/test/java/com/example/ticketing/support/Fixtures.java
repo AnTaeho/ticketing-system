@@ -74,7 +74,7 @@ public class Fixtures {
         return userRepository.save(User.create("fx-" + shortId())).getId();
     }
 
-    // 새 회차(1구역 1열 6석)에서 새 사용자가 앞에서부터 seatCount석을 잡은 상태
+    // 새 회차(구역 하나, 1열 6석)에서 새 사용자가 앞에서부터 seatCount석을 잡은 상태
     public Held held(int seatCount) {
         long pid = newPerformance(1, 1, 6);
         return held(pid, db.seatIds(pid).subList(0, seatCount));

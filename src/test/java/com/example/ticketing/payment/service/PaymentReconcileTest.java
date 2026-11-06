@@ -316,7 +316,7 @@ class PaymentReconcileTest {
         return kind == Unsettled.UNKNOWN ? unknownPayment(held) : orphan(held);
     }
 
-    // 승인 요청이 타임아웃으로 끝난 결제(UNKNOWN, 게이트 키는 결제 마감+1분)
+    // 승인 요청이 타임아웃으로 끝난 결제(UNKNOWN)
     private long unknownPayment(Held held) {
         stubPg.approveWith(PgResult.unknown("read timeout 3s"));
         long paymentId = paymentService.pay(command(held)).paymentId();

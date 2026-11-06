@@ -29,7 +29,7 @@ public class TestRedis {
         return redis;
     }
 
-    // 남은 수명(ms). 키가 없으면 -2, 수명이 없으면 -1
+    // 남은 수명(ms). 키가 없으면 -2, 수명이 없으면 -1, 응답이 없으면 -3
     public long pttl(String key) {
         Long ttl = template().getExpire(key, TimeUnit.MILLISECONDS);
         return ttl == null ? -3 : ttl;

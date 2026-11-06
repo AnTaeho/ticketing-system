@@ -10,7 +10,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReferenceArray;
 
-// 동시성 테스트 러너. 모두 출발선에 세운 뒤 한꺼번에 놓고, 시간 안에 끝나는지 보고, 예외는 삼키지 않고 결과로 돌려준다
+// 동시성 테스트 러너. 모두 출발선에 세운 뒤 한꺼번에 놓고, 시간 안에 끝나는지 보고, 예외는 결과에 담아 돌려준다
 public final class Concurrently {
 
     private static final Duration DEFAULT_TIMEOUT = Duration.ofSeconds(60);
@@ -25,7 +25,7 @@ public final class Concurrently {
         this.threads = tasks;
     }
 
-    // 작업 tasks개를 각자 스레드에서 돌린다
+    // 작업마다 스레드 하나씩 돌린다. threads()로 줄일 수 있다
     public static Concurrently of(int tasks) {
         return new Concurrently(tasks);
     }

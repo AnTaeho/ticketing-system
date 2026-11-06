@@ -161,7 +161,7 @@ class PaymentApiControllerTest {
         return key == null ? request : request.header(KEY, key);
     }
 
-    // 1구역 1열 4석 회차에서 앞 2석을 잡은 상태
+    // 구역 하나, 1열 4석인 회차에서 앞 2석을 잡은 상태
     private Held newHold() {
         long pid = fixtures.newPerformance(1, 1, 4);
         return fixtures.held(pid, db.seatIds(pid).subList(0, 2));

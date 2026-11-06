@@ -12,7 +12,7 @@
 
   var state = {
     countdowns: [],   // 오픈을 기다리는 회차의 남은 시간 칸
-    lastReloadAt: 0   // 열릴 시각이 지나 상태를 다시 받은 서버 시각
+    lastReloadAt: 0   // 열릴 시각이 지나 상태를 다시 받은 이 화면의 시각
   };
 
   function action(performance) {

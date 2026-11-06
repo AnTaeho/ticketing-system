@@ -24,7 +24,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
 
-// 부하 테스트와 결제 대사가 기대는 규칙(묘비, 처리 중 취소, 취소 멱등)만 본다. 결론 비율은 FakePgDeciderTest가 본다
+// 결제 대사가 기대는 규칙(묘비, 처리 중 취소, 취소 멱등)만 본다. 결론 비율은 FakePgDeciderTest가 본다
 @IntegrationTest
 @Import(FakePgTestConfig.class)
 class FakePgServiceTest {

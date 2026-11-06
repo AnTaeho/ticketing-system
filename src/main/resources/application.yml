@@ -14,7 +14,7 @@ spring:
   task:
     scheduling:
       pool:
-        size: 2                # 예매 @Scheduled 2개
+        size: 2                # @Scheduled가 둘(선점 만료, 결제 대사)이라 서로 기다리지 않게 한다
 
   data:
     redis:
@@ -40,7 +40,7 @@ ticketing:
     reconcile-scan-ms: 2000
     reconcile-batch-size: 20
   gate:
-    enabled: true              # 게이트를 끄고 DB 판정만으로 잡아 보기
+    enabled: true              # false면 게이트 없이 DB 판정만으로 잡는다
   pg:
     base-url: ""               # 비우면 http://localhost:${local.server.port}/fake-pg
     connect-timeout: 500ms

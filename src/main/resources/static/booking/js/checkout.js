@@ -52,7 +52,7 @@
     stage: 'loading',        // loading → pay → paying → pending / result
     hold: null,
     headerDone: false,
-    deadlineAt: 0,           // 결제 마감의 이 화면 시계 값
+    deadlineAt: 0,           // 자리가 풀리는 시각(performance.now 기준)
     timeUp: false,
     pendingPaymentId: null,
     pendingSince: 0,
@@ -252,7 +252,7 @@
     var left = state.deadlineAt - performance.now();
     var seconds = Math.ceil(left / 1000);
     if (seconds <= 0) {
-      // 결제 요청이 나가 있는 동안에는 서버가 결제 마감으로 바꿨을 수 있어 기다린다
+      // 결제 요청이 나가 있는 동안에는 그 응답이 결과를 정하므로 기다린다
       if (state.stage === 'pay') expire();
       return;
     }

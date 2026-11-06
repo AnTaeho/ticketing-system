@@ -8,7 +8,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.context.annotation.Import;
 import org.springframework.test.context.TestPropertySource;
 
-// 예매 테스트 메타 애너테이션들이 같은 속성을 쓰게 한 곳에 둔다. 테스트 DB·Redis 번호는 환경 변수로 바꿀 수 있고 기본은 ticketing_booking_test·1이다
+// 예매 테스트 메타 애너테이션들이 같은 속성을 쓰게 한 곳에 둔다
 @Target(ElementType.ANNOTATION_TYPE)
 @Retention(RetentionPolicy.RUNTIME)
 @TestPropertySource(properties = {
