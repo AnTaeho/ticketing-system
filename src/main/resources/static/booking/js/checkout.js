@@ -241,7 +241,7 @@
   // 남은 시간은 서버가 준 두 시각의 차이로만 정하고 이 화면의 시계로 줄여 간다
   function startClock() {
     clearTimeout(timers.tick);
-    state.deadlineAt = performance.now() + (bk.epochOf(state.hold.expiresAt) - bk.epochOf(state.hold.serverNow));
+    state.deadlineAt = performance.now() + (bk.epochOf(state.hold.expiresAt) - bk.epochOf(state.hold.dbNow));
     state.timeUp = false;
     paintClock(null);
     tick();

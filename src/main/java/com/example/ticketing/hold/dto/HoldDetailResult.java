@@ -12,14 +12,14 @@ public record HoldDetailResult(
         long performanceId,
         HoldStatus status,
         LocalDateTime expiresAt,
-        LocalDateTime serverNow,
+        LocalDateTime dbNow, // 응답을 만든 DB 시각. 화면은 expiresAt과의 차로 남은 시간을 센다
         List<SeatInfo> seats,
         int totalAmount,
         Long paymentId
 ) {
 
-    public static HoldDetailResult from(SeatHold hold, List<SeatInfo> seats, Long paymentId, LocalDateTime serverNow) {
+    public static HoldDetailResult from(SeatHold hold, List<SeatInfo> seats, Long paymentId, LocalDateTime dbNow) {
         return new HoldDetailResult(hold.getId(), hold.getPerformanceId(), hold.getStatus(), hold.getExpiresAt(),
-                serverNow, List.copyOf(seats), hold.getTotalAmount(), paymentId);
+                dbNow, List.copyOf(seats), hold.getTotalAmount(), paymentId);
     }
 }
