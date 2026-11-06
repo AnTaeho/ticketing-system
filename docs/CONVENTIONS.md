@@ -23,15 +23,15 @@ com.example.ticketing
 | 하위 패키지 | 들어가는 것 | 의존해도 되는 곳 |
 |---|---|---|
 | `controller` | `*Controller`, 컨트롤러 전용 변환기 | 같은 기능의 `service`·`dto`, `common` |
-| `dto` | `*Request`, `*Command`, `*Result`, `*Response`, 흐름 결과 record | 같은 기능의 `domain`, 다른 기능의 `domain` 값·enum, `common` |
+| `dto` | `*Request`, `*Command`, `*Result`, `*Response`, 흐름 결과 record | 같은 기능의 `domain`, 다른 기능의 `domain` 값·enum과 그 기능이 내준 `dto`, `common` |
 | `service` | `*Service`, `*Transaction`, `*Reader`, `*Scheduler` | 같은 기능의 `repository`·`domain`·`dto`·`client`, 다른 기능의 `service`·`dto`, `common` |
 | `repository` | `*Repository`(JPA), `*RedisStore`(Redis) | 같은 기능의 `domain`·`dto`, 다른 기능의 `domain` enum, `common` |
 | `domain` | 엔티티, 상태 enum, 값 record, 순수 규칙 | `common`, 다른 기능의 `domain` 값·enum (엔티티는 제외) |
 | `client` | 외부 시스템 클라이언트와 그 결과 타입 | `common` |
 
 - 다른 기능의 `controller`나 `repository`를 직접 부르지 않는다. 필요하면 그 기능의 `service`를 부른다.
-- 테이블의 쓰기는 그 테이블을 가진 기능만 한다. 다른 기능의 테이블은 자기 `*Repository`의 JPQL에서 그 엔티티로 읽기만 한다.
-- 예외: hold·payment·booking의 `*Transaction`은 한 트랜잭션 안에서 락 순서를 지키려고 좌석·회차·사용자 repository로 직접 행을 잠그고 상태를 바꾼다. 트랜잭션 밖의 조회는 이 예외에 들지 않는다.
+- 테이블의 쓰기는 그 테이블을 가진 기능만 한다. 다른 기능의 테이블은 그 기능의 `*Reader`나 그 기능이 구현한 창구 인터페이스(`PaymentRefunder`)로 읽는다. 의존 방향 때문에 부를 수 없을 때만 자기 `*Repository`의 JPQL로 값을 읽고 이유를 한 줄 적는다(`SeatHoldRepository.findPaymentIdByHoldId`).
+- 예외: hold·payment·booking의 `*Transaction`은 한 트랜잭션 안에서 락 순서를 지키려고 좌석·회차·사용자 repository로 직접 행을 잠그고 상태를 바꾼다. 이 트랜잭션들이 함께 쓰는 결과 조립 도우미(`PaymentReader.resultOf`)도 같다. 트랜잭션 밖의 조회는 이 예외에 들지 않는다.
 - 의존은 한 방향이다: `payment → booking`, `payment·booking → hold → seat → show`. 거꾸로 부르지 않는다.
 - 예매 취소의 PG 환불은 booking이 정한 `PaymentRefunder` 인터페이스를 payment가 구현한다. 의존은 그대로 payment → booking이다.
 - 두 기능이 서로를 부르면(순환) 한쪽으로 몰거나 공통 개념을 `common`으로 뺀다.
@@ -43,15 +43,16 @@ com.example.ticketing
 | `*Controller` | HTTP 요청을 `*Command`로 바꾸고, `*Result`를 내보낸다. 상태 코드를 고른다 | 판정, SQL, Redis |
 | `*Service` | 한 유스케이스의 흐름을 짠다. 트랜잭션을 열지 않는다(관리 API의 단순 생성만 예외). 커밋 뒤 Redis 반영과 외부 호출을 여기서 한다 | SQL |
 | `*Transaction` | 쓰기 트랜잭션 한 단위. 락, 조건부 UPDATE | 외부 호출, Redis |
-| `*Reader` | 읽기 전용 조회와 조립 | 쓰기 |
+| `*Reader` | 읽기 전용 조회와 조립. 다른 기능에 내주는 읽기는 그 기능의 dto로 돌려준다(`PerformanceReader`) | 쓰기 |
 | `*Scheduler` | 주기 실행의 진입점. 대상을 읽거나(SKIP LOCKED면 집고) 건마다 위임하고, 실패를 기록한다. `@Scheduled` 메서드 이름은 `run()`이다. 건마다의 판정이 한 화면에 들면 여기에 둔다 | 트랜잭션, 길어진 판정 |
 | `*Reflector` | 커밋 뒤 Redis 게이트 반영. 게이트 스위치와 반영 실패 기록을 맡는다. 결제 결론이 풀어야 할 키는 `PaymentSettlement.gateToRelease()`가 알려 준다 | DB |
 | `*Repository` | Spring Data JPA. 저장, 파생 메서드·JPQL 조회, `@Lock` 행 잠금·`SKIP LOCKED` 집기, JPQL 조건부 UPDATE | 업무 판정 |
 | `*RedisStore` | Redis 읽기·쓰기와 Lua 실행. Redis 장애는 `RedisUnavailableException`으로 바꿔 던진다 | 장애 정책 |
 | `*Client` | 외부 시스템 호출. 실패를 결과 값으로 돌려준다 | 재시도 정책 |
 
-- 한 테이블 조회는 파생 메서드나 엔티티로 한다. 여러 테이블을 엮는 읽기는 JPQL `select new <Result>(...)` 하나로 받고, 엔티티 연관 없이 `join X x on x.id = a.xId`로 엮는다.
-- 트랜잭션 안의 조회와 행이 많은 조회는 엔티티 대신 스칼라나 `select new` DTO로 받는다.
+- 조회 결과는 엔티티로 받는다. 조건이 단순하면 파생 메서드(정렬이 여럿이면 `Sort` 인자), 아니면 `select x from X x` JPQL이다. `select new`는 쓰지 않는다.
+- 여러 테이블을 한 화면에 보이는 읽기는 테이블마다 ID 목록으로 한 번씩 읽어 Java에서 묶는다. 건마다 읽지 않는다.
+- 스칼라 조회는 엔티티를 영속성 컨텍스트에 먼저 올리면 안 되는 곳(`PaymentRepository.findHoldIdById`)과 줄 세우기용 락(`UserRepository.lockById`)에만 둔다.
 - 행 잠금은 `@Lock(PESSIMISTIC_WRITE)`, `SKIP LOCKED` 집기는 여기에 `jakarta.persistence.lock.timeout=-2` 힌트를 더한다. 개수는 Spring Data `Limit`으로 넘긴다.
 - native SQL은 JPA로 표현할 수 없는 곳(좌석 대량 생성 `SeatBulkInserter`)에만 두고 이유를 한 줄 적는다.
 - 엔티티 PK 컬럼은 다른 테이블이 그 행을 가리킬 때 쓰는 이름(`hold_id`, `payment_id`)으로 짓고, 자바 필드는 `id`로 둔다.
@@ -72,7 +73,7 @@ com.example.ticketing
 | Controller → HTTP | `*Result`를 그대로. 필드 이름만 다르면 `*Result`에 `@JsonProperty`를 달고, 모양이 다를 때만 `*Response` (`from(result)`) | `dto` |
 | `*Transaction` → `*Service` | 결과를 뜻하는 이름의 record (예: `HoldPlacement`, `PaymentSettlement`) | `dto` |
 
-- 엔티티는 `service` 밖으로 나가지 않는다. 엔티티에서 DTO를 만들 때는 `*Result.from(entity)` 한 곳에서만 한다.
+- 엔티티는 `service` 밖으로 나가지 않고, 다른 기능의 service에도 넘기지 않는다. 같은 기능 안의 `*Reader` → `*Service`는 엔티티를 넘겨도 된다. 엔티티에서 DTO를 만들 때는 `*Result.from(entity)` 한 곳에서만 한다.
 - 필드를 옮겨 담기만 하는 record(`*Result`와 같은 모양의 `*Row`·`*Response`)는 두지 않는다.
 - `Map`은 오류 `detail`에만 쓴다. JSON을 문자열 키로 읽고 쓰지 않는다.
 - 같은 값은 같은 이름으로 부른다. (선점 토큰은 어디서나 `holdToken`)
@@ -82,7 +83,7 @@ com.example.ticketing
 - 좌석 배정의 최종 판정은 DB 조건부 UPDATE의 영향 행 수다. Redis는 DB 앞의 게이트다.
 - 같은 트랜잭션에서 잠근 행 하나의 상태 전이는 엔티티의 `출발To도착` 메서드와 변경 감지로 한다. 메서드는 지금 상태가 출발 상태가 아니면 `IllegalStateException`을 던진다. 엔티티에 setter는 없다.
 - 잠그지 않고 경합하는 전이(좌석 잡기, 결과 모름·대사가 겹치는 결제, 가짜 PG의 승인·취소)와 잠근 여러 행을 한꺼번에 바꾸는 전이는 JPQL 조건부 UPDATE의 영향 행 수로 판정한다. 관리 중인 엔티티와 섞이면 `@Modifying(clearAutomatically = true, flushAutomatically = true)`를 단다.
-- 상태에 대한 판정(예: "결제가 아직 열려 있나")은 상태 enum에 둔다.
+- 상태에 대한 판정(예: "결제가 아직 열려 있나")은 상태 enum에 둔다(`PaymentStatus.isOpen()`, 진행 중 선점 `HoldStatus.ACTIVE`).
 - 영향 행 수는 그대로 비교한다(`updated == 1`). 기대와 다르면 업무 실패는 `ApiException`, 락 아래라 어긋날 수 없는 불변식 위반은 `RowCounts.requireExactly`의 `IllegalStateException`이다.
 - 상태를 바꾸는 트랜잭션은 `READ_COMMITTED`다. 락 순서는 users → seat_hold → booking_payment·booking → seat(id 오름차순)이다.
 - `SKIP LOCKED` 집기는 상태 변경과 같은 트랜잭션에서 한다.
@@ -92,6 +93,7 @@ com.example.ticketing
 ## 5. 시간
 
 - 만료·마감 판정은 DB 시각이다. JPQL은 `current_timestamp`(MySQL에서 `current_timestamp(6)`)로 비교한다. `local datetime`은 MySQL에서 초 단위로 잘리므로 쓰지 않는다.
+- 쿼리에 `current_timestamp`를 두는 곳은 대상 행을 고르는 조건(만료 집기, 대사 대상)과 조건부 UPDATE다. 고른 행에 대한 판정(예매 취소 가능, 망취소 시점, 회차 시작)은 `DbClock.now()`로 읽은 시각과 Java에서 비교한다.
 - "지금 + 기간"은 HQL에서 숫자 기간으로 더한다(`current_timestamp + (:nanos) nanosecond`, `timestampadd(second, :n, current_timestamp)`). Hibernate는 `Duration` 파라미터 산술을 받지 않는다.
 - DB 시각을 저장해야 하는 INSERT는 같은 트랜잭션에서 이미 읽은 `DbClock` 값을 넘긴다. 행마다 DB에서 시각을 되읽게 하지 않는다. 결제 생성 시각(`Payment.createdAt`)도 이렇게 넣는다. 남은 감사 컬럼(`@CreatedDate`·`@LastModifiedDate`)은 JVM 시각이라 판정에 쓰지 않는다.
 - 자바에서 판정 시각이 필요하면 `DbClock`에서 받는다. 요청마다 DB를 치지 않으려는 사전 확인(선점 전 오픈 확인)만 주입한 `Clock`으로 거르고, 경계는 트랜잭션 안의 DB 시각이 다시 판정한다. 경과 시간(PG 호출 시간 로그)은 주입한 `LongSupplier` 나노 시계로 잰다. `System.currentTimeMillis()`·`nanoTime()`을 직접 부르지 않는다.
