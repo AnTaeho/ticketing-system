@@ -1,14 +1,12 @@
 package com.example.ticketing.seat.repository;
 
 import com.example.ticketing.seat.domain.HeldSeat;
-import com.example.ticketing.seat.domain.PerformanceInfo;
 import com.example.ticketing.seat.domain.Seat;
-import com.example.ticketing.seat.domain.SeatInfo;
 import com.example.ticketing.seat.domain.SeatMapSeat;
 import jakarta.persistence.LockModeType;
 import java.util.Collection;
 import java.util.List;
-import java.util.Optional;
+import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
@@ -30,19 +28,7 @@ public interface SeatRepository extends JpaRepository<Seat, Long> {
                         @Param("seatIds") Collection<Long> seatIds,
                         @Param("holdId") long holdId);
 
-    // 회차는 show 기능의 테이블이라 읽기만 한다
-    @Query("""
-            select new com.example.ticketing.seat.domain.PerformanceInfo(p.id, p.openAt, p.startsAt)
-              from Performance p
-             where p.id = :performanceId""")
-    Optional<PerformanceInfo> findPerformanceInfo(@Param("performanceId") long performanceId);
-
-    @Query("""
-            select new com.example.ticketing.seat.domain.SeatInfo(s.id, s.section, s.rowNo, s.seatNo, s.grade, s.price)
-              from Seat s
-             where s.performanceId = :performanceId
-             order by s.id""")
-    List<SeatInfo> findSeatInfos(@Param("performanceId") long performanceId);
+    List<Seat> findByPerformanceId(long performanceId, Sort sort);
 
     // 구역 → 열 → 번호 순이다
     @Query("""

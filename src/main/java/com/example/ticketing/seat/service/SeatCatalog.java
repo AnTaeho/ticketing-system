@@ -4,18 +4,24 @@ import com.example.ticketing.common.config.TicketingProperties;
 import com.example.ticketing.common.error.ApiException;
 import com.example.ticketing.common.error.ErrorCode;
 import com.example.ticketing.seat.domain.PerformanceInfo;
+import com.example.ticketing.seat.domain.Seat;
 import com.example.ticketing.seat.domain.SeatInfo;
 import com.example.ticketing.seat.dto.SeatSelection;
 import com.example.ticketing.seat.repository.SeatRepository;
 import com.example.ticketing.show.domain.PerformanceState;
+import com.example.ticketing.show.dto.PerformanceSummary;
+import com.example.ticketing.show.service.PerformanceReader;
 import java.time.LocalDateTime;
 import java.util.Collection;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.TreeSet;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Component;
 
 // 회차 시각과 좌석 위치·가격은 생성 뒤 바뀌지 않으므로 처음 조회 때 한 번 읽어 인스턴스에 둔다
@@ -23,12 +29,15 @@ import org.springframework.stereotype.Component;
 public class SeatCatalog {
 
     private final SeatRepository seatRepository;
+    private final PerformanceReader performanceReader;
     private final int maxSeats;
 
     private final ConcurrentMap<Long, PerformanceInfo> performances = new ConcurrentHashMap<>();
 
-    public SeatCatalog(SeatRepository seatRepository, TicketingProperties properties) {
+    public SeatCatalog(SeatRepository seatRepository, PerformanceReader performanceReader,
+                       TicketingProperties properties) {
         this.seatRepository = seatRepository;
+        this.performanceReader = performanceReader;
         this.maxSeats = properties.hold().maxSeats();
     }
 
@@ -38,10 +47,13 @@ public class SeatCatalog {
         if (cached != null) {
             return cached;
         }
-        PerformanceInfo loaded = seatRepository.findPerformanceInfo(performanceId)
-                .map(info -> info.withSeats(seatRepository.findSeatInfos(performanceId)))
-                .orElseThrow(() -> new ApiException(ErrorCode.PERFORMANCE_NOT_FOUND,
-                        Map.of("performanceId", performanceId)));
+        PerformanceSummary summary = performanceReader.get(performanceId);
+        Map<Long, SeatInfo> seats = new LinkedHashMap<>();
+        for (Seat seat : seatRepository.findByPerformanceId(performanceId, Sort.by("id"))) {
+            seats.put(seat.getId(), seat.info());
+        }
+        PerformanceInfo loaded = new PerformanceInfo(performanceId, summary.openAt(), summary.startsAt(),
+                Collections.unmodifiableMap(seats));
         PerformanceInfo previous = performances.putIfAbsent(performanceId, loaded);
         return previous != null ? previous : loaded;
     }
