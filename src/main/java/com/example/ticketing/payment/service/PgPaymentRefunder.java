@@ -3,6 +3,8 @@ package com.example.ticketing.payment.service;
 import com.example.ticketing.booking.service.PaymentRefunder;
 import com.example.ticketing.payment.client.PgClient;
 import com.example.ticketing.payment.client.PgResult;
+import com.example.ticketing.payment.domain.Payment;
+import com.example.ticketing.payment.domain.PaymentStatus;
 import com.example.ticketing.payment.repository.PaymentRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -19,9 +21,13 @@ public class PgPaymentRefunder implements PaymentRefunder {
     private final PaymentTransaction paymentTransaction;
 
     @Override
+    public boolean isRefunded(long paymentId) {
+        return getPayment(paymentId).getStatus() == PaymentStatus.CANCELLED;
+    }
+
+    @Override
     public boolean refund(long paymentId) {
-        String orderId = paymentRepository.findOrderIdById(paymentId)
-                .orElseThrow(() -> new IllegalStateException("결제 " + paymentId + "가 없다"));
+        String orderId = getPayment(paymentId).getOrderId();
         PgResult result = pgClient.cancel(orderId);
         switch (result.status()) {
             case CANCELLED, DECLINED -> {
@@ -34,5 +40,10 @@ public class PgPaymentRefunder implements PaymentRefunder {
                 return false;
             }
         }
+    }
+
+    private Payment getPayment(long paymentId) {
+        return paymentRepository.findById(paymentId)
+                .orElseThrow(() -> new IllegalStateException("결제 " + paymentId + "가 없다"));
     }
 }

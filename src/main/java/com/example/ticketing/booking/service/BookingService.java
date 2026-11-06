@@ -1,8 +1,8 @@
 package com.example.ticketing.booking.service;
 
+import com.example.ticketing.booking.domain.Booking;
 import com.example.ticketing.booking.domain.BookingStatus;
 import com.example.ticketing.booking.dto.CancelResult;
-import com.example.ticketing.booking.dto.CancelTarget;
 import com.example.ticketing.common.error.ApiException;
 import com.example.ticketing.common.error.ErrorCode;
 import com.example.ticketing.hold.service.SeatGateReflector;
@@ -22,15 +22,15 @@ public class BookingService {
 
     // PG 환불을 먼저 한다. 환불만 끝나고 DB 변경이 실패해도 다시 누르면 환불된 결제는 PG와 시작 확인 없이 DB만 바꿔 끝난다
     public CancelResult cancel(long userId, long bookingId) {
-        CancelTarget target = bookingReader.findCancelTarget(userId, bookingId);
-        if (target.status() == BookingStatus.CANCELLED) {
+        Booking booking = bookingReader.getBooking(userId, bookingId);
+        if (booking.getStatus() == BookingStatus.CANCELLED) {
             return new CancelResult(bookingId, BookingStatus.CANCELLED);
         }
-        if (!target.paymentRefunded()) {
-            if (!target.notStarted()) {
+        if (!paymentRefunder.isRefunded(booking.getPaymentId())) {
+            if (bookingReader.hasStarted(booking.getPerformanceId())) {
                 throw new ApiException(ErrorCode.CANCEL_NOT_ALLOWED, Map.of("bookingId", bookingId));
             }
-            if (!paymentRefunder.refund(target.paymentId())) {
+            if (!paymentRefunder.refund(booking.getPaymentId())) {
                 throw new ApiException(ErrorCode.REFUND_FAILED, Map.of("bookingId", bookingId));
             }
         }

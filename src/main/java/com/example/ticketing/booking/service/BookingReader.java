@@ -7,7 +7,6 @@ import static java.util.stream.Collectors.toList;
 import com.example.ticketing.booking.domain.Booking;
 import com.example.ticketing.booking.dto.BookingResult;
 import com.example.ticketing.booking.dto.BookingSeatResult;
-import com.example.ticketing.booking.dto.CancelTarget;
 import com.example.ticketing.booking.repository.BookingRepository;
 import com.example.ticketing.booking.repository.BookingSeatRepository;
 import com.example.ticketing.common.error.ApiException;
@@ -47,9 +46,9 @@ public class BookingReader {
         return resultsOf(List.of(getBooking(userId, bookingId))).get(0);
     }
 
-    public CancelTarget findCancelTarget(long userId, long bookingId) {
-        return bookingRepository.findCancelTarget(userId, bookingId)
-                .orElseThrow(() -> new ApiException(ErrorCode.BOOKING_NOT_FOUND, Map.of("bookingId", bookingId)));
+    // 시작 시각은 카탈로그 캐시를 쓰지 않고 늘 DB에서 새로 읽는다
+    public boolean hasStarted(long performanceId) {
+        return performanceReader.get(performanceId).hasStartedAt(dbClock.now());
     }
 
     private List<BookingResult> resultsOf(List<Booking> bookings) {
