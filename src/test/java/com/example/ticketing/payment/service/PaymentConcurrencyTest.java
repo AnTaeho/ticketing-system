@@ -153,7 +153,7 @@ class PaymentConcurrencyTest {
         boolean bothWaiting;
         Results<PaymentResult> results;
 
-        // 두 hold 행을 잠가 두 요청이 1단계(멱등키 조회)를 모두 지난 뒤 hold 락에서 기다리게 한다
+        // 두 hold 행을 잠가 두 요청이 멱등키 조회를 지난 뒤 hold 락에서 기다리게 한다
         try (Running<Void> blocker = Concurrently.of(1).within(Duration.ofSeconds(30)).start(i -> {
             new TransactionTemplate(transactionManager).executeWithoutResult(s -> {
                 jdbcTemplate.queryForList("SELECT hold_id FROM seat_hold WHERE hold_id IN (?, ?) ORDER BY hold_id FOR UPDATE",

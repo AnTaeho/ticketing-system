@@ -1,10 +1,10 @@
-// 예매 화면 공통 부품: 요소 만들기, 머리·문서 제목, 하단 띠 높이, 상태 상자, 확인 단계, 사실 목록
+// 예매 화면들이 함께 쓰는 화면 부품. api.js가 만든 window.bk에 붙이므로 api.js 뒤에 싣는다
 (function () {
   'use strict';
 
   var SITE_NAME = '티켓 예매';
 
-  // 글은 textContent로만 넣는다
+  // 글은 textContent로만 넣어 서버가 준 글이 HTML로 읽히지 않게 한다
   function el(tag, attrs) {
     var node = document.createElement(tag);
     if (attrs) {
@@ -33,7 +33,7 @@
     if (back && backHref) back.setAttribute('href', backHref);
   }
 
-  // 「제목 · 사이트 이름」. 사이트 이름 대신 덧붙일 말을 줄 수 있다
+  // 「제목 · 사이트 이름」. tail을 주면 사이트 이름 자리에 쓴다
   function setTitle(title, tail) {
     document.title = title + ' · ' + (tail || SITE_NAME);
   }

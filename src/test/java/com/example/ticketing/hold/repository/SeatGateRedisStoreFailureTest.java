@@ -15,7 +15,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataAccessException;
 
-// 닫힌 포트로 만든 예매 연결로 Redis 장애를 재현한다
+// 닫힌 포트에 붙인 Redis 연결로 장애를 재현한다
 @IntegrationTest
 class SeatGateRedisStoreFailureTest {
 

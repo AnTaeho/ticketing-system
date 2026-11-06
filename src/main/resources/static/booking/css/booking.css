@@ -1,4 +1,4 @@
-/* 예매 화면 공통: 토큰, 머리, 단추, 알림, 상태 패널, 사실 목록, 확인 단계. 한 화면만 쓰는 모양은 그 화면 이름의 CSS에 둔다 */
+/* 예매 화면 공통 모양과 토큰. 한 화면만 쓰는 모양은 그 화면 이름의 CSS에 둔다 */
 :root{
   --bg:#f4f4f1; --surface:#fff; --line:#e2e2dd; --line-strong:#cfcfc8;
   --text:#1c1c1a; --muted:#6a6a64; --faint:#9a9a92;
@@ -47,7 +47,7 @@ a{color:inherit}
 .btn-primary:hover{background:var(--accent-ink)}
 .btn-ghost{background:var(--surface);border:1px solid var(--line-strong);color:var(--text);font-weight:600}
 .btn-ghost:hover{background:var(--bg)}
-/* 꺼진 단추는 회색이다. 요청을 기다리는 주 단추만 파란 채로 흐리게 둔다(끝남 is-off, 고른 것 없음 is-empty는 회색) */
+/* 꺼진 단추는 회색이다. 요청을 기다리는 주 단추만 파란 채로 흐리게 둔다(is-off·is-empty는 회색) */
 .btn:disabled,.btn.is-off{background:var(--off-soft);border:1px solid var(--off-soft);color:var(--muted);font-weight:600;cursor:default}
 .btn-primary:disabled:not(.is-off):not(.is-empty){opacity:.7;background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
 

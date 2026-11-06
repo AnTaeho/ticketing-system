@@ -114,7 +114,7 @@ class HttpPgClientTest {
         return TestProperties.from(properties).pgBaseUrl(baseUrl).build();
     }
 
-    // 서버 쪽 지연(slow-delay-ms)이 끝나 행이 확정될 때까지 기다려 다음 테스트에 섞이지 않게 한다
+    // 서버 쪽 지연(slow-delay)이 끝나 행이 확정될 때까지 기다려 다음 테스트에 섞이지 않게 한다
     private PgResult awaitSettled(String orderId) {
         return Await.until(properties.fakePg().slowDelay().plusSeconds(5), Duration.ofMillis(100),
                 () -> pgClient.query(orderId), r -> r.status() != PgStatus.PROCESSING);

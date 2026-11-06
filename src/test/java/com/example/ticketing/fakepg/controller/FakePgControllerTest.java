@@ -18,7 +18,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 
-// 부하 테스트와 결제 대사가 기대는 오래된 PROCESSING 처리만 HTTP로 본다. 나머지 규칙은 FakePgServiceTest가 본다
+// 결제 대사가 기대는 오래된 PROCESSING 처리만 HTTP로 본다. 나머지 규칙은 FakePgServiceTest가 본다
 @IntegrationTest
 class FakePgControllerTest {
 

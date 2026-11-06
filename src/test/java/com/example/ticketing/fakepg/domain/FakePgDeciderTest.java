@@ -32,7 +32,7 @@ class FakePgDeciderTest {
     @Test
     @DisplayName("시나리오가 없으면 난수가 decline-rate·slow-rate 경계 아래일 때만 거절·느린 응답이 된다")
     void boundaries() {
-        // 순서: 거절 판정, 느림 판정
+        // plan 한 번이 거절 판정, 느림 판정 순으로 난수를 하나씩 쓴다
         FakePgDecider decider = new FakePgDecider(CONFIG, new ScriptedRandom(
                 0.0999, 0.0499,
                 0.1, 0.05,

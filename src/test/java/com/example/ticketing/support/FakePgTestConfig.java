@@ -10,7 +10,7 @@ import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
 
-// SLOW 시나리오를 5초 기다리지 않고 테스트가 PROCESSING 구간을 열고 닫는다
+// SLOW 시나리오의 지연을 테스트가 열고 닫아 PROCESSING 구간을 원하는 만큼 둔다
 @TestConfiguration(proxyBeanMethods = false)
 public class FakePgTestConfig {
 

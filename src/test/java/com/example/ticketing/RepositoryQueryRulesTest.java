@@ -20,7 +20,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 
-// JPQL은 enum 이름이 있는지만 기동 때 검사하므로, 상태 목록이 enum 규칙과 같은지와 조건부 UPDATE 옵션은 여기서 묶는다
+// JPQL은 enum 이름이 있는지만 기동 때 검사하므로, 상태 목록이 enum 규칙과 같은지와 조건부 UPDATE 옵션은 여기서 검사한다
 class RepositoryQueryRulesTest {
 
     private static final Pattern IN_LIST = Pattern.compile("status\\s+(?i:in)\\s*\\(([^)]*)\\)");

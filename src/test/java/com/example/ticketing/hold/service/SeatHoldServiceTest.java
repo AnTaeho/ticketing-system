@@ -114,7 +114,7 @@ class SeatHoldServiceTest {
         CreateHoldResult holdA = seatHoldService.hold(
                 new CreateHoldCommand(userA, pid, target));
         db.expireHold(holdA.holdId());
-        // 게이트 키는 선점과 같은 TTL이라 기한이 지나면 함께 사라진다. DB 시각만 당겼으므로 키도 지운다
+        // 게이트 키는 선점과 같은 TTL이라 기한이 지나면 함께 사라진다. DB의 만료 시각만 당겼으므로 키도 지운다
         testRedis.clean(pid);
 
         assertThatThrownBy(() -> seatHoldService.hold(new CreateHoldCommand(userB, pid, target)))

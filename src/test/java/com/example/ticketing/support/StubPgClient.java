@@ -11,7 +11,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
-// HTTP 없이 PG 결과를 정하는 대역. 컨텍스트가 공유되므로 테스트마다 reset()한다
+// HTTP 없이 PG 결과를 정하는 대역. 컨텍스트가 공유되므로 TestCleanup이 테스트마다 reset()한다
 public class StubPgClient implements PgClient {
 
     private final AtomicInteger approveCalls = new AtomicInteger();
