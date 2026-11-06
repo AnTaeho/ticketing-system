@@ -1,6 +1,8 @@
 package com.example.ticketing.booking.dto;
 
+import com.example.ticketing.booking.domain.Booking;
 import com.example.ticketing.booking.domain.BookingStatus;
+import com.example.ticketing.show.dto.PerformanceSummary;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -19,16 +21,11 @@ public record BookingResult(
         boolean cancellable
 ) {
 
-    // BookingRepository의 JPQL이 부른다. 좌석은 withSeats로 붙인다
-    public BookingResult(long bookingId, String bookingNumber, BookingStatus status, LocalDateTime createdAt,
-                         LocalDateTime cancelledAt, int totalAmount, String showTitle, String venueName,
-                         LocalDateTime startsAt, boolean notStarted) {
-        this(bookingId, bookingNumber, status, createdAt, cancelledAt, totalAmount, showTitle, venueName, startsAt,
-                List.of(), status == BookingStatus.CONFIRMED && notStarted);
-    }
-
-    public BookingResult withSeats(List<BookingSeatResult> seats) {
-        return new BookingResult(bookingId, bookingNumber, status, createdAt, cancelledAt, totalAmount, showTitle,
-                venueName, startsAt, List.copyOf(seats), cancellable);
+    public static BookingResult from(Booking booking, PerformanceSummary performance, List<BookingSeatResult> seats,
+                                     LocalDateTime dbNow) {
+        return new BookingResult(booking.getId(), booking.getBookingNumber(), booking.getStatus(),
+                booking.getCreatedAt(), booking.getCancelledAt(), booking.getTotalAmount(), performance.showTitle(),
+                performance.venueName(), performance.startsAt(), List.copyOf(seats),
+                booking.getStatus() == BookingStatus.CONFIRMED && !performance.hasStartedAt(dbNow));
     }
 }
