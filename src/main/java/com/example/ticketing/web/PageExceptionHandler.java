@@ -10,7 +10,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.servlet.ModelAndView;
 
-// 화면 경로의 오류는 JSON 대신 화면으로 답한다. 맡을 화면 컨트롤러를 타입으로 정한다
+// 화면 경로의 오류는 오류 화면으로 답한다. 맡을 화면 컨트롤러를 타입으로 정한다
 @Slf4j
 @Order(Ordered.HIGHEST_PRECEDENCE)
 @ControllerAdvice(assignableTypes = {PageController.class})

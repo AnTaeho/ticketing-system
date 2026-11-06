@@ -21,7 +21,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
-// 예매 목록은 예매·회차·공연·좌석 사본을 한 번씩 읽어 묶는다. 예매마다 읽지 않는다
+// 예매 목록은 예매·회차·공연·좌석 사본을 테이블마다 한 번씩 읽어 묶는다
 @Component
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
@@ -46,7 +46,7 @@ public class BookingReader {
         return resultsOf(List.of(getBooking(userId, bookingId))).get(0);
     }
 
-    // 시작 시각은 카탈로그 캐시를 쓰지 않고 늘 DB에서 새로 읽는다
+    // 취소 가능 판정이라 시작 시각을 매번 DB에서 읽는다
     public boolean hasStarted(long performanceId) {
         return performanceReader.get(performanceId).hasStartedAt(dbClock.now());
     }

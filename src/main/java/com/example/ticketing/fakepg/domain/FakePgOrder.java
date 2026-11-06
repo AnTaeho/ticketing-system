@@ -35,7 +35,7 @@ public class FakePgOrder {
     @Column(name = "pg_tx_id", length = 64)
     private String pgTxId;
 
-    // 오래된 PROCESSING 판정이 DB 시각과 비교하므로 서버 시계가 아닌 DB 시각으로 넣는다
+    // 오래된 PROCESSING 판정이 DB 시각과 비교하므로 DB 시각으로 넣는다
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 

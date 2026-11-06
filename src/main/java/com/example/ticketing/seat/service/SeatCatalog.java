@@ -86,7 +86,7 @@ public class SeatCatalog {
         return new SeatSelection(performanceId, List.copyOf(sorted), seats, totalAmount);
     }
 
-    // 지금 이 hold를 가리키는 좌석(HELD·SOLD). 풀린 좌석은 빠진다. DB에서 읽는다
+    // 지금 이 hold를 가리키는 좌석(HELD·SOLD)이다. 좌석 상태는 바뀌므로 매번 DB에서 읽는다
     public List<SeatInfo> seatsOfHold(long holdId) {
         return seatRepository.findByHoldIdOrderById(holdId).stream().map(Seat::info).toList();
     }

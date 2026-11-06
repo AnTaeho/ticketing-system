@@ -14,9 +14,9 @@ import org.springframework.data.repository.query.Param;
 
 public interface SeatRepository extends JpaRepository<Seat, Long> {
 
-    // 좌석을 잠그지 않고 다투는 전이는 조건부 UPDATE의 영향 행 수로 판정한다. 모두 flush·clear해 1차 캐시가 바뀌기 전 값으로 남지 않게 한다
+    // bulk UPDATE는 모두 flush·clear해 1차 캐시에 바뀌기 전 값이 남지 않게 한다
 
-    // 빈자리만 잡는다. 영향 행 수가 고른 좌석 수와 다르면 호출자가 롤백한다
+    // 잠그지 않고 빈자리만 잡는다. 영향 행 수가 고른 좌석 수와 다르면 호출자가 롤백한다
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("""
             update Seat s set s.status = HELD, s.holdId = :holdId
@@ -46,7 +46,6 @@ public interface SeatRepository extends JpaRepository<Seat, Long> {
     @Query("update Seat s set s.status = SOLD where s.holdId = :holdId and s.status = HELD")
     int heldToSold(@Param("holdId") long holdId);
 
-    // 이 hold가 쥔 HELD 좌석만 푼다
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("""
             update Seat s set s.status = AVAILABLE, s.holdId = null

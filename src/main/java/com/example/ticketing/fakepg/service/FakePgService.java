@@ -17,7 +17,7 @@ import org.springframework.stereotype.Service;
 @Service
 public class FakePgService {
 
-    // 상태는 앞으로만 가므로(없음 → PROCESSING/CANCELLED, APPROVED → CANCELLED) 세 번이면 결론이 난다
+    // 상태는 앞으로만 바뀌므로 세 번 안에 결론이 난다
     private static final int MAX_CANCEL_ATTEMPTS = 3;
     private static final String PG_TX_ID_PREFIX = "fpg_";
     // 가장 느린 응답보다 이만큼 더 PROCESSING이면 승인 시간 초과로 거절한다
@@ -63,7 +63,7 @@ public class FakePgService {
         return findSettlingStale(orderId).map(FakePgReply::of).orElseGet(() -> FakePgReply.notFound(orderId));
     }
 
-    // PROCESSING이면 바꾸지 않고 PROCESSING을 돌려준다(HTTP 409)
+    // PROCESSING인 주문은 그대로 두고 PROCESSING을 돌려준다. 컨트롤러가 409로 답한다
     public FakePgReply cancel(String orderId) {
         for (int attempt = 0; attempt < MAX_CANCEL_ATTEMPTS; attempt++) {
             Optional<FakePgOrder> row = findSettlingStale(orderId);
@@ -88,7 +88,7 @@ public class FakePgService {
         throw new IllegalStateException("Fake PG 취소가 결론을 내지 못했다: " + orderId);
     }
 
-    // 가장 느린 승인보다도 오래 PROCESSING이면 승인 시간 초과로 거절을 확정한 뒤 규칙을 적용한다
+    // 가장 느린 승인보다 오래 PROCESSING인 행은 승인 시간 초과로 보고 거절로 바꾼 뒤 돌려준다
     private Optional<FakePgOrder> findSettlingStale(String orderId) {
         Optional<FakePgOrder> row = repository.findById(orderId);
         if (row.isEmpty() || row.get().getStatus() != FakePgStatus.PROCESSING) {
@@ -98,7 +98,7 @@ public class FakePgService {
         return updated == 1 ? repository.findById(orderId) : row;
     }
 
-    // 끊겨도 PROCESSING에 묶이지 않게 결과는 쓰고 끊김 표시만 되살린다
+    // 인터럽트돼도 행이 PROCESSING에 묶이지 않게 결과는 쓰고 인터럽트 표시만 되살린다
     private void pause(long delayMs) {
         if (delayMs <= 0) {
             return;

@@ -35,7 +35,7 @@ public class SeatGateRedisStore {
         return Optional.of(RedisKeys.seatIdOf(String.valueOf(reply.get(1))));
     }
 
-    // 값이 holdToken인 좌석 키만 지운다. 그냥 DEL하면 그새 남이 잡은 키를 지운다. 반환: 지운 키 수
+    // 값이 holdToken인 좌석 키만 지우고 지운 키 수를 돌려준다. 그냥 DEL하면 그새 남이 잡은 키를 지운다
     public long release(GateHold hold) {
         Long removed = RedisFailures.translate(
                 () -> redis.execute(RedisScripts.DELETE_IF_EQUALS, seatKeys(hold), hold.holdToken()));

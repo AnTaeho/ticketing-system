@@ -56,7 +56,7 @@ public class SeatHoldTransaction {
         }
 
         LocalDateTime now = dbClock.now();
-        // 서비스의 사전 확인은 DB 시각 추정값이라 오픈 경계에서 어긋날 수 있어 실제 DB 시각으로 다시 판정한다
+        // 서비스의 사전 확인은 서버 시계라 오픈 경계에서 어긋날 수 있어 DB 시각으로 다시 판정한다
         seatCatalog.requireOpen(performanceId, now);
         LocalDateTime expiresAt = now.plus(holdTtl);
 
@@ -69,7 +69,7 @@ public class SeatHoldTransaction {
         return new HoldPlacement(hold.getId(), expiresAt);
     }
 
-    // 게이트 키를 지울 좌석 ID는 좌석을 풀기 전에 읽어 둔다. 반환은 커밋 뒤 지울 게이트 키다
+    // 커밋 뒤 지울 게이트 키를 돌려준다
     public GateHold heldToReleased(long userId, long holdId) {
         SeatHold hold = seatHoldRepository.lockByIdAndUserId(holdId, userId)
                 .orElseThrow(() -> new ApiException(ErrorCode.HOLD_NOT_FOUND, Map.of("holdId", holdId)));
@@ -78,7 +78,7 @@ public class SeatHoldTransaction {
                     Map.of("holdId", holdId, "status", hold.getStatus().name()));
         }
         hold.heldToReleased();
-        // 좌석은 잠그지 않으므로 hold_id 조건부 UPDATE로 푼다
+        // 좌석 ID는 풀기 전에 읽어 둔다. 좌석은 잠그지 않으므로 hold_id 조건부 UPDATE로 푼다
         List<Long> seatIds = seatRepository.findByHoldIdAndStatusOrderById(holdId, SeatStatus.HELD).stream()
                 .map(Seat::getId).toList();
         seatRepository.heldToAvailable(holdId);

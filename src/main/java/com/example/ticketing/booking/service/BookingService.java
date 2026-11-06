@@ -20,7 +20,7 @@ public class BookingService {
     private final BookingTransaction bookingTransaction;
     private final SeatGateReflector gate;
 
-    // PG 환불을 먼저 한다. 환불만 끝나고 DB 변경이 실패해도 다시 누르면 환불된 결제는 PG와 시작 확인 없이 DB만 바꿔 끝난다
+    // PG 환불을 먼저 한다. 환불 뒤 DB 변경이 실패하면 다시 눌렀을 때 PG·시작 확인 없이 DB만 바꾼다
     public CancelResult cancel(long userId, long bookingId) {
         Booking booking = bookingReader.getBooking(userId, bookingId);
         if (booking.getStatus() == BookingStatus.CANCELLED) {

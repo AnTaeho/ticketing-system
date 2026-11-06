@@ -20,7 +20,8 @@ import org.hibernate.type.SqlTypes;
 import org.springframework.data.annotation.LastModifiedDate;
 import org.springframework.data.jpa.domain.support.AuditingEntityListener;
 
-// 상태 전이 메서드는 hold와 이 결제 행을 비관적 락으로 잠근 트랜잭션에서만 부른다. 잠그지 않고 다투는 전이(결과 모름, 대사 일정)는 PaymentRepository의 조건부 UPDATE다
+// 상태 전이 메서드는 hold와 이 결제 행을 비관적 락으로 잠근 트랜잭션에서만 부른다
+// 잠그지 않고 다투는 전이(결과 모름, 대사 일정)는 PaymentRepository의 조건부 UPDATE다
 @Entity
 @Getter
 @EntityListeners(AuditingEntityListener.class)
@@ -69,11 +70,11 @@ public class Payment {
     @Column(name = "last_error", length = MAX_LAST_ERROR)
     private String lastError;
 
-    // 대사 대상 시각. 최종 상태가 되면 NULL
+    // 대사가 다시 확인할 시각이다. 결론이 나면 NULL이다
     @Column(name = "next_check_at")
     private LocalDateTime nextCheckAt;
 
-    // 호출자가 같은 트랜잭션에서 읽은 DB 시각을 넣는다. 대사의 망취소 판정이 DB 시각과 비교하므로 JVM 시계를 쓰면 어긋난다
+    // 호출자가 같은 트랜잭션에서 읽은 DB 시각을 넣는다. 대사의 망취소 판정이 이 값을 DB 시각과 비교한다
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 

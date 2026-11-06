@@ -42,7 +42,7 @@ public class SeatMapReader {
             lastRow.seats().add(new SeatCell(seat.getId(), seat.getSeatNo(), seat.getGrade().name(), seat.getPrice(),
                     SeatMapResult.code(seat.getStatus())));
         }
-        // 화면이 같은 응답인지 가리는 값이라 DB 시각을 읽지 않고 서버 시계로 충분하다
+        // 화면이 같은 응답인지 가리는 값이라 서버 시계로 충분하다
         return new SeatMapResult(performanceId, clock.millis(), sections);
     }
 }

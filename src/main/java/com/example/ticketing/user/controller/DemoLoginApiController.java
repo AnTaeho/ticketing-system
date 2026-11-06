@@ -18,7 +18,7 @@ public class DemoLoginApiController {
 
     private final DemoLoginService demoLoginService;
 
-    // 닉네임 검사는 앞뒤 공백을 지운 뒤 글자 수로 해야 해서 Bean Validation 대신 서비스가 한다
+    // 닉네임은 앞뒤 공백을 지운 뒤 글자 수로 검사해야 해서 서비스가 검사한다
     @PostMapping("/api/demo/login")
     public ResponseEntity<DemoLoginResult> login(@RequestBody DemoLoginRequest request) {
         DemoLoginResult result = demoLoginService.login(request.nickname());

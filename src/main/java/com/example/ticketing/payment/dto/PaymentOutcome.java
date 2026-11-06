@@ -2,7 +2,7 @@ package com.example.ticketing.payment.dto;
 
 import com.example.ticketing.payment.domain.PaymentStatus;
 
-// 결제·hold 상태 조합을 사용자에게 돌려줄 결과 하나로 줄인다
+// 결제 상태를 사용자에게 돌려줄 결과로 바꾼다
 public enum PaymentOutcome {
     PROCESSING,
     UNKNOWN,

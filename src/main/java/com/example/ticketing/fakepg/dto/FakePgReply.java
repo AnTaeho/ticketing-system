@@ -19,7 +19,7 @@ public record FakePgReply(String orderId, String status, String pgTxId, String r
         return new FakePgReply(orderId, status.name(), pgTxId, null);
     }
 
-    // 취소된 주문에 승인이 다시 오면 돈을 빼지 않고 거절로 답한다
+    // 취소된 주문에 다시 온 승인은 거절로 답한다. 돈은 빠지지 않는다
     public static FakePgReply toRepeatedApprove(FakePgOrder tx) {
         if (tx.getStatus() == FakePgStatus.CANCELLED) {
             return new FakePgReply(tx.getOrderId(), FakePgStatus.DECLINED.name(), null, FakePgStatus.CANCELLED.name());

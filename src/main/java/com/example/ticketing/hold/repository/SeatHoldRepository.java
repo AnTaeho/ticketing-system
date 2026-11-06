@@ -19,7 +19,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 public interface SeatHoldRepository extends JpaRepository<SeatHold, Long> {
 
-    // bulk UPDATE는 모두 flush·clear한다. 같은 트랜잭션에서 뒤이어 읽는 엔티티가 바뀌기 전 값으로 남지 않게
+    // bulk UPDATE는 모두 flush·clear해 뒤이어 읽는 엔티티에 바뀌기 전 값이 남지 않게 한다
 
     Optional<SeatHold> findByIdAndUserId(long id, long userId);
 
@@ -29,7 +29,7 @@ public interface SeatHoldRepository extends JpaRepository<SeatHold, Long> {
     Optional<SeatHold> findFirstByUserIdAndPerformanceIdAndStatusInOrderByIdDesc(long userId, long performanceId,
                                                                                  Collection<HoldStatus> statuses);
 
-    // 결제 테이블은 읽기만 한다. 결제 기능이 hold 기능을 부르므로 결제 서비스를 부르면 순환이 된다
+    // 결제 테이블은 읽기만 한다. 결제 기능이 hold 기능을 부르므로 결제 쪽 Reader를 부르면 순환이 된다
     @Query("select p.id from Payment p where p.holdId = :holdId")
     Optional<Long> findPaymentIdByHoldId(@Param("holdId") long holdId);
 
@@ -41,7 +41,8 @@ public interface SeatHoldRepository extends JpaRepository<SeatHold, Long> {
     @Query("select h from SeatHold h where h.id = :id")
     Optional<SeatHold> lockById(@Param("id") long id);
 
-    // 잠금 시간 -2는 Hibernate에서 FOR UPDATE SKIP LOCKED다. 트랜잭션 밖에서는 락이 바로 풀려 의미가 없으므로 상태 변경과 같은 트랜잭션에서만 부른다
+    // 잠금 시간 -2는 Hibernate에서 FOR UPDATE SKIP LOCKED다
+    // 트랜잭션이 끝나면 락이 풀리므로 상태 변경과 같은 트랜잭션에서만 부른다
     @Transactional(propagation = Propagation.MANDATORY)
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @QueryHints(@QueryHint(name = "jakarta.persistence.lock.timeout", value = "-2"))
@@ -51,7 +52,7 @@ public interface SeatHoldRepository extends JpaRepository<SeatHold, Long> {
              order by h.id""")
     List<SeatHold> claimExpired(Limit limit);
 
-    // claimExpired로 잠근 hold를 한 문장으로 만료한다. 결제 중(PAYING)은 대상이 아니다. 결제 대사가 결론을 낸다
+    // claimExpired로 잠근 hold를 한 문장으로 만료한다. 결제 중(PAYING)은 결제 대사가 결론을 내므로 대상이 아니다
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("""
             update SeatHold h set h.status = EXPIRED, h.updatedAt = current_timestamp

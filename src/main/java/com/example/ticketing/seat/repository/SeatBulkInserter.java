@@ -9,7 +9,8 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
-// 좌석 키가 IDENTITY라 Hibernate는 INSERT를 배치로 묶지 못해 native로 남긴다. JDBC URL 옵션(rewriteBatchedStatements)에 기대지 않고 다중 VALUES 문장을 직접 만든다
+// 좌석 키가 IDENTITY라 Hibernate가 INSERT를 배치로 묶지 못해 native로 남긴다
+// JDBC URL 옵션(rewriteBatchedStatements) 없이도 묶이도록 다중 VALUES 문장을 직접 만든다
 @Component
 @RequiredArgsConstructor
 public class SeatBulkInserter {

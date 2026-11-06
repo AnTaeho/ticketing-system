@@ -16,7 +16,8 @@ import lombok.NoArgsConstructor;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
-// 상태 전이 메서드는 이 좌석 행을 비관적 락으로 잠근 트랜잭션에서만 부른다. 잡기·풀기와 결제 확정의 좌석 여러 개는 SeatRepository의 UPDATE 한 문장이다
+// 상태 전이 메서드는 이 좌석 행을 비관적 락으로 잠근 트랜잭션에서만 부른다
+// 잡기·풀기와 결제 확정처럼 좌석 여러 개를 바꾸는 전이는 SeatRepository의 UPDATE 한 문장이다
 @Entity
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
@@ -46,7 +47,6 @@ public class Seat {
     @Column(name = "seat_no", nullable = false)
     private int seatNo;
 
-    // 설계 DDL대로 MySQL enum 타입 대신 varchar(10)으로 만든다
     @Enumerated(EnumType.STRING)
     @JdbcTypeCode(SqlTypes.VARCHAR)
     @Column(nullable = false, length = 10)

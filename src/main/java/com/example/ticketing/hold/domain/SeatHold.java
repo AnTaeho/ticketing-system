@@ -21,7 +21,8 @@ import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.annotation.LastModifiedDate;
 import org.springframework.data.jpa.domain.support.AuditingEntityListener;
 
-// 상태 전이 메서드는 이 행을 비관적 락으로 잠근 트랜잭션에서만 부른다. 잠그지 않는 만료는 SeatHoldRepository의 조건부 UPDATE다
+// 상태 전이 메서드는 이 행을 비관적 락으로 잠근 트랜잭션에서만 부른다
+// 여러 행을 한 번에 바꾸는 만료는 SeatHoldRepository의 조건부 UPDATE다
 @Entity
 @Getter
 @EntityListeners(AuditingEntityListener.class)
@@ -45,7 +46,8 @@ public class SeatHold {
     @Column(name = "user_id", nullable = false)
     private Long userId;
 
-    // MySQL 방언은 길이 있는 CHAR를 varchar로 만들어 char(36)을 직접 적는다. length가 없으면 update가 기본 길이 255와 비교해 매번 ALTER한다
+    // MySQL 방언은 길이 있는 CHAR를 varchar로 만들어 char(36)을 직접 적는다
+    // length가 없으면 스키마 update가 기본 길이 255와 비교해 매번 ALTER한다
     @Column(name = "hold_token", nullable = false, length = 36, columnDefinition = "char(36)")
     private String holdToken;
 
@@ -84,7 +86,6 @@ public class SeatHold {
         return hold;
     }
 
-    // 만료 판정은 DB 시각으로 한다
     public boolean isExpiredAt(LocalDateTime dbNow) {
         return !expiresAt.isAfter(dbNow);
     }
@@ -104,7 +105,7 @@ public class SeatHold {
         moveTo(HoldStatus.PAYING, HoldStatus.CONFIRMED);
     }
 
-    // PG 거절·망취소 확정 때만 부른다. 사용자 취소(HELD → RELEASED)는 heldToReleased
+    // PG 거절·망취소 확정 때만 부른다. 사용자 취소는 heldToReleased다
     public void payingToReleased() {
         moveTo(HoldStatus.PAYING, HoldStatus.RELEASED);
     }

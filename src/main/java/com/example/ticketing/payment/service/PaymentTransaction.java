@@ -33,7 +33,8 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
-// 락 순서: seat_hold → booking_payment → seat(id 오름차순). 잠근 행은 엔티티 메서드로, 잠근 좌석 여러 개는 UPDATE 한 문장으로 바꾼다. 이 안에서는 PG·Redis를 부르지 않는다
+// 락 순서는 seat_hold → booking_payment → seat(id 오름차순)이다. 이 안에서는 PG·Redis를 부르지 않는다
+// 잠근 행 하나는 엔티티 메서드로, 잠근 좌석 여러 개는 UPDATE 한 문장으로 바꾼다
 @Component
 @Transactional(isolation = Isolation.READ_COMMITTED)
 public class PaymentTransaction {
@@ -177,7 +178,7 @@ public class PaymentTransaction {
                 gateOf(hold, idsOf(seats)));
     }
 
-    // 결제 엔티티를 읽기 전에 hold를 먼저 잠근다. 결과 모름 전이는 hold를 잠그지 않으므로 결제 행도 잠가 락 뒤의 최신 상태를 본다
+    // hold를 먼저 잠근 뒤 결제를 읽는다. 결과 모름 전이는 hold를 잠그지 않으므로 결제 행도 잠가 최신 상태를 본다
     private Locked lock(long paymentId) {
         long holdId = paymentRepository.findHoldIdById(paymentId).orElseThrow(() -> paymentNotFound(paymentId));
         SeatHold hold = seatHoldRepository.lockById(holdId)

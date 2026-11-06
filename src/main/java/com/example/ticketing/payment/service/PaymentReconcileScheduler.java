@@ -14,7 +14,8 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
-// 좌석은 PG 결과가 확정된 뒤에만 푼다. 결제를 잠그지 않고 읽어 건마다 처리한다. 확정과 겹쳐도 hold 락 뒤 상태 확인으로 한 번만 효과가 있다
+// 좌석은 PG 결과가 확정된 뒤에만 푼다. 결제를 잠그지 않고 읽어 건마다 처리한다
+// 요청 스레드의 확정과 겹쳐도 hold 락 뒤 상태 확인으로 한 번만 효과가 있다
 @Slf4j
 @Component
 @ConditionalOnProperty(name = "ticketing.payment.reconcile-enabled", havingValue = "true", matchIfMissing = true)
@@ -66,7 +67,7 @@ public class PaymentReconcileScheduler {
         }
     }
 
-    // 묘비 덕분에 망취소 뒤 늦게 온 승인은 거절되므로, 생성 후 일정 시간이 지나면 취소한다
+    // PG에 주문이 없으면 생성 후 일정 시간이 지난 뒤 망취소한다. 그 뒤 늦게 온 승인은 묘비가 거절한다
     private void notFound(DuePayment payment) {
         if (!payment.notFoundCancelDue()) {
             recheck(payment, recheckAfter, null);

@@ -1,6 +1,6 @@
 package com.example.ticketing.payment.client;
 
-// detail은 UNKNOWN일 때 원인(로그·last_error용)
+// detail은 UNKNOWN의 원인이다. 로그와 last_error에 남긴다
 public record PgResult(PgStatus status, String pgTxId, String detail) {
 
     public static PgResult of(PgStatus status, String pgTxId) {

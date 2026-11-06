@@ -18,7 +18,6 @@ public record PerformanceSummary(
                 performance.getOpenAt(), performance.getStartsAt());
     }
 
-    // dbNow는 DB 시각이다
     public boolean hasStartedAt(LocalDateTime dbNow) {
         return !startsAt.isAfter(dbNow);
     }

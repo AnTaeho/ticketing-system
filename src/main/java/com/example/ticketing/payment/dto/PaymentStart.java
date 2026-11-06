@@ -12,7 +12,7 @@ public sealed interface PaymentStart {
     record Started(long paymentId, String orderId, int amount) implements PaymentStart {
     }
 
-    // 같은 요청이 이미 결제를 만들었다. PG를 다시 부르지 않고 지금 결과를 돌려준다
+    // 같은 요청이 이미 결제를 만들었다. 지금 결과를 돌려주고 PG는 다시 부르지 않는다
     record Existing(PaymentResult result) implements PaymentStart {
     }
 

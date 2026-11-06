@@ -21,7 +21,7 @@ import java.util.UUID;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
-// 트랜잭션을 열지 않는다. 검증·게이트 동안 DB 커넥션을 잡지 않으려고
+// 트랜잭션을 열지 않아 검증·게이트 동안 DB 커넥션을 잡지 않는다
 @Slf4j
 @Service
 public class SeatHoldService {

@@ -8,7 +8,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
-// 결제 시작이 잠근 hold는 기다리지 않고 건너뛰려고 SKIP LOCKED로 집는다
+// 결제 시작이 잠근 hold는 SKIP LOCKED로 건너뛴다
 @Slf4j
 @Component
 @ConditionalOnProperty(name = "ticketing.hold.expiry-enabled", havingValue = "true", matchIfMissing = true)

@@ -9,7 +9,7 @@ import org.springframework.stereotype.Component;
 @Component
 public class DbClock {
 
-    // local datetime은 MySQL에서 소수점 없는 localtimestamp가 되므로 current_timestamp(6)을 바꿔 받는다
+    // local datetime은 MySQL에서 초 단위로 잘리므로 current_timestamp(6)을 LocalDateTime으로 바꿔 받는다
     private static final String NOW = "select cast(current_timestamp as LocalDateTime)";
 
     private final EntityManager entityManager;
